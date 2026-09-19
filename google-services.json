@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "343467969851",
+    "project_id": "kandoo-e3f8f",
+    "storage_bucket": "kandoo-e3f8f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:343467969851:android:da25ba6efaf1d25af3fb1e",
+        "android_client_info": {
+          "package_name": "com.anonymous.kandoo"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAhf1iNGbVfNdtDN_x5j4-kVFAVSCRo97s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,98 +1,309 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useEffect, useState } from 'react';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { registerForPushNotifications } from '../services/notificationService';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import AuthScreen from '../features/Auth/AuthScreen';
+import { useAuth } from '../features/Auth/useAuth';
+import { useCapture } from '../features/Capture/useCapture';
+import { signOut } from '../services/authService';
+import { interpretText } from '../services/interpretationService';
 
 export default function HomeScreen() {
+  const { user, loading, isAuthenticated } = useAuth();
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>
+          Loading Kandoo...
+        </Text>
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <AuthScreen />;
+  }
+
+  return <KandooHome userEmail={user?.email ?? ''} />;
+}
+
+type KandooHomeProps = {
+  userEmail: string;
+};
+
+function KandooHome({ userEmail }: KandooHomeProps) {
+  const [input, setInput] = useState('');
+  const [message, setMessage] = useState('');
+
+  const { items, addCapture } = useCapture();
+
+  useEffect(() => {
+    registerForPushNotifications()
+      .then((token) => {
+        if (token) {
+          console.log(
+            'Kandoo push token registered:',
+            token
+          );
+        }
+      })
+      .catch((error) => {
+        console.error(
+          'Push notification registration error:',
+          error
+        );
+      });
+  }, []);
+
+  async function handleAddCapture() {
+  const trimmedInput = input.trim();
+
+  if (!trimmedInput) {
+    setMessage(
+      'Please enter something for Kandoo to remember.'
+    );
+    return;
+  }
+
+  setMessage('Kandoo is thinking...');
+
+  try {
+    const result = await interpretText(trimmedInput);
+
+    console.log(
+      'Kandoo interpretation:',
+      result.interpretation
+    );
+
+    setInput('');
+
+    if (result.interpretation.intent === 'create_reminder') {
+      setMessage('Reminder created.');
+    } else if (
+      result.interpretation.intent === 'save_memory'
+    ) {
+      setMessage('Memory saved.');
+    } else if (
+      result.interpretation.intent === 'recall_memory'
+    ) {
+      setMessage(
+        result.answer ?? 'Memory recalled.'
+      );
+    } else {
+      setMessage(
+        'Kandoo understood the request, but no action was taken.'
+      );
+    }
+  } catch (error) {
+    console.error(
+      'Kandoo interpretation error:',
+      error
+    );
+
+    if (error instanceof Error) {
+      setMessage(
+        `Could not process: ${error.message}`
+      );
+    } else {
+      setMessage('Could not process your request.');
+    }
+  }
+}
+
+  async function handleSignOut() {
+    try {
+      await signOut();
+      setMessage('Signed out.');
+    } catch (error) {
+      console.error('Sign out error:', error);
+
+      if (error instanceof Error) {
+        setMessage(`Sign out failed: ${error.message}`);
+      } else {
+        setMessage('Sign out failed.');
+      }
+    }
+  }
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <View style={styles.container}>
+      <Text style={styles.title}>Kandoo</Text>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+      <Text style={styles.subtitle}>
+        What can I help you remember?
+      </Text>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+      {userEmail !== '' && (
+        <Text style={styles.userEmail}>
+          {userEmail}
+        </Text>
+      )}
 
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+      <TextInput
+        style={styles.input}
+        placeholder="Tell Kandoo..."
+        placeholderTextColor="#777B87"
+        value={input}
+        onChangeText={setInput}
+      />
+
+      <Pressable
+        style={styles.addButton}
+        onPress={handleAddCapture}
+      >
+        <Text style={styles.addButtonText}>
+          Add
+        </Text>
+      </Pressable>
+
+      {message !== '' && (
+        <Text style={styles.message}>
+          {message}
+        </Text>
+      )}
+
+      {items.length > 0 && (
+        <View style={styles.list}>
+          {items.map((item, index) => (
+            <Text key={index} style={styles.item}>
+              {item.text}
+            </Text>
+          ))}
+        </View>
+      )}
+
+      <Text style={styles.sectionTitle}>
+        Today's reminders
+      </Text>
+
+      <Pressable
+        style={styles.signOutButton}
+        onPress={handleSignOut}
+      >
+        <Text style={styles.signOutButtonText}>
+          Sign out
+        </Text>
+      </Pressable>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0B0D12',
+  },
+
+  loadingText: {
+    color: '#F5F3EE',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+
   container: {
     flex: 1,
+    padding: 24,
     justifyContent: 'center',
-    flexDirection: 'row',
+    backgroundColor: '#0B0D12',
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
+
   title: {
+    fontSize: 42,
+    fontWeight: '800',
     textAlign: 'center',
+    color: '#F5F3EE',
+    letterSpacing: 1,
   },
-  code: {
-    textTransform: 'uppercase',
+
+  subtitle: {
+    fontSize: 18,
+    textAlign: 'center',
+    marginTop: 12,
+    marginBottom: 12,
+    color: '#A8A8B3',
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+
+  userEmail: {
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 24,
+    color: '#777B87',
+  },
+
+  input: {
+    borderWidth: 1,
+    borderColor: '#292D38',
+    borderRadius: 16,
+    padding: 16,
+    fontSize: 16,
+    color: '#F5F3EE',
+    backgroundColor: '#151821',
+    marginBottom: 10,
+  },
+
+  addButton: {
+    backgroundColor: '#FFB86B',
+    padding: 16,
+    borderRadius: 16,
+    marginTop: 2,
+    alignItems: 'center',
+  },
+
+  addButtonText: {
+    color: '#0B0D12',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+
+  message: {
+    marginTop: 14,
+    textAlign: 'center',
+    color: '#A8A8B3',
+    fontSize: 14,
+  },
+
+  list: {
+    marginTop: 24,
+    gap: 10,
+  },
+
+  item: {
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#292D38',
+    borderRadius: 14,
+    fontSize: 16,
+    color: '#F5F3EE',
+    backgroundColor: '#151821',
+  },
+
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 40,
+    color: '#F5F3EE',
+  },
+
+  signOutButton: {
+    marginTop: 24,
+    padding: 12,
+    alignItems: 'center',
+  },
+
+  signOutButtonText: {
+    color: '#A8A8B3',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
