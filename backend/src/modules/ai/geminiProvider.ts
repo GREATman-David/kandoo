@@ -48,13 +48,44 @@ const TASK_TYPES: Record<EmbedTaskType, string> = {
   query: 'RETRIEVAL_QUERY',
 };
 
-let cachedClient: GoogleGenAI | null = null;
-
-function client(): GoogleGenAI {
-  if (!cachedClient) {
-    cachedClient = new GoogleGenAI({ apiKey: requiredEnv('GEMINI_API_KEY') });
+/**
+ * Free-tier quota is per Google Cloud PROJECT, not per key. Keys on separate
+ * projects (GEMINI_API_KEY, GEMINI_API_KEY_2, GEMINI_API_KEY_3, ...) each carry
+ * their own daily budget, so rotating on exhaustion multiplies it — the free
+ * tier's ~20 generate/day is otherwise the top risk to filming a demo.
+ */
+function loadKeys(): string[] {
+  const keys: string[] = [];
+  if (process.env.GEMINI_API_KEY) keys.push(process.env.GEMINI_API_KEY);
+  for (let i = 2; ; i++) {
+    const next = process.env[`GEMINI_API_KEY_${i}`];
+    if (!next) break;
+    keys.push(next);
   }
-  return cachedClient;
+  if (keys.length === 0) {
+    throw new Error('GEMINI_API_KEY is not configured.');
+  }
+  return keys;
+}
+
+let keys: string[] | null = null;
+let clients: (GoogleGenAI | null)[] = [];
+let activeKeyIndex = 0;
+
+function getKeys(): string[] {
+  if (!keys) {
+    keys = loadKeys();
+    clients = keys.map(() => null);
+  }
+  return keys;
+}
+
+function activeClient(): GoogleGenAI {
+  const all = getKeys();
+  if (!clients[activeKeyIndex]) {
+    clients[activeKeyIndex] = new GoogleGenAI({ apiKey: all[activeKeyIndex] });
+  }
+  return clients[activeKeyIndex] as GoogleGenAI;
 }
 
 /**
@@ -119,12 +150,9 @@ async function withBackoff<T>(
       return await operation();
     } catch (error) {
       if (!isRetryable(error)) throw error;
-      if (isDailyQuota(error)) {
-        throw new Error(
-          'Gemini daily embedding quota exhausted; it resets at midnight Pacific.',
-          { cause: error }
-        );
-      }
+      // A per-day quota will not clear on any timescale worth waiting for, so
+      // surface it immediately and let withKeyFailover rotate to another key.
+      if (isDailyQuota(error)) throw error;
 
       lastError = error;
       if (attempt === attempts - 1) break;
@@ -143,6 +171,39 @@ async function withBackoff<T>(
   }
 
   throw lastError;
+}
+
+/**
+ * Wraps an operation so a per-day quota exhaustion rotates to the next key
+ * (on a different project, hence a fresh daily budget) instead of failing.
+ * withBackoff still handles per-minute 429s and 503s within a single key; this
+ * layer only reacts to per-day exhaustion. Only the active key INDEX is logged,
+ * never the key. When every key is exhausted the error finally surfaces.
+ */
+async function withKeyFailover<T>(operation: () => Promise<T>): Promise<T> {
+  const total = getKeys().length;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < total; attempt++) {
+    try {
+      return await withBackoff(operation);
+    } catch (error) {
+      if (!isDailyQuota(error)) throw error;
+      lastError = error;
+      activeKeyIndex = (activeKeyIndex + 1) % total;
+      if (process.env.NODE_ENV !== 'production') {
+        console.debug(
+          `Gemini key index ${activeKeyIndex} now active ` +
+            `(previous hit its per-day quota)`
+        );
+      }
+    }
+  }
+
+  throw new Error(
+    `All ${total} Gemini key(s) hit their per-day quota; resets midnight Pacific.`,
+    { cause: lastError }
+  );
 }
 
 /**
@@ -213,8 +274,8 @@ export class GeminiProvider implements AIProvider {
     system: string,
     contents: { role: string; parts: { text: string }[] }[]
   ): Promise<{ raw: string; value: unknown }> {
-    const response = await withBackoff(() =>
-      client().models.generateContent({
+    const response = await withKeyFailover(() =>
+      activeClient().models.generateContent({
         model: this.model,
         contents,
         config: {
@@ -259,8 +320,8 @@ export class GeminiProvider implements AIProvider {
       return EMPTY_RECALL_ANSWER;
     }
 
-    const response = await withBackoff(() =>
-      client().models.generateContent({
+    const response = await withKeyFailover(() =>
+      activeClient().models.generateContent({
         model: this.model,
         contents: [
           {
@@ -289,8 +350,8 @@ export class GeminiProvider implements AIProvider {
   ): Promise<number[][]> {
     if (texts.length === 0) return [];
 
-    const response = await withBackoff(() =>
-      client().models.embedContent({
+    const response = await withKeyFailover(() =>
+      activeClient().models.embedContent({
         model: EMBEDDING_MODEL,
         contents: texts,
         config: {
