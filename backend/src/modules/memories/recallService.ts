@@ -5,16 +5,18 @@ import type { RecallMemory } from '../ai/aiProvider';
 import type { RecallAction } from '../ai/interpretationSchema';
 
 /**
- * The previous implementation did:
+ * Recall searches everything the user has told Kandoo — saved memories AND
+ * scheduled reminders — because "when did I say I'd call Mummy" is a question
+ * about a reminder, not a memory. The `match_context` RPC unions both tables,
+ * hybrid-scored (pgvector cosine fused with full-text ts_rank), and tags each
+ * row with its `source`.
  *
+ * The previous `match_memories` searched memories only, so a reminder could
+ * never be recalled. And the version before that ran
  *   .or(`content.ilike.%${query}%`)
- *
- * with the user's whole natural-language question as the pattern. No memory
- * will ever literally contain the string "What I said about my pressure energy
- * generator", so it could only ever return zero rows. It was also unsafe:
- * a query containing a comma or parenthesis breaks PostgREST filter syntax.
- *
- * This version embeds the query and runs hybrid retrieval in Postgres.
+ * with the whole natural-language question as the pattern — no row ever
+ * literally contains "when did I say I would call Mummy", so it always
+ * returned zero rows.
  */
 export async function recallMemories(
   userId: string,
@@ -34,7 +36,7 @@ export async function recallMemories(
     console.error('Query embedding failed; using lexical only:', error);
   }
 
-  const { data, error } = await supabase.rpc('match_memories', {
+  const { data, error } = await supabase.rpc('match_context', {
     p_user_id: userId,
     p_query_embedding: queryEmbedding,
     p_query_text: query,
@@ -72,7 +74,7 @@ export async function recallMemories(
 
 /**
  * Used only when the RPC is unavailable (e.g. migration not yet applied).
- * Matches on individual salient words rather than the whole sentence.
+ * Lexical match on individual salient words across memories and reminders.
  */
 async function fallbackRecall(
   userId: string,
@@ -82,7 +84,7 @@ async function fallbackRecall(
   const stopWords = new Set([
     'what','when','where','who','did','do','does','the','a','an','about','i',
     'me','my','you','said','say','tell','remember','was','were','is','are',
-    'that','this','to','of','on','in','for','with','and','or','it','can',
+    'that','this','to','of','on','in','for','with','and','or','it','can','would',
   ]);
 
   const terms = query
@@ -94,20 +96,48 @@ async function fallbackRecall(
 
   if (terms.length === 0) return [];
 
-  const { data, error } = await supabase
-    .from('memories')
-    .select('id, content, person, location, created_at')
-    .eq('user_id', userId)
-    .or(terms.map((term) => `content.ilike.%${term}%`).join(','))
-    .order('created_at', { ascending: false })
-    .limit(limit);
+  const [memories, reminders] = await Promise.all([
+    supabase
+      .from('memories')
+      .select('id, content, person, location, created_at')
+      .eq('user_id', userId)
+      .or(terms.map((term) => `content.ilike.%${term}%`).join(','))
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    supabase
+      .from('reminders')
+      .select('id, task, person, place_hint, due_at, created_at')
+      .eq('user_id', userId)
+      .or(terms.map((term) => `task.ilike.%${term}%`).join(','))
+      .order('created_at', { ascending: false })
+      .limit(limit),
+  ]);
 
-  if (error) {
-    console.error('Fallback recall failed:', error);
-    return [];
-  }
+  if (memories.error) console.error('Fallback memory recall failed:', memories.error);
+  if (reminders.error) console.error('Fallback reminder recall failed:', reminders.error);
 
-  return (data ?? []) as RecallMemory[];
+  const items: RecallMemory[] = [
+    ...(memories.data ?? []).map((m) => ({
+      id: m.id as string,
+      source: 'memory' as const,
+      content: m.content as string,
+      person: (m.person as string | null) ?? null,
+      location: (m.location as string | null) ?? null,
+      due_at: null,
+      created_at: m.created_at as string,
+    })),
+    ...(reminders.data ?? []).map((r) => ({
+      id: r.id as string,
+      source: 'reminder' as const,
+      content: r.task as string,
+      person: (r.person as string | null) ?? null,
+      location: (r.place_hint as string | null) ?? null,
+      due_at: (r.due_at as string | null) ?? null,
+      created_at: r.created_at as string,
+    })),
+  ];
+
+  return items.slice(0, limit);
 }
 
 export async function answerRecall(

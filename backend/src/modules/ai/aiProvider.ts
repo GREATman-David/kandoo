@@ -1,12 +1,21 @@
 import type { KandooInterpretation } from './interpretationSchema';
 
+/**
+ * A hit from recall. Despite the name it may be a saved memory OR a scheduled
+ * reminder — `source` says which, and `due_at` is set only for reminders. The
+ * answer model needs both to say "you said you'd call Mummy at 5pm" rather than
+ * treating a commitment as a plain fact.
+ */
 export type RecallMemory = {
   id: string;
+  source: 'memory' | 'reminder';
   content: string;
   person: string | null;
   location: string | null;
+  /** Set only when `source` is 'reminder': the scheduled time. */
+  due_at: string | null;
   created_at: string;
-  /** Present only when the memory came from hybrid retrieval. */
+  /** Present only when the row came from hybrid retrieval. */
   score?: number;
 };
 

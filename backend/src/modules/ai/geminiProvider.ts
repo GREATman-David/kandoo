@@ -57,14 +57,25 @@ function client(): GoogleGenAI {
   return cachedClient;
 }
 
-function isRateLimited(error: unknown): boolean {
+/**
+ * Transient upstream failures worth retrying: 429 (rate limit), and 500/503
+ * ("high demand" / "internal"). On the free tier a 503 during a demo is common,
+ * and dropping the user's whole recap to one is the worst failure this app has.
+ * A 400/404 (bad request, retired model) is a real error and is rethrown.
+ */
+function isRetryable(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   const status = (error as { status?: unknown }).status;
-  if (status === 429) return true;
+  if (status === 429 || status === 500 || status === 503) return true;
   const message = (error as { message?: unknown }).message;
   return (
     typeof message === 'string' &&
-    (message.includes('429') || message.includes('RESOURCE_EXHAUSTED'))
+    (message.includes('429') ||
+      message.includes('RESOURCE_EXHAUSTED') ||
+      message.includes('503') ||
+      message.includes('UNAVAILABLE') ||
+      message.includes('500') ||
+      message.includes('INTERNAL'))
   );
 }
 
@@ -93,9 +104,9 @@ function statedRetryDelayMs(error: unknown): number | null {
 }
 
 /**
- * The free tier rate-limits by requests per minute, so a 429 on a burst of
- * memory embeddings is normal operation, not a failure. Anything else is a
- * real error and is rethrown immediately.
+ * The free tier rate-limits by requests per minute, and "high demand" 503s are
+ * routine, so a burst failure is normal operation rather than a real error.
+ * Non-transient errors (bad request, retired model) are rethrown immediately.
  */
 async function withBackoff<T>(
   operation: () => Promise<T>,
@@ -107,7 +118,7 @@ async function withBackoff<T>(
     try {
       return await operation();
     } catch (error) {
-      if (!isRateLimited(error)) throw error;
+      if (!isRetryable(error)) throw error;
       if (isDailyQuota(error)) {
         throw new Error(
           'Gemini daily embedding quota exhausted; it resets at midnight Pacific.',

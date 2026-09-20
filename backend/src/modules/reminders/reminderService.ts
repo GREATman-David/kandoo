@@ -1,4 +1,5 @@
 import { supabase } from '../../services/supabase';
+import { aiProvider } from '../ai';
 import { resolveEntity } from '../entities/entityService';
 import { normalizeReminderTime } from './timeNormalizer';
 
@@ -65,6 +66,19 @@ export async function createReminder(
     placeId = place?.id ?? null;
   }
 
+  // Embed the task so a recall like "when did I say I'd call Mummy" can find
+  // this reminder by meaning, not just keywords. 'document' — same task type as
+  // memories, so both sides of match_context share one embedding space. A
+  // failure must not lose the reminder: it saves without a vector and the
+  // backfill fills it in later.
+  let embedding: number[] | null = null;
+  try {
+    const [vector] = await aiProvider.embed([task], 'document');
+    embedding = vector ?? null;
+  } catch (error) {
+    console.error('Embedding failed; saving reminder without vector:', error);
+  }
+
   const { data, error } = await supabase
     .from('reminders')
     .insert({
@@ -79,6 +93,7 @@ export async function createReminder(
       place_id: placeId,
       insistent: action.insistent,
       status: 'pending',
+      embedding,
     })
     .select(
       'id, task, person, due_at, place_hint, place_id, insistent, status, created_at'
@@ -91,6 +106,43 @@ export async function createReminder(
   }
 
   return data as CreatedReminder;
+}
+
+/**
+ * One-off backfill for reminders created before they carried embeddings.
+ * Mirrors backfillEmbeddings for memories; run from a script, not a handler.
+ * Throws on a failed update rather than looping over the same rows forever.
+ */
+export async function backfillReminderEmbeddings(batchSize = 50): Promise<number> {
+  const { data, error } = await supabase
+    .from('reminders')
+    .select('id, task')
+    .is('embedding', null)
+    .limit(batchSize);
+
+  if (error) throw new Error(`Reminder backfill query failed: ${error.message}`);
+  if (!data || data.length === 0) return 0;
+
+  const vectors = await aiProvider.embed(
+    data.map((row) => row.task as string),
+    'document'
+  );
+
+  const results = await Promise.all(
+    data.map((row, index) =>
+      supabase
+        .from('reminders')
+        .update({ embedding: vectors[index] })
+        .eq('id', row.id)
+    )
+  );
+
+  const failed = results.find((result) => result.error);
+  if (failed?.error) {
+    throw new Error(`Reminder backfill update failed: ${failed.error.message}`);
+  }
+
+  return data.length;
 }
 
 /**
