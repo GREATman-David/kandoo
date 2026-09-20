@@ -37,7 +37,7 @@ export async function createMemory(
 
   let embedding: number[] | null = null;
   try {
-    const [vector] = await aiProvider.embed([content]);
+    const [vector] = await aiProvider.embed([content], 'document');
     embedding = vector ?? null;
   } catch (error) {
     console.error('Embedding failed; saving memory without vector:', error);
@@ -102,9 +102,12 @@ export async function backfillEmbeddings(batchSize = 50): Promise<number> {
   if (error) throw new Error(`Backfill query failed: ${error.message}`);
   if (!data || data.length === 0) return 0;
 
-  const vectors = await aiProvider.embed(data.map((row) => row.content));
+  const vectors = await aiProvider.embed(
+    data.map((row) => row.content),
+    'document'
+  );
 
-  await Promise.all(
+  const results = await Promise.all(
     data.map((row, index) =>
       supabase
         .from('memories')
@@ -112,6 +115,14 @@ export async function backfillEmbeddings(batchSize = 50): Promise<number> {
         .eq('id', row.id)
     )
   );
+
+  // A silently failed update here is worse than a thrown one: the rows stay
+  // NULL, the next batch re-fetches and re-embeds the same rows, and a naive
+  // caller loops until the embedding quota is gone.
+  const failed = results.find((result) => result.error);
+  if (failed?.error) {
+    throw new Error(`Backfill update failed: ${failed.error.message}`);
+  }
 
   return data.length;
 }

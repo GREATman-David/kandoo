@@ -4,11 +4,18 @@ import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
+import { useKandooFonts } from '@/theme/useKandooFonts';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const [fontsLoaded, fontError] = useKandooFonts();
+
+  if (!fontsLoaded && !fontError) {
+    return null;
+  }
+
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <AnimatedSplashOverlay />

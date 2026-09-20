@@ -24,7 +24,9 @@ if (!isProduction) {
   console.log('OpenAI model:', process.env.OPENAI_MODEL ?? '(not set)');
 }
 
-// There is no web client. `cors()` with no options allows every origin.
+// There is no web client, only native callers that don't send an Origin
+// header and aren't subject to CORS anyway. `{ origin: false }` disables the
+// CORS headers entirely, which blocks every browser-based cross-origin caller.
 app.use(cors({ origin: false }));
 app.use(express.json({ limit: '1mb' }));
 

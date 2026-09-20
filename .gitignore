@@ -43,3 +43,9 @@ example
 # generated native folders
 /ios
 /android
+
+# local dev/test scratch
+.gradle-build.log
+backend/.dev-server.log
+backend/.test-*.cjs
+backend/.backfill.ts

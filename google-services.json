@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:343467969851:android:da25ba6efaf1d25af3fb1e",
+        "mobilesdk_app_id": "1:343467969851:android:dd639203f7ebaf31f3fb1e",
         "android_client_info": {
-          "package_name": "com.anonymous.kandoo"
+          "package_name": "app.kandoo.mobile"
         }
       },
       "oauth_client": [],

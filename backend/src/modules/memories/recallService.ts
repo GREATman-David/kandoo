@@ -28,7 +28,7 @@ export async function recallMemories(
 
   let queryEmbedding: number[] | null = null;
   try {
-    const [vector] = await aiProvider.embed([query]);
+    const [vector] = await aiProvider.embed([query], 'query');
     queryEmbedding = vector ?? null;
   } catch (error) {
     console.error('Query embedding failed; using lexical only:', error);

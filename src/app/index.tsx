@@ -10,11 +10,16 @@ import {
   View,
 } from 'react-native';
 
+import { ReviewSheet } from '@/components/ReviewSheet';
+import { colors, radius, spacing, text } from '@/theme/theme';
+
 import AuthScreen from '../features/Auth/AuthScreen';
 import { useAuth } from '../features/Auth/useAuth';
-import { useCapture } from '../features/Capture/useCapture';
 import { signOut } from '../services/authService';
-import { interpretText } from '../services/interpretationService';
+import {
+  interpretText,
+  type InterpretationResponse,
+} from '../services/interpretationService';
 
 export default function HomeScreen() {
   const { user, loading, isAuthenticated } = useAuth();
@@ -43,8 +48,11 @@ type KandooHomeProps = {
 function KandooHome({ userEmail }: KandooHomeProps) {
   const [input, setInput] = useState('');
   const [message, setMessage] = useState('');
-
-  const { items, addCapture } = useCapture();
+  const [isThinking, setIsThinking] = useState(false);
+  const [review, setReview] = useState<{
+    rawText: string;
+    response: InterpretationResponse;
+  } | null>(null);
 
   useEffect(() => {
     registerForPushNotifications()
@@ -65,59 +73,35 @@ function KandooHome({ userEmail }: KandooHomeProps) {
   }, []);
 
   async function handleAddCapture() {
-  const trimmedInput = input.trim();
+    const trimmedInput = input.trim();
 
-  if (!trimmedInput) {
-    setMessage(
-      'Please enter something for Kandoo to remember.'
-    );
-    return;
-  }
-
-  setMessage('Kandoo is thinking...');
-
-  try {
-    const result = await interpretText(trimmedInput);
-
-    console.log(
-      'Kandoo interpretation:',
-      result.interpretation
-    );
-
-    setInput('');
-
-    if (result.interpretation.intent === 'create_reminder') {
-      setMessage('Reminder created.');
-    } else if (
-      result.interpretation.intent === 'save_memory'
-    ) {
-      setMessage('Memory saved.');
-    } else if (
-      result.interpretation.intent === 'recall_memory'
-    ) {
+    if (!trimmedInput) {
       setMessage(
-        result.answer ?? 'Memory recalled.'
+        'Please enter something for Kandoo to remember.'
       );
-    } else {
-      setMessage(
-        'Kandoo understood the request, but no action was taken.'
-      );
+      return;
     }
-  } catch (error) {
-    console.error(
-      'Kandoo interpretation error:',
-      error
-    );
 
-    if (error instanceof Error) {
-      setMessage(
-        `Could not process: ${error.message}`
-      );
-    } else {
-      setMessage('Could not process your request.');
+    setMessage('');
+    setIsThinking(true);
+
+    try {
+      const response = await interpretText(trimmedInput);
+
+      setInput('');
+      setReview({ rawText: trimmedInput, response });
+    } catch (error) {
+      console.error('Kandoo interpretation error:', error);
+
+      if (error instanceof Error) {
+        setMessage(`Could not process: ${error.message}`);
+      } else {
+        setMessage('Could not process your request.');
+      }
+    } finally {
+      setIsThinking(false);
     }
   }
-}
 
   async function handleSignOut() {
     try {
@@ -139,7 +123,7 @@ function KandooHome({ userEmail }: KandooHomeProps) {
       <Text style={styles.title}>Kandoo</Text>
 
       <Text style={styles.subtitle}>
-        What can I help you remember?
+        What happened?
       </Text>
 
       {userEmail !== '' && (
@@ -150,18 +134,20 @@ function KandooHome({ userEmail }: KandooHomeProps) {
 
       <TextInput
         style={styles.input}
-        placeholder="Tell Kandoo..."
-        placeholderTextColor="#777B87"
+        placeholder="Tell Kandoo what's on your mind..."
+        placeholderTextColor={colors.inkFaint}
         value={input}
         onChangeText={setInput}
+        editable={!isThinking}
       />
 
       <Pressable
-        style={styles.addButton}
+        style={[styles.addButton, isThinking && styles.addButtonDisabled]}
         onPress={handleAddCapture}
+        disabled={isThinking}
       >
         <Text style={styles.addButtonText}>
-          Add
+          {isThinking ? 'Working it out…' : 'Add'}
         </Text>
       </Pressable>
 
@@ -171,20 +157,6 @@ function KandooHome({ userEmail }: KandooHomeProps) {
         </Text>
       )}
 
-      {items.length > 0 && (
-        <View style={styles.list}>
-          {items.map((item, index) => (
-            <Text key={index} style={styles.item}>
-              {item.text}
-            </Text>
-          ))}
-        </View>
-      )}
-
-      <Text style={styles.sectionTitle}>
-        Today's reminders
-      </Text>
-
       <Pressable
         style={styles.signOutButton}
         onPress={handleSignOut}
@@ -193,6 +165,17 @@ function KandooHome({ userEmail }: KandooHomeProps) {
           Sign out
         </Text>
       </Pressable>
+
+      {review ? (
+        <ReviewSheet
+          visible
+          summary={review.response.summary}
+          confidence={review.response.confidence}
+          results={review.response.results}
+          rawText={review.rawText}
+          onClose={() => setReview(null)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -202,108 +185,87 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0B0D12',
+    backgroundColor: colors.base,
   },
 
   loadingText: {
-    color: '#F5F3EE',
-    fontSize: 18,
-    fontWeight: '600',
+    ...text.bodyStrong,
+    color: colors.ink,
   },
 
   container: {
     flex: 1,
-    padding: 24,
+    padding: spacing.space5,
     justifyContent: 'center',
-    backgroundColor: '#0B0D12',
+    backgroundColor: colors.base,
   },
 
   title: {
-    fontSize: 42,
-    fontWeight: '800',
+    ...text.displayXl,
     textAlign: 'center',
-    color: '#F5F3EE',
-    letterSpacing: 1,
+    color: colors.ink,
   },
 
   subtitle: {
-    fontSize: 18,
+    ...text.bodyL,
     textAlign: 'center',
-    marginTop: 12,
-    marginBottom: 12,
-    color: '#A8A8B3',
+    marginTop: spacing.space3,
+    marginBottom: spacing.space3,
+    color: colors.inkMuted,
   },
 
   userEmail: {
-    fontSize: 13,
+    ...text.caption,
     textAlign: 'center',
-    marginBottom: 24,
-    color: '#777B87',
+    marginBottom: spacing.space5,
+    color: colors.inkFaint,
   },
 
   input: {
     borderWidth: 1,
-    borderColor: '#292D38',
-    borderRadius: 16,
-    padding: 16,
-    fontSize: 16,
-    color: '#F5F3EE',
-    backgroundColor: '#151821',
-    marginBottom: 10,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    padding: spacing.space4,
+    ...text.bodyL,
+    color: colors.ink,
+    backgroundColor: colors.surface,
+    marginBottom: spacing.space2,
   },
 
   addButton: {
-    backgroundColor: '#FFB86B',
-    padding: 16,
-    borderRadius: 16,
+    backgroundColor: colors.accent,
+    padding: spacing.space4,
+    borderRadius: radius.md,
     marginTop: 2,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
+  },
+
+  addButtonDisabled: {
+    opacity: 0.6,
   },
 
   addButtonText: {
-    color: '#0B0D12',
-    fontSize: 16,
-    fontWeight: '700',
+    ...text.bodyStrong,
+    color: colors.base,
   },
 
   message: {
-    marginTop: 14,
+    ...text.caption,
+    marginTop: spacing.space3,
     textAlign: 'center',
-    color: '#A8A8B3',
-    fontSize: 14,
-  },
-
-  list: {
-    marginTop: 24,
-    gap: 10,
-  },
-
-  item: {
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#292D38',
-    borderRadius: 14,
-    fontSize: 16,
-    color: '#F5F3EE',
-    backgroundColor: '#151821',
-  },
-
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginTop: 40,
-    color: '#F5F3EE',
+    color: colors.inkMuted,
   },
 
   signOutButton: {
-    marginTop: 24,
-    padding: 12,
+    marginTop: spacing.space6,
+    padding: spacing.space3,
     alignItems: 'center',
   },
 
   signOutButtonText: {
-    color: '#A8A8B3',
-    fontSize: 14,
-    fontWeight: '600',
+    ...text.body,
+    color: colors.inkMuted,
   },
 });

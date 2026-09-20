@@ -7,6 +7,8 @@ import {
     View,
 } from 'react-native';
 
+import { colors, radius, spacing, text } from '@/theme/theme';
+
 import { signIn, signUp } from '../../services/authService';
 
 export default function AuthScreen() {
@@ -61,7 +63,7 @@ export default function AuthScreen() {
       <TextInput
         style={styles.input}
         placeholder="Email"
-        placeholderTextColor="#777B87"
+        placeholderTextColor={colors.inkFaint}
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
@@ -72,7 +74,7 @@ export default function AuthScreen() {
       <TextInput
         style={styles.input}
         placeholder="Password"
-        placeholderTextColor="#777B87"
+        placeholderTextColor={colors.inkFaint}
         value={password}
         onChangeText={setPassword}
         secureTextEntry
@@ -80,7 +82,7 @@ export default function AuthScreen() {
       />
 
       <Pressable
-        style={styles.primaryButton}
+        style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
         onPress={handleSubmit}
         disabled={loading}
       >
@@ -120,67 +122,71 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
+    padding: spacing.space5,
     justifyContent: 'center',
-    backgroundColor: '#0B0D12',
+    backgroundColor: colors.base,
   },
 
   title: {
-    fontSize: 42,
-    fontWeight: '800',
+    ...text.wordmark,
     textAlign: 'center',
-    color: '#F5F3EE',
-    letterSpacing: 1,
+    color: colors.ink,
   },
 
   subtitle: {
-    fontSize: 18,
+    ...text.bodyL,
     textAlign: 'center',
-    marginTop: 12,
-    marginBottom: 30,
-    color: '#A8A8B3',
+    marginTop: spacing.space3,
+    marginBottom: spacing.space6,
+    color: colors.inkMuted,
   },
 
   input: {
+    ...text.bodyL,
     borderWidth: 1,
-    borderColor: '#292D38',
-    borderRadius: 16,
-    padding: 16,
-    fontSize: 16,
-    color: '#F5F3EE',
-    backgroundColor: '#151821',
-    marginBottom: 10,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    padding: spacing.space4,
+    color: colors.ink,
+    backgroundColor: colors.surface,
+    marginBottom: spacing.space2,
   },
 
   primaryButton: {
-    backgroundColor: '#FFB86B',
-    padding: 16,
-    borderRadius: 16,
+    backgroundColor: colors.accent,
+    padding: spacing.space4,
+    borderRadius: radius.md,
     marginTop: 2,
+    minHeight: 48,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  primaryButtonDisabled: {
+    opacity: 0.6,
   },
 
   primaryButtonText: {
-    color: '#0B0D12',
-    fontSize: 16,
-    fontWeight: '700',
+    ...text.bodyStrong,
+    color: colors.base,
   },
 
   secondaryButton: {
-    padding: 14,
+    padding: spacing.space3,
+    minHeight: 44,
     alignItems: 'center',
+    justifyContent: 'center',
   },
 
   secondaryButtonText: {
-    color: '#F5F3EE',
-    fontSize: 15,
-    fontWeight: '600',
+    ...text.bodyStrong,
+    color: colors.inkMuted,
   },
 
   message: {
-    marginTop: 16,
+    ...text.caption,
+    marginTop: spacing.space4,
     textAlign: 'center',
-    color: '#A8A8B3',
-    fontSize: 14,
+    color: colors.inkMuted,
   },
 });

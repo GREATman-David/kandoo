@@ -17,6 +17,13 @@ export type InterpretContext = {
   timezone: string;
 };
 
+/**
+ * Whether a text is being stored or searched with. Asymmetric embedding models
+ * (Gemini) encode the two differently and retrieval degrades when they are
+ * mixed; symmetric ones (OpenAI) ignore this.
+ */
+export type EmbedTaskType = 'document' | 'query';
+
 export interface AIProvider {
   interpret(
     text: string,
@@ -32,5 +39,5 @@ export interface AIProvider {
    * Returns one vector per input string, in the same order.
    * Dimension must match the `vector(1536)` column on memories.
    */
-  embed(texts: string[]): Promise<number[][]>;
+  embed(texts: string[], taskType?: EmbedTaskType): Promise<number[][]>;
 }

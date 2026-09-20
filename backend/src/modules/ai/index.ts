@@ -1,4 +1,5 @@
 import type { AIProvider } from './aiProvider';
+import { GeminiProvider } from './geminiProvider';
 import { MockAIProvider } from './mockProvider';
 import { OpenAIProvider } from './openaiProvider';
 
@@ -18,9 +19,11 @@ function createAIProvider(): AIProvider {
       return new MockAIProvider();
     case 'openai':
       return new OpenAIProvider();
+    case 'gemini':
+      return new GeminiProvider();
     default:
       throw new Error(
-        `Unknown AI_PROVIDER "${provider}". Expected "openai" or "mock".`
+        `Unknown AI_PROVIDER "${provider}". Expected "openai", "gemini" or "mock".`
       );
   }
 }
