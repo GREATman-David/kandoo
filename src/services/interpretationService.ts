@@ -135,3 +135,44 @@ export async function confirmReminder(
 
   return data.reminder;
 }
+
+/**
+ * Confirmed + pending reminders, used on launch to rebuild the device's local
+ * notification schedule. The device — not the server — decides what to fire.
+ */
+export async function fetchActiveReminders(): Promise<CreatedReminder[]> {
+  const accessToken = await getAccessTokenOrThrow();
+
+  const response = await fetch(`${BACKEND_URL}/reminders/active`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data?.error ?? 'Failed to load reminders.');
+  }
+
+  return (data.reminders ?? []) as CreatedReminder[];
+}
+
+/** Dismiss a reminder server-side. The caller cancels its local notification. */
+export async function dismissReminder(reminderId: string): Promise<void> {
+  const accessToken = await getAccessTokenOrThrow();
+
+  const response = await fetch(
+    `${BACKEND_URL}/reminders/${reminderId}/dismiss`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error ?? 'Failed to dismiss reminder.');
+  }
+}

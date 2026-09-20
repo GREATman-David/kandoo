@@ -430,6 +430,20 @@ value that shadows a global is not).
 **Native modules need a rebuild.** Adding `react-native-svg` or any other native
 dependency is not picked up by Metro alone; prebuild and rebuild the APK.
 
+**Metro can wedge: socket LISTENING but not serving.** The port shows up in
+`netstat` and `adb reverse` looks fine, but the device (and the host itself)
+gets nothing. Test with `curl http://127.0.0.1:8081/status` from the HOST — it
+must return `packager-status:running`. If it hangs or returns empty, Metro is
+wedged: kill it and `npx expo start --clear` again. This is not a network,
+firewall, or reverse problem, so don't chase those first.
+
+**Uninstall any stale `com.anonymous.kandoo` before deep-linking.** Before the
+package rename the app was `com.anonymous.kandoo`, and an old install can linger.
+Both it and `app.kandoo.mobile` register the `kandoo://` scheme, so a deep link
+raises an "Open with" chooser and often launches the stale app (with its old
+cached error screen). `adb -s <mumu> uninstall com.anonymous.kandoo` once, then
+deep-links resolve unambiguously.
+
 **MuMu's Android instance can quit under build load.** `MuMuNxMain` (launcher)
 stays up while `MuMuNxDevice` (the device) is gone and no ADB ports are open.
 Reopen the emulator window, then `adb connect` again.

@@ -45,6 +45,9 @@ const config: ExpoConfig = {
         imageWidth: 132,
       },
     ],
+    // Adds SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM so time reminders fire on the
+    // second rather than whenever Doze next wakes. expo-notifications omits it.
+    './plugins/withExactAlarmPermission',
   ],
   experiments: {
     typedRoutes: true,

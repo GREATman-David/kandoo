@@ -1,19 +1,16 @@
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
-import { AccessibilityInfo, StyleSheet, View, type TextStyle } from 'react-native';
+import { AccessibilityInfo, Image, StyleSheet, View, type TextStyle } from 'react-native';
 import Animated, {
   Easing,
   interpolate,
-  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
-import Svg, { Path } from 'react-native-svg';
 
-import { MMERE_DANE_PATH } from '@/components/Symbol';
 import { colors, radius, shadow, spacing, text } from '@/theme/theme';
 
 export type BrandIntroProps = {
@@ -21,7 +18,11 @@ export type BrandIntroProps = {
   onDone: () => void;
 };
 
-const AnimatedPath = Animated.createAnimatedComponent(Path);
+const AnimatedImage = Animated.createAnimatedComponent(Image);
+// White template tinted per phase (base -> ink, pulsing accent, settled).
+// react-native-svg's Fabric ViewManagers don't register on RN 0.86, so the
+// mark is a PNG; the canonical geometry lives in Symbol.tsx (MMERE_DANE_PATH).
+const MARK = require('@/assets/images/mark-template.png');
 
 const WORDMARK = 'Kandoo';
 const MOTTO = 'Yes You Kan';
@@ -254,7 +255,7 @@ export function BrandIntro({ onDone }: BrandIntroProps) {
     ],
   }));
 
-  const markProps = useAnimatedProps(() => ({ fill: markFill.value }));
+  const markTintStyle = useAnimatedStyle(() => ({ tintColor: markFill.value }));
 
   const haloStyle = useAnimatedStyle(() => ({
     opacity: 0.34 * halo.value,
@@ -282,13 +283,14 @@ export function BrandIntro({ onDone }: BrandIntroProps) {
           ))}
 
           <Animated.View style={[styles.markLayer, markStyle]}>
-            <Svg width={SPLASH_SIZE} height={SPLASH_SIZE} viewBox="0 0 100 100">
-              <AnimatedPath
-                d={MMERE_DANE_PATH}
-                animatedProps={markProps}
-                fillRule="evenodd"
-              />
-            </Svg>
+            <AnimatedImage
+              source={MARK}
+              resizeMode="contain"
+              style={[
+                { width: SPLASH_SIZE, height: SPLASH_SIZE },
+                markTintStyle,
+              ]}
+            />
           </Animated.View>
 
           <View style={[styles.textRow, { top: WORD_TOP }]}>

@@ -17,6 +17,7 @@ import Animated, {
 import { ReviewSheet } from '@/components/ReviewSheet';
 import { KandooSymbol } from '@/components/Symbol';
 import { useHome, type RecentItem } from '@/features/Home/useHome';
+import { useReminderSync } from '@/features/reminders/useReminderSync';
 import type {
   InterpretResult,
   InterpretationResponse,
@@ -26,7 +27,6 @@ import { formatDueDate } from '@/utils/formatDueDate';
 
 import AuthScreen from '../features/Auth/AuthScreen';
 import { useAuth } from '../features/Auth/useAuth';
-import { registerForPushNotifications } from '../services/notificationService';
 import { signOut } from '../services/authService';
 
 export default function HomeScreen() {
@@ -59,13 +59,9 @@ function KandooHome() {
   const home = useHome();
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  useEffect(() => {
-    registerForPushNotifications().catch((error: unknown) => {
-      // Push is being replaced by local notifications; this path is expected
-      // to fail on a dev build without an EAS projectId.
-      console.warn('Push registration skipped:', error);
-    });
-  }, []);
+  // Set up notification channels/permissions and rebuild the local schedule
+  // from the server's active reminders. Replaces the retired server-push path.
+  useReminderSync(true);
 
   return (
     <View style={styles.screen}>

@@ -4,9 +4,11 @@ import { useCallback, useRef, useState } from 'react';
 import {
   confirmReminder,
   interpretText,
+  type CreatedReminder,
   type InterpretResult,
   type InterpretationResponse,
 } from '@/services/interpretationService';
+import { scheduleReminder } from '@/services/localNotifications';
 
 /**
  * Home is one route with four states, not four screens. This hook owns the
@@ -126,9 +128,8 @@ export function useHome() {
     );
     const failed = settled.filter((s) => s.status === 'rejected');
 
-    setBusy(false);
-
     if (failed.length > 0) {
+      setBusy(false);
       for (const f of failed) {
         console.error('Confirm reminder failed:', (f as PromiseRejectedResult).reason);
       }
@@ -140,6 +141,25 @@ export function useHome() {
       return;
     }
 
+    // Schedule the local notification for each confirmed reminder. The DEVICE
+    // owns the trigger (§3.2): once scheduled, it fires with the server off.
+    // Best-effort per reminder — the server has already committed the confirm,
+    // so a scheduling hiccup must not un-confirm it; launch reconcile retries.
+    const confirmed = settled
+      .filter(
+        (s): s is PromiseFulfilledResult<CreatedReminder> =>
+          s.status === 'fulfilled'
+      )
+      .map((s) => s.value);
+    for (const reminder of confirmed) {
+      try {
+        await scheduleReminder(reminder);
+      } catch (error) {
+        console.error(`Scheduling reminder ${reminder.id} failed:`, error);
+      }
+    }
+
+    setBusy(false);
     haptic(Haptics.ImpactFeedbackStyle.Soft);
     setState('remembered');
   }, [response, busy]);
