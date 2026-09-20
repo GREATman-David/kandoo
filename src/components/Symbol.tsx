@@ -96,7 +96,13 @@ const ALARM_BREATH = 1100;
 /** The ground circle reads as a wash around the mark, not a tight disc. */
 const GROUND_RATIO = 1.45;
 
-export function Symbol({ state, size }: SymbolProps) {
+/**
+ * Named KandooSymbol, not Symbol: a module-scope binding called `Symbol`
+ * shadows the JS global, and Babel's emitted helpers reference
+ * `Symbol.iterator` / `Symbol.for` — which then resolve to this component and
+ * throw "undefined is not a function" on first render.
+ */
+export function KandooSymbol({ state, size }: SymbolProps) {
   const [reduceMotion, setReduceMotion] = useState(false);
   const scale = useSharedValue(1);
 
@@ -204,4 +210,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default Symbol;
+export default KandooSymbol;

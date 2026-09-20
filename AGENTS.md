@@ -418,6 +418,15 @@ key. `memories`, `reminders`, `captures`, `entities` and `memory_entities` were
 all missing UPDATE/DELETE and have been granted; check
 `information_schema.role_table_grants` in the SQL editor if a write fails.
 
+**Never export a component named `Symbol`.** A module-scope binding called
+`Symbol` shadows the JS global, and Babel's emitted helpers reference
+`Symbol.iterator` / `Symbol.for` — those then resolve to the component and the
+first render throws `TypeError: undefined is not a function` with the app
+showing the dev client's blank grey. The mark is exported as `KandooSymbol`
+(`src/components/Symbol.tsx`) for exactly this reason. The same applies to any
+other global name (`Map`, `Set`, `Text`-style collisions are caught by TS; a
+value that shadows a global is not).
+
 **Native modules need a rebuild.** Adding `react-native-svg` or any other native
 dependency is not picked up by Metro alone; prebuild and rebuild the APK.
 

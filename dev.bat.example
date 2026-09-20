@@ -1,0 +1,71 @@
+@echo off
+setlocal
+
+REM ===========================================================
+REM  Kandoo dev launcher  -  MuMu emulator  (template)
+REM
+REM  Copy this file to dev.bat (which is gitignored), adjust the
+REM  two variables below if needed, and double-click it.
+REM
+REM  Opens three windows: backend, Metro, and this one.
+REM  Close all three to stop everything.
+REM ===========================================================
+
+REM  Project root. %~dp0 is the folder this script lives in, so the
+REM  default works wherever the repo is cloned. Override if you keep
+REM  the script elsewhere, e.g.  set PROJECT=C:\code\kandoo
+set PROJECT=%~dp0
+
+REM  MuMu's ADB endpoint. 7555 is the default; if dev.bat can't find
+REM  MuMu, check its settings — 16384 and 5555 are the other usual ones.
+set MUMU=127.0.0.1:7555
+
+cd /d "%PROJECT%" || (echo Could not find %PROJECT% & pause & exit /b 1)
+
+echo.
+echo  [1/5] Connecting to MuMu...
+adb connect %MUMU% >nul 2>&1
+adb -s %MUMU% get-state >nul 2>&1
+if errorlevel 1 (
+  echo.
+  echo  Could not reach MuMu on %MUMU%.
+  echo  Is the emulator running? Other common ports: 16384, 5555
+  echo.
+  adb devices
+  pause
+  exit /b 1
+)
+echo        connected.
+
+echo  [2/5] Forwarding Metro port 8081...
+REM  Metro needs the reverse. The backend does NOT - the app reaches
+REM  the host at 10.0.2.2:3000 directly.
+adb -s %MUMU% reverse --remove-all >nul 2>&1
+adb -s %MUMU% reverse tcp:8081 tcp:8081 >nul 2>&1
+if errorlevel 1 (echo        WARNING: reverse failed, Metro may not connect.) else (echo        done.)
+
+echo  [3/5] Starting backend on port 3000...
+start "Kandoo backend" cmd /k "cd /d %PROJECT%\backend && npm run dev"
+
+echo  [4/5] Starting Metro...
+REM  --clear because EXPO_PUBLIC_ vars are inlined at bundle time;
+REM  a stale cache will silently serve old values.
+start "Kandoo Metro" cmd /k "cd /d %PROJECT% && npx expo start --clear"
+
+echo  [5/5] Waiting for Metro, then launching the app...
+timeout /t 12 /nobreak >nul
+adb -s %MUMU% shell monkey -p app.kandoo.mobile -c android.intent.category.LAUNCHER 1 >nul 2>&1
+
+echo.
+echo  ---------------------------------------------------------
+echo   Kandoo is starting.
+echo.
+echo   Backend  : http://localhost:3000/health
+echo   From app : http://10.0.2.2:3000
+echo   Metro    : port 8081 (reversed to MuMu)
+echo.
+echo   If the app shows a stale bundle, press R twice in the
+echo   Metro window, or shake the device and pick Reload.
+echo  ---------------------------------------------------------
+echo.
+pause

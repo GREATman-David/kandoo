@@ -46,6 +46,11 @@ example
 
 # local dev/test scratch
 .gradle-build.log
+.metro.log
 backend/.dev-server.log
 backend/.test-*.cjs
 backend/.backfill.ts
+
+# local launcher scripts (hard-code a machine path); keep dev.bat.example
+*.bat
+!dev.bat.example
