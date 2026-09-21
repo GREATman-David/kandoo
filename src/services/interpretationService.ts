@@ -11,10 +11,17 @@ function requireEnv(value: string | undefined, name: string): string {
   return value;
 }
 
-const BACKEND_URL = requireEnv(
-  process.env.EXPO_PUBLIC_API_URL,
-  'EXPO_PUBLIC_API_URL'
-);
+/**
+ * Dev builds hit the local backend — localhost over the adb-reverse tunnel,
+ * read from .env. Release builds ALWAYS hit production on Render, baked in at
+ * build time so a shipped APK can never accidentally point at a laptop. `__DEV__`
+ * is true under Metro and false in any release build.
+ */
+const PRODUCTION_API_URL = 'https://kandoo-toow.onrender.com';
+
+const BACKEND_URL = __DEV__
+  ? requireEnv(process.env.EXPO_PUBLIC_API_URL, 'EXPO_PUBLIC_API_URL')
+  : PRODUCTION_API_URL;
 
 /**
  * Raised when the backend can't be reached or didn't answer properly. Its
