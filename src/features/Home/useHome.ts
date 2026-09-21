@@ -1,4 +1,8 @@
 import * as Haptics from 'expo-haptics';
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent,
+} from 'expo-speech-recognition';
 import { useCallback, useRef, useState } from 'react';
 
 import {
@@ -44,6 +48,27 @@ function haptic(style: Haptics.ImpactFeedbackStyle) {
   });
 }
 
+const VOICE_SUPPORTED = ExpoSpeechRecognitionModule.isRecognitionAvailable();
+
+/**
+ * One options object for the initial start AND every silent restart, so a
+ * restarted session behaves identically to the first. `continuous` asks the
+ * recognizer to keep going past a pause; the silence-length extras ask Android
+ * to wait much longer before deciding speech is over. Google's recognizer
+ * frequently ignores both — so restart-on-'end' (below) is the real guarantee
+ * that a 90-second recap with natural pauses is captured whole, not these hints.
+ */
+const START_OPTIONS = {
+  lang: 'en-US',
+  interimResults: true,
+  continuous: true,
+  androidIntentOptions: {
+    EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS: 30000,
+    EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 10000,
+    EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 10000,
+  },
+} as const;
+
 export function useHome() {
   const [state, setState] = useState<HomeState>('idle');
   const [transcript, setTranscript] = useState('');
@@ -51,10 +76,149 @@ export function useHome() {
   const [error, setError] = useState<string | null>(null);
   const [recent, setRecent] = useState<RecentItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [voiceActive, setVoiceActive] = useState(false);
+  // Raised when a recall answer reaches past the free 7-day window. The paywall
+  // appears at that boundary and nowhere else — never on launch.
+  const [paywallVisible, setPaywallVisible] = useState(false);
 
   // The transcript that produced the current response, kept for the review
   // sheet's "Saved what you said" fallback and for retry after a failure.
   const submittedText = useRef('');
+  // Latest transcript as a ref: voice results and the submit path both need it
+  // without waiting for a state flush, since the speech 'end' event fires
+  // immediately after the final 'result'.
+  const latest = useRef('');
+  const busyRef = useRef(false);
+  // Set when the user asks to send while the mic is still live, so the 'end'
+  // handler submits the final transcript rather than a mid-word interim.
+  const submitOnEnd = useRef(false);
+  // Text finalized across the recognizer's own segments AND across our silent
+  // restarts. The live interim is shown appended to this; when a segment
+  // finalizes, or a session ends and we restart, it is folded in here so the
+  // next session's words ADD to it instead of replacing it. This is what makes
+  // capture survive the pauses in a long recap.
+  const committed = useRef('');
+  // Distinguishes a user-driven stop/cancel from the recognizer ending on its
+  // own. Only the latter — the OS deciding it heard a pause — triggers a
+  // silent restart. The user, never the OS, decides when capture ends.
+  const cancelRequested = useRef(false);
+  const fatalError = useRef(false);
+
+  function setTranscriptBoth(text: string) {
+    latest.current = text;
+    setTranscript(text);
+  }
+
+  /**
+   * Ask the backend what it heard. Reads the transcript from a ref so the
+   * voice 'end' path and the typed path share one implementation. The symbol
+   * turns accent the moment this starts — that breathing is the "working it
+   * out" signal, and the only loading indicator Home ever shows.
+   */
+  const runInterpret = useCallback(async () => {
+    const text = latest.current.trim();
+    if (!text || busyRef.current) return;
+
+    submittedText.current = text;
+    busyRef.current = true;
+    setBusy(true);
+    setError(null);
+    setState('understanding');
+
+    try {
+      const result = await interpretText(text);
+      setResponse(result);
+      // The paywall is a recall-boundary event: it opens only when the answer
+      // genuinely reached older, Pro-only memories.
+      const reachedPro = result.results.some(
+        (r) => r.kind === 'recall' && r.status === 'ok' && r.proBoundaryHit
+      );
+      if (reachedPro) setPaywallVisible(true);
+    } catch (caught) {
+      console.error('Interpret failed:', caught);
+      setError(
+        caught instanceof Error ? caught.message : 'Could not process that.'
+      );
+      // Back to listening with the words intact, so nothing is lost.
+      setState('listening');
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }, []);
+
+  // --- Voice: the mic streams into the same transcript the field edits. ---
+  // Each result is the current segment only; we append it to everything
+  // finalized so far, so the displayed transcript grows across pauses.
+  useSpeechRecognitionEvent('result', (event) => {
+    const segment = event.results[0]?.transcript ?? '';
+    const full = [committed.current, segment]
+      .filter(Boolean)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    setTranscriptBoth(full);
+    // A finalized segment is locked in so the next phrase appends to it.
+    if (event.isFinal) committed.current = full;
+  });
+
+  useSpeechRecognitionEvent('end', () => {
+    // Cancelled: cancelListening already reset the UI. Nothing to do.
+    if (cancelRequested.current) {
+      cancelRequested.current = false;
+      return;
+    }
+    // A fatal error (permission, no recogniser) ended it: stop, but keep the
+    // words captured so far and the typing fallback.
+    if (fatalError.current) {
+      fatalError.current = false;
+      setVoiceActive(false);
+      return;
+    }
+    // User pressed Stop: fold in the final words and submit.
+    if (submitOnEnd.current) {
+      submitOnEnd.current = false;
+      committed.current = latest.current.trim();
+      setVoiceActive(false);
+      void runInterpret();
+      return;
+    }
+    // Otherwise the recogniser ended ITSELF — a pause, a silence timeout, or a
+    // finished segment. The user hasn't asked to stop, so keep the session
+    // alive: fold in what we have and start listening again, silently, without
+    // touching the UI. A long silence (including at the very start) just loops
+    // back through here, so it never ends capture.
+    committed.current = latest.current.trim();
+    try {
+      ExpoSpeechRecognitionModule.start(START_OPTIONS);
+    } catch (caught) {
+      console.warn('Voice restart failed:', caught);
+      setVoiceActive(false);
+      setError('Voice capture stopped. You can keep typing.');
+    }
+  });
+
+  useSpeechRecognitionEvent('error', (event) => {
+    // 'end' fires immediately after an error; this handler only records whether
+    // the error is fatal, so 'end' knows whether to restart or stop. Words
+    // already captured are never lost, and typing always stays available.
+    console.warn('Speech recognition error:', event.error, event.message);
+    const fatal =
+      event.error === 'not-allowed' ||
+      event.error === 'service-not-allowed' ||
+      event.error === 'audio-capture' ||
+      event.error === 'language-not-supported';
+    if (fatal) {
+      fatalError.current = true;
+      setError(
+        event.error === 'not-allowed' || event.error === 'service-not-allowed'
+          ? 'Microphone access is off. You can still type.'
+          : 'Voice capture is unavailable. You can still type.'
+      );
+    }
+    // Transient errors (no-speech, no-match, speech-timeout, network, busy) are
+    // the normal cost of a pause and are left for 'end' to restart through.
+  });
 
   /** Typing the first character is what opens capture in text mode. */
   const startListening = useCallback(() => {
@@ -68,46 +232,91 @@ export function useHome() {
 
   const updateTranscript = useCallback(
     (text: string) => {
-      setTranscript(text);
+      setTranscriptBoth(text);
       if (text.length > 0) startListening();
     },
     [startListening]
   );
 
-  const cancelListening = useCallback(() => {
-    setTranscript('');
-    setError(null);
-    setState('idle');
-  }, []);
-
   /**
-   * Stop listening and ask the backend what it heard. The symbol turns accent
-   * the moment this starts — that breathing is the "working it out" signal, and
-   * it is the only loading indicator Home ever shows.
+   * Speak instead of type. Voice replaces the field as the input — it does not
+   * add a state — and typing stays available alongside it. On-device, so no
+   * network and no API quota is spent (AGENTS.md §3.6).
    */
-  const stopListening = useCallback(async () => {
-    const text = transcript.trim();
-    if (!text || busy) return;
-
-    submittedText.current = text;
-    setBusy(true);
-    setError(null);
-    setState('understanding');
+  const startVoice = useCallback(async () => {
+    if (!VOICE_SUPPORTED) {
+      setError('Speech recognition is not available. You can type instead.');
+      setState('listening');
+      return;
+    }
 
     try {
-      const result = await interpretText(text);
-      setResponse(result);
-    } catch (caught) {
-      console.error('Interpret failed:', caught);
-      setError(
-        caught instanceof Error ? caught.message : 'Could not process that.'
-      );
-      // Back to listening with the words intact, so nothing is lost.
+      const permission =
+        await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!permission.granted) {
+        setError('Microphone access is needed to speak. You can type instead.');
+        setState('listening');
+        return;
+      }
+
+      setError(null);
+      committed.current = '';
+      cancelRequested.current = false;
+      fatalError.current = false;
+      submitOnEnd.current = false;
+      setTranscriptBoth('');
       setState('listening');
-    } finally {
-      setBusy(false);
+      setVoiceActive(true);
+      haptic(Haptics.ImpactFeedbackStyle.Light);
+
+      ExpoSpeechRecognitionModule.start(START_OPTIONS);
+    } catch (caught) {
+      console.error('Starting voice failed:', caught);
+      setVoiceActive(false);
+      setError('Could not start the microphone. You can type instead.');
+      setState('listening');
     }
-  }, [transcript, busy]);
+  }, []);
+
+  const cancelListening = useCallback(() => {
+    if (voiceActive) {
+      // Flag the cancel BEFORE abort so the 'end' it triggers doesn't restart.
+      cancelRequested.current = true;
+      submitOnEnd.current = false;
+      ExpoSpeechRecognitionModule.abort();
+    }
+    committed.current = '';
+    setVoiceActive(false);
+    setTranscriptBoth('');
+    setError(null);
+    setState('idle');
+  }, [voiceActive]);
+
+  /**
+   * Send what was captured. If the mic is still live, stop it and let the
+   * 'end' handler submit the final transcript; otherwise submit now.
+   */
+  const stopListening = useCallback(async () => {
+    if (voiceActive) {
+      submitOnEnd.current = true;
+      ExpoSpeechRecognitionModule.stop();
+      return;
+    }
+    await runInterpret();
+  }, [voiceActive, runInterpret]);
+
+  const closePaywall = useCallback(() => setPaywallVisible(false), []);
+
+  /**
+   * Called after a successful purchase. Re-asks the exact same question now
+   * that the user is Pro, so the answer comes back with the older memories the
+   * boundary was hiding — the moment the paywall pays off.
+   */
+  const onProUnlocked = useCallback(() => {
+    setPaywallVisible(false);
+    latest.current = submittedText.current;
+    void runInterpret();
+  }, [runInterpret]);
 
   /**
    * The trust boundary. Reminders were created `pending`; this is the only
@@ -185,8 +394,11 @@ export function useHome() {
     }
 
     setResponse(null);
+    latest.current = '';
+    committed.current = '';
     setTranscript('');
     setError(null);
+    setPaywallVisible(false);
     submittedText.current = '';
     setState('idle');
   }, [response]);
@@ -198,9 +410,15 @@ export function useHome() {
     error,
     busy,
     recent,
+    voiceActive,
+    voiceSupported: VOICE_SUPPORTED,
+    paywallVisible,
+    closePaywall,
+    onProUnlocked,
     submittedText: submittedText.current,
     updateTranscript,
     startListening,
+    startVoice,
     stopListening,
     cancelListening,
     remember,

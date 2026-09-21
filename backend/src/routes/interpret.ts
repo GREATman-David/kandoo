@@ -7,6 +7,7 @@ import {
 
 import { aiProvider } from '../modules/ai';
 import { createCapture } from '../modules/captures/captureService';
+import { isProUser } from '../modules/entitlements/entitlementService';
 import { createMemory } from '../modules/memories/memoryService';
 import { answerRecall } from '../modules/memories/recallService';
 import {
@@ -24,7 +25,13 @@ const isProduction = process.env.NODE_ENV === 'production';
 type ActionResult =
   | { kind: 'reminder'; status: 'ok'; reminder: unknown }
   | { kind: 'memory'; status: 'ok'; memory: unknown }
-  | { kind: 'recall'; status: 'ok'; answer: string; memories: unknown[] }
+  | {
+      kind: 'recall';
+      status: 'ok';
+      answer: string;
+      memories: unknown[];
+      proBoundaryHit: boolean;
+    }
   | { kind: KandooAction['kind']; status: 'failed'; reason: string };
 
 router.post('/interpret', authenticateRequest, async (req, res) => {
@@ -80,6 +87,14 @@ router.post('/interpret', authenticateRequest, async (req, res) => {
 
     const results: ActionResult[] = [];
 
+    // Resolved at most once per request, only if a recall action needs it, so
+    // capture/extraction stay off the RevenueCat path entirely.
+    let proStatus: boolean | null = null;
+    const ensureProStatus = async () => {
+      if (proStatus === null) proStatus = await isProUser(userId);
+      return proStatus;
+    };
+
     for (const action of interpretation.actions) {
       try {
         switch (action.kind) {
@@ -99,8 +114,19 @@ router.post('/interpret', authenticateRequest, async (req, res) => {
             break;
           }
           case 'recall': {
-            const { answer, memories } = await answerRecall(userId, action);
-            results.push({ kind: 'recall', status: 'ok', answer, memories });
+            const pro = await ensureProStatus();
+            const { answer, memories, proBoundaryHit } = await answerRecall(
+              userId,
+              action,
+              pro
+            );
+            results.push({
+              kind: 'recall',
+              status: 'ok',
+              answer,
+              memories,
+              proBoundaryHit,
+            });
             break;
           }
         }

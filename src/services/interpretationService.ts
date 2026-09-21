@@ -16,6 +16,71 @@ const BACKEND_URL = requireEnv(
   'EXPO_PUBLIC_API_URL'
 );
 
+/**
+ * Raised when the backend can't be reached or didn't answer properly. Its
+ * message is the ONLY thing the UI shows for a network failure — the raw cause
+ * (a `java.net.*` / OkHttp string like `UnknownServiceException`) is logged,
+ * never displayed. One friendly line, in Kandoo's voice.
+ */
+export class NetworkError extends Error {
+  constructor() {
+    super("Couldn't reach Kandoo. Check your connection and try again.");
+    this.name = 'NetworkError';
+  }
+}
+
+/**
+ * The single door to the backend. Every call goes through here so the
+ * transport-vs-application error boundary is decided in exactly one place:
+ *   - fetch/read/parse failure → NetworkError (friendly), real cause logged.
+ *   - a non-ok response WITH a backend error string → show that string; the
+ *     backend already sanitises its errors (AGENTS §10), so it is safe to show.
+ *   - a non-ok response with no usable body (an HTML 5xx from a proxy, a 204) →
+ *     NetworkError, because there is nothing meaningful to say.
+ */
+async function apiFetch<T>(
+  path: string,
+  init: RequestInit,
+  fallbackMessage: string
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${BACKEND_URL}${path}`, init);
+  } catch (transport) {
+    // No connection, DNS, TLS, or cleartext-blocked: a transport failure.
+    console.error(`Network request to ${path} failed:`, transport);
+    throw new NetworkError();
+  }
+
+  let body = '';
+  try {
+    body = await response.text();
+  } catch (readError) {
+    console.error(`Reading response from ${path} failed:`, readError);
+    throw new NetworkError();
+  }
+
+  let data: unknown = null;
+  if (body) {
+    try {
+      data = JSON.parse(body);
+    } catch (parseError) {
+      console.error(
+        `Non-JSON response from ${path} (status ${response.status}):`,
+        parseError
+      );
+      throw new NetworkError();
+    }
+  }
+
+  if (!response.ok) {
+    const message = (data as { error?: unknown } | null)?.error;
+    throw new Error(typeof message === 'string' ? message : fallbackMessage);
+  }
+
+  return data as T;
+}
+
 export type ReminderStatus =
   | 'pending'
   | 'confirmed'
@@ -47,7 +112,14 @@ export type CreatedMemory = {
 export type InterpretResult =
   | { kind: 'reminder'; status: 'ok'; reminder: CreatedReminder }
   | { kind: 'memory'; status: 'ok'; memory: CreatedMemory }
-  | { kind: 'recall'; status: 'ok'; answer: string; memories: unknown[] }
+  | {
+      kind: 'recall';
+      status: 'ok';
+      answer: string;
+      memories: unknown[];
+      /** The question reached past the free 7-day window; raise the paywall. */
+      proBoundaryHit: boolean;
+    }
   | {
       kind: 'reminder' | 'memory' | 'recall';
       status: 'failed';
@@ -88,26 +160,18 @@ export async function interpretText(
   const clientTime = new Date().toISOString();
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  const response = await fetch(`${BACKEND_URL}/interpret`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessToken}`,
+  return apiFetch<InterpretationResponse>(
+    '/interpret',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ text: trimmedText, clientTime, timezone }),
     },
-    body: JSON.stringify({
-      text: trimmedText,
-      clientTime,
-      timezone,
-    }),
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data?.error ?? 'Failed to interpret text.');
-  }
-
-  return data;
+    'Failed to interpret text.'
+  );
 }
 
 /** Called from the review sheet. Reminders stay unscheduled until this fires. */
@@ -116,22 +180,17 @@ export async function confirmReminder(
 ): Promise<CreatedReminder> {
   const accessToken = await getAccessTokenOrThrow();
 
-  const response = await fetch(
-    `${BACKEND_URL}/reminders/${reminderId}/confirm`,
+  const data = await apiFetch<{ reminder: CreatedReminder }>(
+    `/reminders/${reminderId}/confirm`,
     {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-    }
+    },
+    'Failed to confirm reminder.'
   );
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data?.error ?? 'Failed to confirm reminder.');
-  }
 
   return data.reminder;
 }
@@ -143,36 +202,28 @@ export async function confirmReminder(
 export async function fetchActiveReminders(): Promise<CreatedReminder[]> {
   const accessToken = await getAccessTokenOrThrow();
 
-  const response = await fetch(`${BACKEND_URL}/reminders/active`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const data = await apiFetch<{ reminders?: CreatedReminder[] }>(
+    '/reminders/active',
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    'Failed to load reminders.'
+  );
 
-  const data = await response.json();
-
-  if (!response.ok) {
-    throw new Error(data?.error ?? 'Failed to load reminders.');
-  }
-
-  return (data.reminders ?? []) as CreatedReminder[];
+  return data.reminders ?? [];
 }
 
 /** Dismiss a reminder server-side. The caller cancels its local notification. */
 export async function dismissReminder(reminderId: string): Promise<void> {
   const accessToken = await getAccessTokenOrThrow();
 
-  const response = await fetch(
-    `${BACKEND_URL}/reminders/${reminderId}/dismiss`,
+  await apiFetch<unknown>(
+    `/reminders/${reminderId}/dismiss`,
     {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-    }
+    },
+    'Failed to dismiss reminder.'
   );
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new Error(data?.error ?? 'Failed to dismiss reminder.');
-  }
 }

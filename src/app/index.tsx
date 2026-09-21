@@ -14,10 +14,16 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { Paywall } from '@/components/Paywall';
 import { ReviewSheet } from '@/components/ReviewSheet';
 import { KandooSymbol } from '@/components/Symbol';
 import { useHome, type RecentItem } from '@/features/Home/useHome';
 import { useReminderSync } from '@/features/reminders/useReminderSync';
+import {
+  configurePurchases,
+  identifyUser,
+  resetPurchasesUser,
+} from '@/services/purchases';
 import type {
   InterpretResult,
   InterpretationResponse,
@@ -30,7 +36,17 @@ import { useAuth } from '../features/Auth/useAuth';
 import { signOut } from '../services/authService';
 
 export default function HomeScreen() {
-  const { loading, isAuthenticated } = useAuth();
+  const { loading, isAuthenticated, user } = useAuth();
+
+  // Configure RevenueCat once, then tie the customer to the Supabase account so
+  // the backend can read the entitlement by the same id over the V2 REST API.
+  useEffect(() => {
+    configurePurchases();
+  }, []);
+
+  useEffect(() => {
+    if (user?.id) void identifyUser(user.id);
+  }, [user?.id]);
 
   if (loading) {
     return (
@@ -72,11 +88,26 @@ function KandooHome() {
 
       <View style={styles.symbol}>
         <Pressable
-          onPress={home.state === 'listening' ? home.stopListening : undefined}
-          accessibilityRole={home.state === 'listening' ? 'button' : undefined}
-          accessibilityLabel={
-            home.state === 'listening' ? 'Stop capture' : undefined
+          onPress={
+            home.state === 'idle'
+              ? home.startVoice
+              : home.state === 'listening'
+                ? home.stopListening
+                : undefined
           }
+          accessibilityRole={
+            home.state === 'idle' || home.state === 'listening'
+              ? 'button'
+              : undefined
+          }
+          accessibilityLabel={
+            home.state === 'idle'
+              ? 'Tap to speak'
+              : home.state === 'listening'
+                ? 'Stop and send'
+                : undefined
+          }
+          hitSlop={12}
         >
           <KandooSymbol state={home.state} size={SYMBOL_SIZE} />
         </Pressable>
@@ -91,6 +122,9 @@ function KandooHome() {
           <>
             <Text style={styles.greeting}>{greeting()}</Text>
             <Text style={styles.ask}>What should I remember for you?</Text>
+            {home.voiceSupported ? (
+              <Text style={styles.voiceHint}>Tap the mic to speak, or just type.</Text>
+            ) : null}
           </>
         ) : null}
 
@@ -99,26 +133,49 @@ function KandooHome() {
         ) : null}
 
         {/*
-          One input across idle and listening, like the symbol. Swapping
-          elements on the first keystroke would drop focus and blink the
-          keyboard; only its styling changes.
+          One input across idle and listening, like the symbol. The TextInput
+          is the SAME element and stays in the SAME parent row in both states —
+          swapping or reparenting it on the first keystroke would drop focus and
+          blink the keyboard. Only the row's border and the mic button toggle.
         */}
         {home.state === 'idle' || home.state === 'listening' ? (
-          <TextInput
-            style={home.state === 'listening' ? styles.transcript : styles.field}
-            placeholder="Tell Kandoo anything…"
-            placeholderTextColor={colors.inkFaint}
-            value={home.transcript}
-            onChangeText={home.updateTranscript}
-            multiline
-          />
+          <View
+            style={[
+              styles.inputRow,
+              home.state === 'listening' && styles.inputRowBare,
+            ]}
+          >
+            <TextInput
+              style={home.state === 'listening' ? styles.transcript : styles.field}
+              placeholder="Tell Kandoo anything…"
+              placeholderTextColor={colors.inkFaint}
+              value={home.transcript}
+              onChangeText={home.updateTranscript}
+              multiline
+            />
+            {/* Mic at the right edge of the field is the standard, primary way
+                to start voice. The mark stays tappable as a shortcut. Toggling
+                this sibling never remounts the TextInput beside it. */}
+            {home.state === 'idle' && home.voiceSupported ? (
+              <Pressable
+                style={styles.micBtn}
+                onPress={home.startVoice}
+                accessibilityRole="button"
+                accessibilityLabel="Speak"
+                hitSlop={8}
+              >
+                <MicGlyph color={colors.inkMuted} />
+              </Pressable>
+            ) : null}
+          </View>
         ) : null}
 
         {home.state === 'idle' ? <Idle recent={home.recent} /> : null}
 
         {home.state === 'listening' ? (
           <Listening
-            canStop={home.transcript.trim().length > 0}
+            canStop={home.voiceActive || home.transcript.trim().length > 0}
+            voiceActive={home.voiceActive}
             error={home.error}
             busy={home.busy}
             onStop={home.stopListening}
@@ -156,6 +213,12 @@ function KandooHome() {
           onClose={() => setSheetOpen(false)}
         />
       ) : null}
+
+      <Paywall
+        visible={home.paywallVisible}
+        onClose={home.closePaywall}
+        onPurchased={home.onProUnlocked}
+      />
     </View>
   );
 }
@@ -186,6 +249,9 @@ function Idle({ recent }: IdleProps) {
       <Pressable
         style={styles.signOut}
         onPress={() => {
+          // Detach the RevenueCat customer first so the next account that signs
+          // in on this device doesn't inherit this one's entitlement.
+          void resetPurchasesUser();
           signOut().catch((error: unknown) => {
             console.error('Sign out failed:', error);
           });
@@ -215,17 +281,40 @@ function describeCounts(item: RecentItem): string {
   return parts.join(' · ') || 'Saved what you said';
 }
 
+/**
+ * A microphone drawn from plain Views — no icon font or SVG (we removed
+ * react-native-svg for the Fabric gap). A filled capsule head over a short
+ * stem and base reads as a mic; `color` lets it follow colour-as-state.
+ */
+function MicGlyph({ color }: { color: string }) {
+  return (
+    <View style={styles.mic} pointerEvents="none">
+      <View style={[styles.micHead, { backgroundColor: color }]} />
+      <View style={[styles.micStem, { backgroundColor: color }]} />
+      <View style={[styles.micBase, { backgroundColor: color }]} />
+    </View>
+  );
+}
+
 // ----------------------------------------------------------- Listening
 
 type ListeningProps = {
   canStop: boolean;
+  voiceActive: boolean;
   error: string | null;
   busy: boolean;
   onStop: () => void;
   onCancel: () => void;
 };
 
-function Listening({ canStop, error, busy, onStop, onCancel }: ListeningProps) {
+function Listening({
+  canStop,
+  voiceActive,
+  error,
+  busy,
+  onStop,
+  onCancel,
+}: ListeningProps) {
   return (
     <>
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -239,7 +328,8 @@ function Listening({ canStop, error, busy, onStop, onCancel }: ListeningProps) {
           onPress={onStop}
           disabled={busy || !canStop}
         >
-          <Text style={styles.btnPrimaryText}>Stop</Text>
+          {/* Live mic: stop it, then submit. Typed or already stopped: send now. */}
+          <Text style={styles.btnPrimaryText}>{voiceActive ? 'Stop' : 'Send'}</Text>
         </Pressable>
       </View>
     </>
@@ -489,27 +579,73 @@ const styles = StyleSheet.create({
     color: colors.ink,
     textAlign: 'center',
     maxWidth: 300,
+    marginBottom: spacing.space3,
+  },
+  voiceHint: {
+    ...text.caption,
+    color: colors.inkFaint,
+    textAlign: 'center',
     marginBottom: spacing.space5,
   },
-  field: {
-    ...text.body,
+  inputRow: {
     alignSelf: 'stretch',
+    flexDirection: 'row',
+    alignItems: 'center',
     minHeight: 64,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.line,
     backgroundColor: colors.surface,
+    paddingRight: spacing.space2,
+  },
+  // Listening: drop the box so the centered transcript reads plainly, matching
+  // the pre-mic-button look. The mic hides here, so no right padding is needed.
+  inputRowBare: {
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    paddingRight: 0,
+  },
+  field: {
+    ...text.body,
+    flex: 1,
     color: colors.ink,
     paddingHorizontal: spacing.space4,
     paddingVertical: spacing.space3,
   },
   transcript: {
     ...text.bodyL,
-    alignSelf: 'stretch',
+    flex: 1,
     color: colors.ink,
     textAlign: 'center',
     paddingVertical: spacing.space3,
-    minHeight: 64,
+  },
+  micBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mic: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micHead: {
+    width: 11,
+    height: 15,
+    borderRadius: 5.5,
+  },
+  micStem: {
+    width: 2,
+    height: 3,
+    marginTop: 1,
+  },
+  micBase: {
+    width: 12,
+    height: 2,
+    borderRadius: 1,
+    marginTop: 1,
   },
   held: {
     ...text.bodyL,

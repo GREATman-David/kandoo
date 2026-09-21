@@ -48,6 +48,18 @@ const config: ExpoConfig = {
     // Adds SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM so time reminders fire on the
     // second rather than whenever Doze next wakes. expo-notifications omits it.
     './plugins/withExactAlarmPermission',
+    // On-device speech recognition for voice capture. Adds RECORD_AUDIO and the
+    // package visibility needed to reach Android's recognizer service.
+    [
+      'expo-speech-recognition',
+      {
+        microphonePermission:
+          'Kandoo uses the microphone so you can speak instead of type.',
+        speechRecognitionPermission:
+          'Kandoo turns your speech into reminders and memories on your device.',
+        androidSpeechServicePackages: ['com.google.android.googlequicksearchbox'],
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true,

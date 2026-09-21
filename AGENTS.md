@@ -447,3 +447,31 @@ deep-links resolve unambiguously.
 **MuMu's Android instance can quit under build load.** `MuMuNxMain` (launcher)
 stays up while `MuMuNxDevice` (the device) is gone and no ADB ports are open.
 Reopen the emulator window, then `adb connect` again.
+
+**A flaky network turns a non-fatal 404 into a hard build failure — retry
+before debugging.** `commons-io:1.4` (a transitive dep of `expo-file-system`)
+lives on **Maven Central, not Google Maven**: `dl.google.com` returns 404 for
+it and Gradle is supposed to fall through `google()` → `mavenCentral()`. But a
+*transport* error (timeout, DNS "No such host") on `google()` aborts resolution
+before the fallthrough, so intermittent connectivity surfaces as
+`Could not resolve commons-io:commons-io:1.4` at `:app:mergeReleaseNativeLibs` —
+a dependency error that looks like a build/config bug but is not. This bit the
+first two 4-ABI builds. Fix: confirm the network, then just re-run. Once the
+artifact caches from Central it never blocks again. Verify with
+`curl -m8 https://repo1.maven.org/maven2/commons-io/commons-io/1.4/commons-io-1.4.pom`
+(200 = reachable); a 404 from `dl.google.com` for the same path is expected and
+harmless.
+
+**A 4-ABI release build takes ~80 minutes; a single-ABI debug build ~15.** The
+phone-runnable APK is `./gradlew assembleRelease -x lint -x test --no-parallel`
+with NO `-PreactNativeArchitectures` override, so it builds all four ABIs
+(`armeabi-v7a,arm64-v8a,x86,x86_64` from `gradle.properties`). The `release`
+build type signs with the existing `debug.keystore` (see `signingConfig
+signingConfigs.debug` in `app/build.gradle`), so it is installable on hardware
+with no keystore setup, and R8 is OFF by default
+(`enableMinifyInReleaseBuilds` defaults false) — the APK is ~107MB, unminified.
+The arm cross-compile and the Defender/`.cxx` race did NOT bite under
+`--no-parallel`; the real cost is just the ~80 min of 4× native work. Voice can
+only be filmed on hardware (no emulator has an `android.speech.RecognitionService`),
+so this build is mandatory before filming — do not first discover its runtime on
+the 28th.
