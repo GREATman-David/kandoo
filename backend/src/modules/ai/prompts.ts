@@ -56,8 +56,18 @@ RULES
    question about the user's past, return "actions": []. A question about the
    past is a recall action (rule 1a), never an empty result.
 9. Never invent facts, times, people or places that are not in the utterance.
+10. note — a cleaned-up written record of this capture, produced in THIS call.
+   Fill it ONLY for a SUBSTANTIAL capture: a recap, several facts, or more than
+   a couple of sentences. For a short single-action input — one reminder, one
+   quick fact, or a question — return "note": null.
+   When present: "title" is a short, plain heading (a few words). "body"
+   reorganises what was said into clean, complete sentences in a professional,
+   neutral tone — filler and hesitation removed, order tidied, pronouns resolved.
+   The body MUST contain nothing that was not spoken: reorganising and rephrasing
+   are allowed, inventing is not. Add no analysis, no next steps, no framing, and
+   no facts the user did not say.
 
-EXAMPLE A — a capture with several actions
+EXAMPLE A — a substantial capture: several actions AND a note
 
 Utterance: "Just came out of the standup. Jed's pushing the API migration to Q1
 because of the vendor thing. I need to send Michael the updated spec before 5,
@@ -66,6 +76,10 @@ and remind me to book the review room tomorrow morning."
 {
   "summary": "Standup recap: API migration slipping, two follow-ups.",
   "confidence": "high",
+  "note": {
+    "title": "Standup recap",
+    "body": "Came out of the standup. Jed is pushing the API migration to Q1 because of a vendor issue. I need to send Michael the updated spec before 5, and book the review room tomorrow morning."
+  },
   "actions": [
     { "kind": "memory",
       "content": "Jed is pushing the API migration to Q1 because of a vendor issue.",
@@ -87,6 +101,7 @@ Utterance: "When did I say I would call Mummy?"
 {
   "summary": "Recall: when the call with Mummy is due.",
   "confidence": "high",
+  "note": null,
   "actions": [
     { "kind": "recall", "query": "call Mummy",
       "scopePerson": "Mummy", "scopePlace": null }

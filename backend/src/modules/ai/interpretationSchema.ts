@@ -61,11 +61,26 @@ export const kandooActionSchema = z.discriminatedUnion('kind', [
   recallActionSchema,
 ]);
 
+/**
+ * A cleaned-up written note for a SUBSTANTIAL capture — a recap, several facts,
+ * more than a couple of sentences. It reorganises what was said into complete
+ * sentences in a professional tone; it never adds anything that was not spoken.
+ * Null for short, single-action inputs, which do not warrant a note.
+ */
+export const noteSchema = z
+  .object({
+    title: z.string().min(1),
+    body: z.string().min(1),
+  })
+  .strict();
+
 export const kandooInterpretationSchema = z
   .object({
     /** One-line gist of the whole utterance. Shown above the review card. */
     summary: z.string().nullable(),
     confidence: z.enum(['high', 'low']),
+    /** Present only for substantial captures; null otherwise. */
+    note: noteSchema.nullable().default(null),
     actions: z.array(kandooActionSchema),
   })
   .strict();
@@ -74,6 +89,7 @@ export type ReminderAction = z.infer<typeof reminderActionSchema>;
 export type MemoryAction = z.infer<typeof memoryActionSchema>;
 export type RecallAction = z.infer<typeof recallActionSchema>;
 export type KandooAction = z.infer<typeof kandooActionSchema>;
+export type KandooNote = z.infer<typeof noteSchema>;
 export type KandooInterpretation = z.infer<typeof kandooInterpretationSchema>;
 
 /**
@@ -83,6 +99,7 @@ export type KandooInterpretation = z.infer<typeof kandooInterpretationSchema>;
 export const KANDOO_JSON_SHAPE = `{
   "summary": string | null,
   "confidence": "high" | "low",
+  "note": { "title": string, "body": string } | null,
   "actions": [
     { "kind": "reminder", "task": string, "dueAt": string|null,
       "placeHint": string|null, "people": string[], "insistent": boolean }

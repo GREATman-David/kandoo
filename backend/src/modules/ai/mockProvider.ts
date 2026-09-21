@@ -79,6 +79,7 @@ export class MockAIProvider implements AIProvider {
     return {
       summary: null,
       confidence: 'low',
+      note: null,
       actions,
     };
   }

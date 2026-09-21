@@ -141,6 +141,35 @@ export type InterpretationResponse = {
   results: InterpretResult[];
 };
 
+export type CaptureNoteMemory = {
+  id: string;
+  content: string;
+  person: string | null;
+  location: string | null;
+  topics: string[];
+  created_at: string;
+};
+
+export type CaptureNoteReminder = {
+  id: string;
+  task: string;
+  person: string | null;
+  due_at: string | null;
+  place_hint: string | null;
+  status: ReminderStatus;
+  created_at: string;
+};
+
+/** A capture that produced a note, with what Kandoo understood from it. */
+export type CaptureNote = {
+  id: string;
+  text: string;
+  note: { title: string; body: string } | null;
+  created_at: string;
+  memories: CaptureNoteMemory[];
+  reminders: CaptureNoteReminder[];
+};
+
 async function getAccessTokenOrThrow(): Promise<string> {
   const {
     data: { session },
@@ -216,6 +245,19 @@ export async function fetchActiveReminders(): Promise<CreatedReminder[]> {
   );
 
   return data.reminders ?? [];
+}
+
+/** The Memory screen: captures that produced a note, newest first. */
+export async function fetchCaptureNotes(): Promise<CaptureNote[]> {
+  const accessToken = await getAccessTokenOrThrow();
+
+  const data = await apiFetch<{ captures?: CaptureNote[] }>(
+    '/captures',
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    'Failed to load notes.'
+  );
+
+  return data.captures ?? [];
 }
 
 /** Dismiss a reminder server-side. The caller cancels its local notification. */

@@ -18,6 +18,8 @@ import 'dotenv/config';
 import { aiProvider } from '../src/modules/ai';
 import { supabase } from '../src/services/supabase';
 
+const TIMEZONE = 'Africa/Lagos';
+
 type MemorySeed = {
   kind: 'memory';
   daysAgo: number;
@@ -76,6 +78,45 @@ const SEED: Seed[] = [
   { kind: 'memory', daysAgo: 3, hour: 13, content: "Found a good jollof spot near the office — Mama Nkechi's.", location: "Mama Nkechi's", topics: ['food', 'lunch'] },
   { kind: 'reminder', daysAgo: 19, hour: 12, task: 'Pick up the grey coat from the dry cleaner', place: 'Adeola street', dueHour: 18, status: 'fired' },
   { kind: 'reminder', daysAgo: 1, hour: 9, task: 'Pay the electricity bill', dueHour: 21, status: 'confirmed', insistent: true },
+];
+
+/**
+ * Substantial spoken recaps, run through the REAL extraction so their notes are
+ * genuine (organised, nothing invented) rather than hand-written — and so each
+ * populates the Memory tab with a note plus the memories/reminders it produced.
+ * Spread across the six weeks; two land older than a week.
+ */
+const RECAPS: { daysAgo: number; hour: number; text: string }[] = [
+  {
+    daysAgo: 34,
+    hour: 16,
+    text:
+      "Just wrapped the sprint review. We're cutting the analytics dashboard " +
+      "from this release because QA found a data race we can't fix in time. " +
+      'Tunde is taking over the vendor contract renewal, and finance wants the ' +
+      'revised budget by Friday. I need to send the board the updated timeline ' +
+      'before end of day, and set a reminder to prep the demo script next week.',
+  },
+  {
+    daysAgo: 20,
+    hour: 19,
+    text:
+      "Had a long call with Mum about Dad's checkup. His blood pressure is down " +
+      'and the doctor is happy, but they want him off salt and walking every ' +
+      "day. Ada confirmed she's coming for Christmas and bringing the kids, so " +
+      'the spare room needs sorting. Remind me to order Dad the new blood ' +
+      "pressure monitor, and to call the doctor's office about his next appointment.",
+  },
+  {
+    daysAgo: 5,
+    hour: 18,
+    text:
+      'Got a lot done today. The plumber fixed the kitchen leak and said the ' +
+      'pipes under the sink need replacing within the year. I picked up the dry ' +
+      'cleaning and dropped the tax documents with the accountant. I still need ' +
+      'to renew the car insurance before it lapses next week, and book the ' +
+      'dentist for that filling.',
+  },
 ];
 
 function backdate(daysAgo: number, hour: number): string {
@@ -193,6 +234,90 @@ async function insertItem(
   return { table: 'reminders', id: data.id, text: item.task };
 }
 
+async function insertRecap(
+  userId: string,
+  recap: { daysAgo: number; hour: number; text: string }
+): Promise<{ table: 'memories' | 'reminders'; id: string; text: string }[]> {
+  const createdAt = backdate(recap.daysAgo, recap.hour);
+
+  // Real extraction, resolving any relative times against the backdated moment
+  // so "next week" / "before end of day" land in the right place in history.
+  const result = await aiProvider.interpret(recap.text, {
+    clientTime: createdAt,
+    timezone: TIMEZONE,
+  });
+
+  const { data: capture, error: capErr } = await supabase
+    .from('captures')
+    .insert({
+      user_id: userId,
+      text: recap.text,
+      client_time: createdAt,
+      timezone: TIMEZONE,
+      source: 'seed',
+      note: result.note,
+      created_at: createdAt,
+    })
+    .select('id')
+    .single();
+  if (capErr || !capture) throw new Error(`Recap capture insert failed: ${capErr?.message}`);
+
+  const rows: { table: 'memories' | 'reminders'; id: string; text: string }[] = [];
+
+  for (const action of result.actions) {
+    if (action.kind === 'memory') {
+      const { data, error } = await supabase
+        .from('memories')
+        .insert({
+          user_id: userId,
+          capture_id: capture.id,
+          content: action.content,
+          person: action.people[0] ?? null,
+          location: action.placeHint,
+          topics: action.topics,
+          embedding: null,
+          created_at: createdAt,
+        })
+        .select('id')
+        .single();
+      if (error || !data) throw new Error(`Recap memory insert failed: ${error?.message}`);
+      rows.push({ table: 'memories', id: data.id, text: action.content });
+    } else if (action.kind === 'reminder') {
+      const past = action.dueAt ? Date.parse(action.dueAt) < Date.now() : true;
+      const { data, error } = await supabase
+        .from('reminders')
+        .insert({
+          user_id: userId,
+          capture_id: capture.id,
+          task: action.task,
+          person: action.people[0] ?? null,
+          due_at: action.dueAt,
+          // Legacy column is NOT NULL; a place-anchored reminder has no dueAt,
+          // so fall back to the capture time.
+          reminder_time: action.dueAt ?? createdAt,
+          place_hint: action.placeHint,
+          place_id: null,
+          insistent: action.insistent,
+          status: past ? 'fired' : 'confirmed',
+          embedding: null,
+          created_at: createdAt,
+        })
+        .select('id')
+        .single();
+      if (error || !data) throw new Error(`Recap reminder insert failed: ${error?.message}`);
+      rows.push({ table: 'reminders', id: data.id, text: action.task });
+    }
+    // A recall action would be odd inside a recap; ignore it if one appears.
+  }
+
+  console.log(
+    `  recap ${recap.daysAgo}d ago → note ${
+      result.note ? `"${result.note.title}"` : 'null'
+    }, ${rows.length} linked items`
+  );
+  return rows;
+}
+
 async function embedAll(
   rows: { table: 'memories' | 'reminders'; id: string; text: string }[]
 ): Promise<void> {
@@ -235,12 +360,29 @@ async function main() {
     rows.push(await insertItem(userId, item));
   }
 
+  console.log(`Extracting ${RECAPS.length} recaps for genuine notes…`);
+  for (const recap of RECAPS) {
+    try {
+      rows.push(...(await insertRecap(userId, recap)));
+    } catch (error) {
+      // A transient Gemini 503/quota on one recap must not sink the whole seed
+      // — the other recaps and all the direct facts still go in.
+      console.warn(
+        `  recap ${recap.daysAgo}d skipped:`,
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
+
   const memories = rows.filter((r) => r.table === 'memories').length;
   const reminders = rows.filter((r) => r.table === 'reminders').length;
-  const older = SEED.filter((s) => s.daysAgo > 7).length;
+  const older =
+    SEED.filter((s) => s.daysAgo > 7).length +
+    RECAPS.filter((r) => r.daysAgo > 7).length;
   console.log(
-    `Inserted ${memories} memories and ${reminders} reminders ` +
-      `(${older} older than 7 days — the paywall boundary).`
+    `Inserted ${memories} memories and ${reminders} reminders across ` +
+      `${SEED.length} facts + ${RECAPS.length} recaps ` +
+      `(${older} captures older than 7 days — the paywall boundary).`
   );
 
   await embedAll(rows);

@@ -6,7 +6,11 @@ import {
 } from '../middleware/authenticateRequest';
 
 import { aiProvider } from '../modules/ai';
-import { createCapture } from '../modules/captures/captureService';
+import {
+  attachNote,
+  createCapture,
+  listCaptureNotes,
+} from '../modules/captures/captureService';
 import { isProUser } from '../modules/entitlements/entitlementService';
 import { createMemory } from '../modules/memories/memoryService';
 import { answerRecall } from '../modules/memories/recallService';
@@ -145,11 +149,19 @@ router.post('/interpret', authenticateRequest, async (req, res) => {
       }
     }
 
+    // A substantial capture also produces a cleaned-up note. Persisting it is
+    // best-effort — the actions above are the real work, and a note write must
+    // never fail the response.
+    if (interpretation.note) {
+      await attachNote(capture.id, interpretation.note);
+    }
+
     return res.status(200).json({
       success: true,
       captureId: capture.id,
       summary: interpretation.summary,
       confidence: interpretation.confidence,
+      note: interpretation.note ?? null,
       results,
     });
   } catch (error) {
@@ -196,6 +208,21 @@ router.get('/reminders/active', authenticateRequest, async (req, res) => {
   } catch (error) {
     console.error('List reminders failed:', error);
     return res.status(500).json({ error: 'Could not load reminders.' });
+  }
+});
+
+/**
+ * The Memory screen: captures that produced a note, each with the memories and
+ * reminders it created. Read-only.
+ */
+router.get('/captures', authenticateRequest, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).user.id;
+  try {
+    const captures = await listCaptureNotes(userId);
+    return res.json({ success: true, captures });
+  } catch (error) {
+    console.error('List captures failed:', error);
+    return res.status(500).json({ error: 'Could not load your notes.' });
   }
 });
 
