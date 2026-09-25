@@ -171,7 +171,7 @@ router.post('/interpret', authenticateRequest, async (req, res) => {
     // best-effort — the actions above are the real work, and a note write must
     // never fail the response.
     if (interpretation.note) {
-      await attachNote(capture.id, interpretation.note);
+      await attachNote(userId, capture.id, interpretation.note);
     }
 
     return res.status(200).json({

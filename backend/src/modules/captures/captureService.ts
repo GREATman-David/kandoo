@@ -64,12 +64,14 @@ export async function createCapture(
  * The caller logs; the capture keeps its verbatim text regardless.
  */
 export async function attachNote(
+  userId: string,
   captureId: string,
   note: KandooNote
 ): Promise<void> {
   const { error } = await supabase
     .from('captures')
     .update({ note })
+    .eq('user_id', userId)
     .eq('id', captureId);
 
   if (error) {

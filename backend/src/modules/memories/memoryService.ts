@@ -141,23 +141,31 @@ export async function deleteMemory(
   userId: string,
   memoryId: string
 ): Promise<void> {
+  // Delete the memory scoped to its owner FIRST, and only touch its links once
+  // that has proved the memory is the caller's. memory_entities has no user_id
+  // column, so ownership can only be established through the memories row — and
+  // since service-role bypasses RLS, that scoping is the one thing stopping a
+  // request from stripping another user's links by guessing a memory id.
+  const { data: deleted, error } = await supabase
+    .from('memories')
+    .delete()
+    .eq('user_id', userId)
+    .eq('id', memoryId)
+    .select('id');
+
+  if (error) {
+    console.error('Memory delete failed:', error);
+    throw new Error('Failed to delete memory.');
+  }
+  // Not the caller's (or already gone): never touch links we don't own.
+  if (!deleted || deleted.length === 0) return;
+
   const linkResult = await supabase
     .from('memory_entities')
     .delete()
     .eq('memory_id', memoryId);
   if (linkResult.error) {
     console.error('Removing memory entity links failed:', linkResult.error);
-  }
-
-  const { error } = await supabase
-    .from('memories')
-    .delete()
-    .eq('user_id', userId)
-    .eq('id', memoryId);
-
-  if (error) {
-    console.error('Memory delete failed:', error);
-    throw new Error('Failed to delete memory.');
   }
 }
 

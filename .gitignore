@@ -46,10 +46,16 @@ example
 
 # local dev/test scratch
 .gradle-build.log
+.gradle-*.log
 .metro.log
+nul
 backend/.dev-server.log
 backend/.test-*.cjs
 backend/.backfill.ts
+
+# Firebase config carries keys and is per-developer — provide your own locally.
+# It is still needed on disk for `expo prebuild` (app.config references it).
+/google-services.json
 
 # local launcher scripts (hard-code a machine path); keep dev.bat.example
 *.bat

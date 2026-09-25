@@ -52,9 +52,13 @@ async function memoriesForEntities(
   const byEntity = new Map<string, MemoryRow[]>();
   if (entityIds.length === 0) return byEntity;
 
+  // Scope through the joined memory's owner. `!inner` drops any link whose memory
+  // isn't the caller's, so even a foreign entity id can never surface another
+  // user's memory content — service-role bypasses RLS, so this filter is the guard.
   const { data, error } = await supabase
     .from('memory_entities')
-    .select('entity_id, memories(id, content, person, created_at, capture_id)')
+    .select('entity_id, memories!inner(id, content, person, created_at, capture_id)')
+    .eq('memories.user_id', userId)
     .in('entity_id', entityIds);
 
   if (error) {
@@ -73,22 +77,25 @@ async function memoriesForEntities(
     list.push(mem);
     byEntity.set(row.entity_id, list);
   }
-  void userId;
   return byEntity;
 }
 
 async function remindersForEntities(
+  userId: string,
   entityIds: string[]
 ): Promise<Map<string, ReminderRow[]>> {
   const byEntity = new Map<string, ReminderRow[]>();
   if (entityIds.length === 0) return byEntity;
 
   try {
+    // Same ownership scoping as memoriesForEntities: `!inner` on the caller's
+    // reminders so a foreign entity id can't pull in another user's reminders.
     const { data, error } = await supabase
       .from('reminder_entities')
       .select(
-        'entity_id, reminders(id, task, status, due_at, created_at, capture_id)'
+        'entity_id, reminders!inner(id, task, status, due_at, created_at, capture_id)'
       )
+      .eq('reminders.user_id', userId)
       .in('entity_id', entityIds);
     if (error) throw error;
 
@@ -144,7 +151,7 @@ export async function listPeople(userId: string): Promise<PersonSummary[]> {
   const ids = rows.map((e) => e.id);
   const [mems, rems] = await Promise.all([
     memoriesForEntities(userId, ids),
-    remindersForEntities(ids),
+    remindersForEntities(userId, ids),
   ]);
 
   // noteCount must mean "captures that actually have a note", the same thing
@@ -215,7 +222,7 @@ export async function getPerson(
 
   const [mems, rems] = await Promise.all([
     memoriesForEntities(userId, [personId]),
-    remindersForEntities([personId]),
+    remindersForEntities(userId, [personId]),
   ]);
   const memories = (mems.get(personId) ?? []).sort((a, b) =>
     b.created_at.localeCompare(a.created_at)
@@ -280,6 +287,22 @@ export async function mergePeople(
   if (!survivor) throw new Error('Survivor person not found.');
   const survivorName = (survivor as { name: string }).name;
 
+  // Validate EVERY other id belongs to the caller before any read or write —
+  // not just the final delete. Otherwise a request could pass another user's
+  // entity ids and have their memory links moved onto, and content exposed
+  // under, the caller's survivor (service-role bypasses RLS). If any id isn't
+  // the caller's, reject the whole merge rather than operate on a subset.
+  const { data: ownedRows } = await supabase
+    .from('entities')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('kind', 'person')
+    .in('id', others);
+  const owned = new Set(((ownedRows ?? []) as { id: string }[]).map((r) => r.id));
+  if (owned.size !== others.length) {
+    throw new Error('Those people are not yours to merge.');
+  }
+
   // Move memory links.
   const { data: mLinks } = await supabase
     .from('memory_entities')
@@ -295,7 +318,11 @@ export async function mergePeople(
         memoryIds.map((memory_id) => ({ memory_id, entity_id: survivorId })),
         { onConflict: 'memory_id,entity_id', ignoreDuplicates: true }
       );
-    await supabase.from('memories').update({ person: survivorName }).in('id', memoryIds);
+    await supabase
+      .from('memories')
+      .update({ person: survivorName })
+      .eq('user_id', userId)
+      .in('id', memoryIds);
   }
 
   // Move reminder links (skip quietly if the table isn't migrated).
@@ -314,7 +341,11 @@ export async function mergePeople(
           reminderIds.map((reminder_id) => ({ reminder_id, entity_id: survivorId })),
           { onConflict: 'reminder_id,entity_id', ignoreDuplicates: true }
         );
-      await supabase.from('reminders').update({ person: survivorName }).in('id', reminderIds);
+      await supabase
+        .from('reminders')
+        .update({ person: survivorName })
+        .eq('user_id', userId)
+        .in('id', reminderIds);
     }
   } catch (error) {
     console.warn('Merge reminder links skipped (migration 004?):', error);
