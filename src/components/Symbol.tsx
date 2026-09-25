@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
   AccessibilityInfo,
-  Image,
   StyleSheet,
   View,
   type ViewStyle,
@@ -16,9 +15,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { colors, duration, radius, shadow } from '@/theme/theme';
-
-const MARK = require('@/assets/images/mark-template.png');
+import { colors, duration, radius, shadow, withOpacity } from '@/theme/theme';
 
 export type SymbolState =
   | 'idle'
@@ -34,62 +31,71 @@ export type SymbolProps = {
 };
 
 /**
- * The Mmere Dane path, kept as the canonical geometry even though we render a
- * PNG right now. react-native-svg's Fabric ViewManagers don't register on RN
- * 0.86 ("Can't find ViewManager 'RNSVGPath'"), so the mark is drawn as a
- * white template PNG tinted per state — assets/images/mark-template.png is
- * rasterised from exactly this path. When react-native-svg is fixed, swap the
- * <Image> below back to <Svg><Path d={MMERE_DANE_PATH} .../></Svg> and it's a
- * ten-minute change. Do not delete this.
+ * The mark — Adinkrahene, concentric rings signifying leadership. Its ring
+ * colours are FIXED brand colours in every state (dark-brown outer, olive-gold
+ * ring, amber core, cream gaps): the mark itself never recolours. State is
+ * carried entirely by the GLOW behind it and its MOTION — a listening orange
+ * glow with a pulse, an understanding amber glow with a breath, a still and
+ * glowless remembered, a calm and glowless idle. Never deform it: uniform scale,
+ * glow and opacity only.
+ *
+ * Ring geometry as fractions of `size`, sampled from the canonical asset:
+ * outer ring 0.79..1.00, middle ring 0.40..0.60, core 0..0.21 of the radius.
  */
-export const MMERE_DANE_PATH =
-  'M23.83 0.00 L2.71 22.04 L0.00 28.75 L7.00 37.00 L11.71 35.54 L22.67 23.50 L28.38 29.00 L30.38 33.96 L17.21 47.50 L16.46 50.25 L30.38 66.00 L30.29 68.29 L22.67 76.46 L11.71 64.42 L7.00 62.96 L0.71 68.67 L0.00 73.96 L23.83 99.96 L28.38 97.75 L40.12 83.54 L42.96 85.92 L44.33 94.17 L47.38 99.33 L53.58 98.38 L57.00 85.92 L59.83 83.54 L71.58 97.75 L76.12 99.96 L97.25 77.92 L99.96 71.21 L92.96 62.96 L88.25 64.42 L77.29 76.46 L71.58 70.96 L69.58 66.00 L82.75 52.46 L83.50 49.71 L69.58 33.96 L69.67 31.67 L77.29 23.50 L88.25 35.54 L92.96 37.00 L99.25 31.29 L99.96 26.00 L76.12 0.00 L71.58 2.21 L59.83 16.42 L57.00 14.04 L55.62 5.79 L52.58 0.62 L46.38 1.58 L42.96 14.04 L40.12 16.42 L28.38 2.21 Z M48.71 34.92 L51.42 35.00 L56.88 40.67 L57.00 41.58 L63.50 48.21 L63.54 48.96 L63.96 49.46 L63.96 50.50 L63.54 51.00 L63.50 51.75 L57.00 58.38 L56.88 59.29 L51.25 65.04 L48.54 64.96 L43.08 59.29 L42.96 58.38 L36.46 51.75 L36.42 51.00 L36.00 50.50 L36.00 49.46 L36.42 48.96 L36.46 48.21 L42.96 41.58 L43.08 40.67 Z';
+const OUTER_BORDER = 0.07;
+const MIDDLE_DIAMETER = 0.72;
+const MIDDLE_BORDER = 0.19;
+const CORE_DIAMETER = 0.22;
+
+type Motion = 'breathe' | 'pulse' | 'moment' | 'still';
 
 type StateStyle = {
-  /** The tint applied to the white template. Its former SVG fill. */
-  tint: string;
   ground: string | null;
   glow: ViewStyle | null;
+  motion: Motion;
   label: string;
 };
 
 const STATES: Record<SymbolState, StateStyle> = {
-  idle: { tint: colors.inkFaint, ground: null, glow: null, label: 'Kandoo is idle' },
+  idle: { ground: null, glow: null, motion: 'breathe', label: 'Kandoo is idle' },
   listening: {
-    tint: colors.live,
-    ground: colors.liveWash,
+    // A low-opacity live-orange wash reads orange on cream; the fixed liveWash
+    // token washed out to pink at this size.
+    ground: withOpacity(colors.live, 0.15),
     glow: shadow.live,
+    motion: 'pulse',
     label: 'Kandoo is listening',
   },
   understanding: {
-    tint: colors.accent,
     ground: null,
     glow: shadow.accent,
+    motion: 'breathe',
     label: 'Kandoo is working it out',
   },
   remembered: {
-    tint: colors.settled,
     ground: null,
     glow: null,
+    motion: 'still',
     label: 'Kandoo remembered this',
   },
   moment: {
-    tint: colors.accent,
     ground: null,
     glow: shadow.accent,
+    motion: 'moment',
     label: 'Kandoo has something for you',
   },
   alarm: {
-    tint: colors.ink,
     ground: colors.alarm,
     glow: { ...shadow.live, shadowColor: colors.alarm, shadowOpacity: 0.45 },
+    motion: 'breathe',
     label: 'Kandoo needs your attention',
   },
 };
 
-const BREATH_SCALE = 1.07;
-const PULSE_SCALE = 1.12;
-const ALARM_BREATH = 1100;
+const BREATH_SCALE = 1.05;
+const PULSE_SCALE = 1.1;
+const MOMENT_SCALE = 1.12;
+const PULSE_MS = 900;
 
 /** The ground circle reads as a wash around the mark, not a tight disc. */
 const GROUND_RATIO = 1.45;
@@ -113,45 +119,51 @@ export function KandooSymbol({ state, size }: SymbolProps) {
     };
   }, []);
 
+  const { motion } = STATES[state];
+
   useEffect(() => {
     cancelAnimation(scale);
 
-    // Reduced motion holds the state colour and drops the movement entirely.
-    // Remembered is deliberately still: stillness is the payoff.
-    if (reduceMotion || state === 'remembered') {
+    // Reduced motion, and the deliberately still states, hold flat.
+    if (reduceMotion || motion === 'still') {
       scale.value = 1;
       return;
     }
 
     const easing = Easing.inOut(Easing.ease);
 
-    if (state === 'moment') {
+    if (motion === 'moment') {
       // Two pulses, then rest. Not a loop.
       const pulse = withSequence(
-        withTiming(PULSE_SCALE, { duration: 320, easing }),
+        withTiming(MOMENT_SCALE, { duration: 320, easing }),
         withTiming(1, { duration: 480, easing })
       );
       scale.value = withSequence(pulse, pulse);
       return;
     }
 
-    const breath = state === 'alarm' ? ALARM_BREATH : duration.breath;
+    // Listening pulses (livelier, faster); everything else breathes slowly.
+    const peak = motion === 'pulse' ? PULSE_SCALE : BREATH_SCALE;
+    const period = motion === 'pulse' ? PULSE_MS : duration.breath;
     scale.value = withRepeat(
       withSequence(
-        withTiming(BREATH_SCALE, { duration: breath / 2, easing }),
-        withTiming(1, { duration: breath / 2, easing })
+        withTiming(peak, { duration: period / 2, easing }),
+        withTiming(1, { duration: period / 2, easing })
       ),
       -1,
       false
     );
-  }, [state, reduceMotion, scale]);
+  }, [motion, reduceMotion, scale]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
 
-  const { tint, ground, glow, label } = STATES[state];
+  const { ground, glow, label } = STATES[state];
   const groundSize = size * GROUND_RATIO;
+
+  const middle = size * MIDDLE_DIAMETER;
+  const core = size * CORE_DIAMETER;
 
   return (
     <View
@@ -176,12 +188,39 @@ export function KandooSymbol({ state, size }: SymbolProps) {
       ) : null}
 
       <Animated.View style={animatedStyle}>
-        {/* White template tinted per state — see MMERE_DANE_PATH above. */}
-        <Image
-          source={MARK}
-          style={{ width: size, height: size, tintColor: tint }}
-          resizeMode="contain"
-        />
+        {/* Fixed brand colours; gaps fall through to the cream ground. */}
+        <View
+          style={{
+            width: size,
+            height: size,
+            borderRadius: radius.full,
+            borderWidth: size * OUTER_BORDER,
+            borderColor: colors.markOuter,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <View
+            style={{
+              width: middle,
+              height: middle,
+              borderRadius: radius.full,
+              borderWidth: size * MIDDLE_BORDER,
+              borderColor: colors.markRing,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <View
+              style={{
+                width: core,
+                height: core,
+                borderRadius: radius.full,
+                backgroundColor: colors.markCore,
+              }}
+            />
+          </View>
+        </View>
       </Animated.View>
     </View>
   );

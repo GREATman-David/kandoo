@@ -51,7 +51,6 @@ type Seed = MemorySeed | ReminderSeed;
  */
 const SEED: Seed[] = [
   // --- Work ---
-  { kind: 'memory', daysAgo: 33, hour: 11, content: 'Jed pushed the API migration to Q1 because of the vendor issue.', person: 'Jed', topics: ['work', 'api migration'] },
   { kind: 'memory', daysAgo: 33, hour: 11, content: 'The budget for the platform team got cut by fifteen percent this year.', topics: ['work', 'budget'] },
   { kind: 'memory', daysAgo: 21, hour: 15, content: 'Priya owns the vendor migration now, not me.', person: 'Priya', topics: ['work', 'ownership'] },
   { kind: 'memory', daysAgo: 12, hour: 9, content: 'Standup moved to 9:30 so the New York team can join.', topics: ['work', 'schedule'] },
@@ -87,6 +86,18 @@ const SEED: Seed[] = [
  * Spread across the six weeks; two land older than a week.
  */
 const RECAPS: { daysAgo: number; hour: number; text: string }[] = [
+  {
+    // The Jed standup, so People's Jed matches the design frame: three memories
+    // clearly attributed to Jed, one Jed reminder, and one note.
+    daysAgo: 0,
+    hour: 9,
+    text:
+      'Just came out of the standup with Jed. First, Jed is pushing the API ' +
+      'migration to Q1 because of the vendor issue. Second, Jed is taking two ' +
+      'weeks off in December for the holidays. Third, Jed prefers we review the ' +
+      'spec together before it goes out to the client. Remind me to send Jed ' +
+      'the revised timeline on Friday morning.',
+  },
   {
     daysAgo: 34,
     hour: 16,

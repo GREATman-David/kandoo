@@ -18,10 +18,9 @@ export type BrandIntroProps = {
   onDone: () => void;
 };
 
-const AnimatedImage = Animated.createAnimatedComponent(Image);
-// White template tinted per phase (base -> ink, pulsing accent, settled).
-// react-native-svg's Fabric ViewManagers don't register on RN 0.86, so the
-// mark is a PNG; the canonical geometry lives in Symbol.tsx (MMERE_DANE_PATH).
+// The Adinkrahene mark in its fixed brand colours — the same PNG the native
+// splash shows, so the handoff is seamless. It is never tinted; the intro's
+// state is the halo glow, the scale pulse and the words drawing in.
 const MARK = require('@/assets/images/mark-template.png');
 
 const WORDMARK = 'Kandoo';
@@ -65,9 +64,7 @@ const T_LETTER_GAP = 55;
 const T_MOTTO = 3250;
 const T_EXIT = 4300;
 
-const GROUND_FADE = 500;
 const SHRINK_MS = 650;
-const RECOLOUR_MS = 400;
 const SURFACE_MS = 420;
 const DRIFT_MS = 900;
 const PULL_MS = 420;
@@ -107,11 +104,9 @@ type Timer = ReturnType<typeof setTimeout>;
 export function BrandIntro({ onDone }: BrandIntroProps) {
   const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
 
-  const ground = useSharedValue(0);
   const markScale = useSharedValue(1);
   const markLift = useSharedValue(0);
   const markHit = useSharedValue(0);
-  const markFill = useSharedValue<string>(colors.base);
   const halo = useSharedValue(0);
   const words = useSharedValue(0);
   const motto = useSharedValue(0);
@@ -152,24 +147,20 @@ export function BrandIntro({ onDone }: BrandIntroProps) {
     };
 
     if (reduceMotion) {
-      ground.value = 1;
       markScale.value = SHRINK;
       markLift.value = 1;
-      markFill.value = colors.settled;
       words.value = withTiming(1, { duration: REDUCED_FADE });
       motto.value = withTiming(1, { duration: REDUCED_FADE });
       at(REDUCED_FADE + REDUCED_HOLD, onDone);
       return () => timers.forEach(clearTimeout);
     }
 
-    // 700 — splash handoff: ground fades, mark shrinks and recedes.
+    // 700 — splash handoff: mark shrinks and recedes on the steady cream ground.
     at(T_HANDOFF, () => {
-      ground.value = withTiming(1, { duration: GROUND_FADE });
       markScale.value = withTiming(SHRINK, {
         duration: SHRINK_MS,
         easing: EASE_HANDOFF,
       });
-      markFill.value = withTiming(colors.inkFaint, { duration: RECOLOUR_MS });
     });
 
     fragments.forEach((fragment, i) => {
@@ -194,12 +185,8 @@ export function BrandIntro({ onDone }: BrandIntroProps) {
         });
       });
 
-      // The mark brightens as each one lands, then relaxes.
+      // The mark pulses — a glow and a beat of scale — as each fragment lands.
       at(T_PULL + i * T_PULL_GAP + T_LAND_AFTER_PULL, () => {
-        markFill.value = withSequence(
-          withTiming(colors.accent, { duration: 80 }),
-          withTiming(colors.inkFaint, { duration: HIT_MS })
-        );
         markHit.value = withSequence(
           withTiming(1, { duration: 80 }),
           withTiming(0, { duration: HIT_MS })
@@ -213,7 +200,6 @@ export function BrandIntro({ onDone }: BrandIntroProps) {
 
     // 2550 — everything absorbed; the mark settles, lifts, and goes still.
     at(T_SETTLE, () => {
-      markFill.value = withTiming(colors.settled, { duration: RECOLOUR_MS });
       markLift.value = withTiming(1, { duration: SETTLE_MS, easing: EASE });
     });
 
@@ -239,8 +225,10 @@ export function BrandIntro({ onDone }: BrandIntroProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reduceMotion, onDone]);
 
+  // The ground is the cream base throughout: the native splash is already cream,
+  // so there is no colour handoff to animate — only the mark and words move.
   const groundStyle = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColorHex(ground.value, colors.accent, colors.base),
+    backgroundColor: colors.base,
   }));
 
   const stageStyle = useAnimatedStyle(() => ({
@@ -254,8 +242,6 @@ export function BrandIntro({ onDone }: BrandIntroProps) {
       { scale: markScale.value * (1 + (HIT_SCALE - 1) * markHit.value) },
     ],
   }));
-
-  const markTintStyle = useAnimatedStyle(() => ({ tintColor: markFill.value }));
 
   const haloStyle = useAnimatedStyle(() => ({
     opacity: 0.34 * halo.value,
@@ -283,13 +269,11 @@ export function BrandIntro({ onDone }: BrandIntroProps) {
           ))}
 
           <Animated.View style={[styles.markLayer, markStyle]}>
-            <AnimatedImage
+            {/* Fixed-colour mark — no tint; the fragment glow lives in the halo. */}
+            <Image
               source={MARK}
               resizeMode="contain"
-              style={[
-                { width: SPLASH_SIZE, height: SPLASH_SIZE },
-                markTintStyle,
-              ]}
+              style={{ width: SPLASH_SIZE, height: SPLASH_SIZE }}
             />
           </Animated.View>
 
@@ -314,25 +298,6 @@ export function BrandIntro({ onDone }: BrandIntroProps) {
       </Animated.View>
     </Animated.View>
   );
-}
-
-/**
- * Reanimated animates colour strings in withTiming, but interpolating between
- * two hex tokens inside a worklet needs a numeric driver. Mixes channel-wise.
- */
-function interpolateColorHex(t: number, from: string, to: string): string {
-  'worklet';
-  const a = parseInt(from.slice(1), 16);
-  const b = parseInt(to.slice(1), 16);
-  const mix = (shift: number) => {
-    const x = (a >> shift) & 0xff;
-    const y = (b >> shift) & 0xff;
-    return Math.round(x + (y - x) * t);
-  };
-  const r = mix(16);
-  const g = mix(8);
-  const bl = mix(0);
-  return `rgb(${r}, ${g}, ${bl})`;
 }
 
 type FragmentValues = {

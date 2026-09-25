@@ -1,5 +1,5 @@
 /**
- * The paywall line is memory depth: free recall reaches back 7 days, Pro reaches
+ * The paywall line is memory depth: free recall reaches back 10 days, Pro reaches
  * back forever. That boundary is enforced HERE, on the server, not on the device
  * — a client boolean is trivially spoofable, and memory depth is the whole
  * product. The device only presents the paywall; the server decides who is Pro.
@@ -89,7 +89,7 @@ async function resolveEntitlementId(
  * Whether this user currently holds the `kandoo_pro` entitlement. Fails CLOSED
  * (treated as free) on any misconfiguration or REST failure: a transient
  * RevenueCat outage must never hand out Pro, and free still answers the last
- * 7 days, so the user is never blocked — only asked to upgrade for older ones.
+ * 10 days, so the user is never blocked — only asked to upgrade for older ones.
  */
 export async function isProUser(userId: string): Promise<boolean> {
   const cached = proStatusCache.get(userId);

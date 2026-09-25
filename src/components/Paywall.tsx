@@ -98,8 +98,8 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
             <Text style={styles.eyebrow}>Kandoo Pro</Text>
             <Text style={styles.title}>Remember across all of time.</Text>
             <Text style={styles.blurb}>
-              Free recall reaches back a week. Pro reaches back forever — every
-              memory you’ve ever given Kandoo, whenever it matters.
+              Free Kandoo remembers the last ten days. Pro holds your whole
+              history — every memory you’ve ever given it, whenever it matters.
             </Text>
 
             {annual ? (

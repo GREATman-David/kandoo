@@ -6,7 +6,7 @@ export type CaptureInput = {
   text: string;
   clientTime: string;
   timezone: string;
-  source?: 'text' | 'voice';
+  source?: 'text' | 'voice' | 'manual';
   transcriptConfidence?: number | null;
 };
 
@@ -83,6 +83,7 @@ export type CaptureNote = {
   id: string;
   text: string;
   note: KandooNote | null;
+  source: string | null;
   created_at: string;
   memories: {
     id: string;
@@ -110,15 +111,25 @@ export type CaptureNote = {
  */
 export async function listCaptureNotes(
   userId: string,
-  limit = 30
+  opts: { limit?: number; notedOnly?: boolean; requireContent?: boolean } = {}
 ): Promise<CaptureNote[]> {
-  const { data: captures, error } = await supabase
+  const { limit = 30, notedOnly = true, requireContent = false } = opts;
+  let query = supabase
     .from('captures')
-    .select('id, text, note, created_at')
-    .eq('user_id', userId)
-    .not('note', 'is', null)
+    .select('id, text, note, source, created_at')
+    .eq('user_id', userId);
+  // Memory lists only captures that produced a note; Home ▸ Recently lists the
+  // most recent captures whether or not they did (a one-line reminder has none).
+  if (notedOnly) query = query.not('note', 'is', null);
+
+  // The Memory screen wants everything with substance — a note OR memories —
+  // but not bare recall queries. requireContent can't be a SQL filter (it
+  // depends on the memory join below), so over-fetch and filter after.
+  const fetchLimit = requireContent ? Math.min(limit * 3, 150) : limit;
+
+  const { data: captures, error } = await query
     .order('created_at', { ascending: false })
-    .limit(limit);
+    .limit(fetchLimit);
 
   if (error) {
     console.error('Listing capture notes failed:', error);
@@ -129,6 +140,7 @@ export async function listCaptureNotes(
     id: string;
     text: string;
     note: KandooNote | null;
+    source: string | null;
     created_at: string;
   }[];
   if (rows.length === 0) return [];
@@ -180,12 +192,138 @@ export async function listCaptureNotes(
     byCaptureReminders.set(r.capture_id as string, list);
   }
 
-  return rows.map((c) => ({
+  const mapped = rows.map((c) => ({
     id: c.id,
     text: c.text,
     note: c.note,
+    source: c.source,
     created_at: c.created_at,
     memories: byCaptureMemories.get(c.id) ?? [],
     reminders: byCaptureReminders.get(c.id) ?? [],
   }));
+
+  // Memory: keep only captures with a note or at least one memory (drop bare
+  // recall queries), then re-apply the caller's limit after the over-fetch.
+  if (requireContent) {
+    return mapped
+      .filter((c) => c.note !== null || c.memories.length > 0)
+      .slice(0, limit);
+  }
+  return mapped;
+}
+
+/** One capture with everything it produced — for the note-detail screen. */
+export async function getCaptureNote(
+  userId: string,
+  captureId: string
+): Promise<CaptureNote | null> {
+  const { data: capture, error } = await supabase
+    .from('captures')
+    .select('id, text, note, source, created_at')
+    .eq('user_id', userId)
+    .eq('id', captureId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Get capture failed:', error);
+    throw new Error('Failed to load that note.');
+  }
+  if (!capture) return null;
+
+  const [memoriesRes, remindersRes] = await Promise.all([
+    supabase
+      .from('memories')
+      .select('id, content, person, location, topics, created_at')
+      .eq('user_id', userId)
+      .eq('capture_id', captureId),
+    supabase
+      .from('reminders')
+      .select('id, task, person, due_at, place_hint, status, created_at')
+      .eq('user_id', userId)
+      .eq('capture_id', captureId),
+  ]);
+
+  if (memoriesRes.error) console.error('Capture memories query failed:', memoriesRes.error);
+  if (remindersRes.error) console.error('Capture reminders query failed:', remindersRes.error);
+
+  return {
+    id: capture.id as string,
+    text: capture.text as string,
+    note: (capture.note as CaptureNote['note']) ?? null,
+    source: (capture.source as string | null) ?? null,
+    created_at: capture.created_at as string,
+    memories: (memoriesRes.data ?? []) as CaptureNote['memories'],
+    reminders: (remindersRes.data ?? []) as CaptureNote['reminders'],
+  };
+}
+
+/**
+ * Edit a capture's note (title + body only). Unlike attachNote — which is
+ * best-effort during /interpret — an explicit edit must report failure, and it
+ * filters on user_id so a client can only ever touch its own capture. The
+ * memories the note was extracted into are deliberately untouched: editing the
+ * summary must not silently rewrite what Kandoo understood.
+ */
+export async function updateCaptureNote(
+  userId: string,
+  captureId: string,
+  note: KandooNote
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('captures')
+    .update({ note })
+    .eq('user_id', userId)
+    .eq('id', captureId)
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    console.error('Update capture note failed:', error);
+    throw new Error('Failed to update that note.');
+  }
+  if (!data) throw new Error('Note not found.');
+}
+
+/**
+ * Delete a capture and the memories it produced — the "whole item" a Memory row
+ * stands for. Reminders are detached (capture_id → null) rather than deleted:
+ * they own local notifications and their own lifecycle, so a note being removed
+ * must not silently cancel a reminder the user still relies on. Ordering the
+ * child writes first keeps this correct whether the FK cascades or restricts.
+ */
+export async function deleteCapture(
+  userId: string,
+  captureId: string
+): Promise<void> {
+  // Detach reminders so they survive and no FK is violated on delete.
+  const { error: detachError } = await supabase
+    .from('reminders')
+    .update({ capture_id: null })
+    .eq('user_id', userId)
+    .eq('capture_id', captureId);
+  if (detachError) {
+    console.error('Detaching reminders from capture failed:', detachError);
+    throw new Error('Failed to delete that note.');
+  }
+
+  // Remove the memories extracted from this capture (their entity links cascade).
+  const { error: memError } = await supabase
+    .from('memories')
+    .delete()
+    .eq('user_id', userId)
+    .eq('capture_id', captureId);
+  if (memError) {
+    console.error('Deleting capture memories failed:', memError);
+    throw new Error('Failed to delete that note.');
+  }
+
+  const { error } = await supabase
+    .from('captures')
+    .delete()
+    .eq('user_id', userId)
+    .eq('id', captureId);
+  if (error) {
+    console.error('Delete capture failed:', error);
+    throw new Error('Failed to delete that note.');
+  }
 }

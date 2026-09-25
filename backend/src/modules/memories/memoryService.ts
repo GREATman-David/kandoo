@@ -89,6 +89,125 @@ export async function createMemory(
 }
 
 /**
+ * Edit a memory's text. Re-embeds on save — without that, recall keeps matching
+ * the old wording while the screen shows the new one (the app quietly wrong,
+ * per the design doc). If the embedding call fails we still persist the new
+ * text and null the stale vector, so hybrid retrieval falls back to lexical
+ * rather than returning the OLD meaning; a backfill can refill the vector later.
+ */
+export async function updateMemory(
+  userId: string,
+  memoryId: string,
+  content: string
+): Promise<CreatedMemory> {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    throw new Error('Memory content cannot be empty.');
+  }
+
+  let embedding: number[] | null = null;
+  try {
+    const [vector] = await aiProvider.embed([trimmed], 'document');
+    embedding = vector ?? null;
+  } catch (error) {
+    console.error('Re-embedding failed; clearing stale vector:', error);
+  }
+
+  const { data, error } = await supabase
+    .from('memories')
+    .update({ content: trimmed, embedding })
+    .eq('user_id', userId)
+    .eq('id', memoryId)
+    .select('id, content, person, location, topics, created_at')
+    .maybeSingle();
+
+  if (error) {
+    console.error('Memory update failed:', error);
+    throw new Error('Failed to update memory.');
+  }
+  if (!data) {
+    throw new Error('Memory not found.');
+  }
+
+  return data as CreatedMemory;
+}
+
+/**
+ * Delete one memory. Removes its entity links first (best-effort) so People
+ * counts stay honest, then the row itself. Filtered by user_id — service_role
+ * bypasses RLS, so that filter is the only thing scoping it to the owner.
+ */
+export async function deleteMemory(
+  userId: string,
+  memoryId: string
+): Promise<void> {
+  const linkResult = await supabase
+    .from('memory_entities')
+    .delete()
+    .eq('memory_id', memoryId);
+  if (linkResult.error) {
+    console.error('Removing memory entity links failed:', linkResult.error);
+  }
+
+  const { error } = await supabase
+    .from('memories')
+    .delete()
+    .eq('user_id', userId)
+    .eq('id', memoryId);
+
+  if (error) {
+    console.error('Memory delete failed:', error);
+    throw new Error('Failed to delete memory.');
+  }
+}
+
+/**
+ * A memory typed by the user, not extracted. Still embedded (extraction off ≠
+ * embedding off) so recall can find it. `capture_id` ties it to its manual
+ * capture; `person`/`topics`/`location` are left null — the user gave prose,
+ * not structure.
+ */
+export async function createManualMemory(
+  userId: string,
+  captureId: string,
+  content: string
+): Promise<CreatedMemory> {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    throw new Error('Memory content cannot be empty.');
+  }
+
+  let embedding: number[] | null = null;
+  try {
+    const [vector] = await aiProvider.embed([trimmed], 'document');
+    embedding = vector ?? null;
+  } catch (error) {
+    console.error('Embedding manual memory failed; saving without vector:', error);
+  }
+
+  const { data, error } = await supabase
+    .from('memories')
+    .insert({
+      user_id: userId,
+      capture_id: captureId,
+      content: trimmed,
+      person: null,
+      location: null,
+      topics: [],
+      embedding,
+    })
+    .select('id, content, person, location, topics, created_at')
+    .single();
+
+  if (error) {
+    console.error('Manual memory insert failed:', error);
+    throw new Error('Failed to save memory.');
+  }
+
+  return data as CreatedMemory;
+}
+
+/**
  * One-off backfill for memories written before embeddings existed.
  * Run from a script, not from a request handler.
  */

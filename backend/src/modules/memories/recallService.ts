@@ -140,20 +140,20 @@ async function fallbackRecall(
   return items.slice(0, limit);
 }
 
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000;
 
 /**
  * Kandoo's voice at the paywall boundary. Never a hard "upgrade now" — it
  * answers what it can, then names Pro as the way to reach further back.
  */
 const PRO_MORE_LINE =
-  'There’s more from further back, but memories older than a week are part of Kandoo Pro.';
+  'There’s more from further back, but memories older than ten days are part of Kandoo Pro.';
 const PRO_ONLY_LINE =
-  'That’s from more than a week ago — older memories are part of Kandoo Pro.';
+  'That’s from more than ten days ago — older memories are part of Kandoo Pro.';
 
 /**
  * Recall answer, gated by memory depth. Free users are answered from the last
- * 7 days; when the question genuinely reaches older memories, the answer says
+ * 10 days; when the question genuinely reaches older memories, the answer says
  * so in Kandoo's voice and `proBoundaryHit` tells the device to raise the
  * paywall. Pro users are answered from everything. Enforcement is here, not on
  * the device — see entitlementService.
@@ -175,23 +175,29 @@ export async function answerRecall(
     return { answer, memories: all, proBoundaryHit: false };
   }
 
-  const cutoff = Date.now() - SEVEN_DAYS_MS;
-  const recent: RecallMemory[] = [];
-  let hasOlder = false;
-  for (const memory of all) {
+  const cutoff = Date.now() - TEN_DAYS_MS;
+  const isRecent = (memory: RecallMemory) => {
     const created = Date.parse(memory.created_at);
-    if (Number.isNaN(created) || created >= cutoff) {
-      recent.push(memory);
-    } else {
-      hasOlder = true;
-    }
-  }
+    return Number.isNaN(created) || created >= cutoff;
+  };
+  const recent = all.filter(isRecent);
 
-  if (!hasOlder) {
+  // `all` is ranked best-first, so array position IS relevance rank. The
+  // boundary should fire ONLY when an older memory would have outranked the
+  // recent ones we can show — i.e. the top match is older than the cutoff. If a
+  // recent memory is the most relevant, it already answers the question and
+  // nothing is being withheld, however many older rows also happened to match.
+  const firstOlder = all.findIndex((m) => !isRecent(m));
+  const firstRecent = all.findIndex(isRecent);
+  const olderOutranks =
+    firstOlder !== -1 && (firstRecent === -1 || firstOlder < firstRecent);
+
+  if (!olderOutranks) {
     const answer = await aiProvider.generateRecallAnswer(action.query, recent);
     return { answer, memories: recent, proBoundaryHit: false };
   }
 
+  // The most relevant match is older than the cutoff — it is genuinely withheld.
   if (recent.length === 0) {
     return { answer: PRO_ONLY_LINE, memories: [], proBoundaryHit: true };
   }

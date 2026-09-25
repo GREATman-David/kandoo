@@ -1,6 +1,10 @@
 import { supabase } from '../../services/supabase';
 import { aiProvider } from '../ai';
-import { resolveEntity } from '../entities/entityService';
+import {
+  linkReminderToEntities,
+  resolveEntities,
+  resolveEntity,
+} from '../entities/entityService';
 import { normalizeReminderTime } from './timeNormalizer';
 
 import type { ReminderAction } from '../ai/interpretationSchema';
@@ -22,6 +26,8 @@ export type CreatedReminder = {
   insistent: boolean;
   status: ReminderStatus;
   created_at: string;
+  /** Present on the reminders-tab list; used to open the parent note. */
+  capture_id?: string | null;
 };
 
 /**
@@ -105,7 +111,22 @@ export async function createReminder(
     throw new Error('Failed to create reminder.');
   }
 
-  return data as CreatedReminder;
+  const reminder = data as CreatedReminder;
+
+  // Link the people the same way createMemory does, so a reminder shows under a
+  // person's "What you promised" and moves across on a merge. Best-effort — a
+  // linking failure must not fail the reminder write.
+  try {
+    const people = await resolveEntities(userId, 'person', action.people);
+    await linkReminderToEntities(
+      reminder.id,
+      people.map((p) => p.id)
+    );
+  } catch (linkError) {
+    console.error('Reminder entity linking failed:', linkError);
+  }
+
+  return reminder;
 }
 
 /**
@@ -194,6 +215,182 @@ export async function setReminderStatus(
   if (error) {
     console.error('Reminder status update failed:', error);
     throw new Error('Failed to update reminder.');
+  }
+}
+
+const REMINDER_COLUMNS =
+  'id, task, person, due_at, place_hint, place_id, insistent, status, created_at, capture_id';
+
+/**
+ * The Reminders tab. Returns three lists; the DEVICE splits `active` into Today
+ * and Upcoming against its own local clock (§3.4 — time is a device fact, and a
+ * server grouping by "today" would be wrong in another timezone).
+ *   - needsReview: pending reminders (a dismissed review card left them unscheduled)
+ *   - active: confirmed reminders, soonest first
+ *   - history: fired / dismissed / cancelled, most recent first
+ * Reminders are NEVER filtered by age — one set five weeks ago for next Friday
+ * must still appear and fire.
+ */
+export async function listGroupedReminders(userId: string): Promise<{
+  needsReview: CreatedReminder[];
+  active: CreatedReminder[];
+  history: CreatedReminder[];
+}> {
+  const { data, error } = await supabase
+    .from('reminders')
+    .select(REMINDER_COLUMNS)
+    .eq('user_id', userId)
+    .order('due_at', { ascending: true, nullsFirst: false })
+    .limit(300);
+
+  if (error) {
+    console.error('List grouped reminders failed:', error);
+    throw new Error('Failed to load reminders.');
+  }
+
+  const all = (data ?? []) as CreatedReminder[];
+  const needsReview = all.filter((r) => r.status === 'pending');
+  const active = all.filter((r) => r.status === 'confirmed');
+  const history = all
+    .filter(
+      (r) =>
+        r.status === 'fired' ||
+        r.status === 'dismissed' ||
+        r.status === 'cancelled'
+    )
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 25);
+
+  return { needsReview, active, history };
+}
+
+/**
+ * A reminder the user creates by hand from the + button. No capture, no
+ * extraction: it is `confirmed` immediately and the device schedules it at once.
+ */
+export async function createManualReminder(
+  userId: string,
+  input: { task: string; dueAt: string | null; person: string | null }
+): Promise<CreatedReminder> {
+  const task = input.task.trim();
+  if (!task) throw new Error('Reminder task cannot be empty.');
+  if (!input.dueAt) throw new Error('A manual reminder needs a time.');
+
+  let embedding: number[] | null = null;
+  try {
+    const [vector] = await aiProvider.embed([task], 'document');
+    embedding = vector ?? null;
+  } catch (error) {
+    console.error('Embedding failed; saving manual reminder without vector:', error);
+  }
+
+  const { data, error } = await supabase
+    .from('reminders')
+    .insert({
+      user_id: userId,
+      capture_id: null,
+      task,
+      person: input.person?.trim() || null,
+      due_at: input.dueAt,
+      reminder_time: input.dueAt,
+      place_hint: null,
+      place_id: null,
+      insistent: false,
+      status: 'confirmed',
+      embedding,
+    })
+    .select(REMINDER_COLUMNS)
+    .single();
+
+  if (error) {
+    console.error('Create manual reminder failed:', error);
+    throw new Error('Failed to create reminder.');
+  }
+
+  const reminder = data as CreatedReminder;
+
+  if (input.person?.trim()) {
+    try {
+      const entity = await resolveEntity(userId, 'person', input.person);
+      if (entity) await linkReminderToEntities(reminder.id, [entity.id]);
+    } catch (linkError) {
+      console.error('Manual reminder entity linking failed:', linkError);
+    }
+  }
+
+  return reminder;
+}
+
+/**
+ * Edit a reminder (task, time, person) or change its status (done, snooze).
+ * A task edit re-embeds so recall keeps finding it by its new wording. The
+ * DEVICE reschedules/cancels the local notification after this returns — the
+ * server never touches notifications.
+ */
+export async function updateReminder(
+  userId: string,
+  reminderId: string,
+  patch: {
+    task?: string;
+    dueAt?: string | null;
+    person?: string | null;
+    status?: ReminderStatus;
+  }
+): Promise<CreatedReminder> {
+  const update: Record<string, unknown> = {};
+
+  if (patch.task !== undefined) {
+    const task = patch.task.trim();
+    if (!task) throw new Error('Reminder task cannot be empty.');
+    update.task = task;
+    try {
+      const [vector] = await aiProvider.embed([task], 'document');
+      update.embedding = vector ?? null;
+    } catch (error) {
+      console.error('Re-embedding edited reminder failed:', error);
+    }
+  }
+  if (patch.dueAt !== undefined) {
+    update.due_at = patch.dueAt;
+    update.reminder_time = patch.dueAt;
+  }
+  if (patch.person !== undefined) update.person = patch.person?.trim() || null;
+  if (patch.status !== undefined) update.status = patch.status;
+
+  if (Object.keys(update).length === 0) {
+    throw new Error('Nothing to update.');
+  }
+
+  const { data, error } = await supabase
+    .from('reminders')
+    .update(update)
+    .eq('id', reminderId)
+    .eq('user_id', userId)
+    .select(REMINDER_COLUMNS)
+    .single();
+
+  if (error) {
+    console.error('Update reminder failed:', error);
+    throw new Error('Failed to update reminder.');
+  }
+
+  return data as CreatedReminder;
+}
+
+/** Hard-delete a reminder. The device cancels its local notification after. */
+export async function deleteReminder(
+  userId: string,
+  reminderId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('reminders')
+    .delete()
+    .eq('id', reminderId)
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('Delete reminder failed:', error);
+    throw new Error('Failed to delete reminder.');
   }
 }
 

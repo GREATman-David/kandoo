@@ -14,16 +14,19 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { AccountSheet } from '@/components/AccountSheet';
+import { NoteDetail } from '@/components/NoteDetail';
 import { Paywall } from '@/components/Paywall';
 import { ReviewSheet } from '@/components/ReviewSheet';
 import { KandooSymbol } from '@/components/Symbol';
-import { useHome, type RecentItem } from '@/features/Home/useHome';
-import { useReminderSync } from '@/features/reminders/useReminderSync';
 import {
-  configurePurchases,
-  identifyUser,
-  resetPurchasesUser,
-} from '@/services/purchases';
+  useHome,
+  type HomeState,
+  type RecentItem,
+} from '@/features/Home/useHome';
+import { useReminderSync } from '@/features/reminders/useReminderSync';
+import { useEntitlement } from '@/hooks/useEntitlement';
+import { configurePurchases, identifyUser } from '@/services/purchases';
 import type {
   InterpretResult,
   InterpretationResponse,
@@ -33,7 +36,16 @@ import { formatDueDate } from '@/utils/formatDueDate';
 
 import AuthScreen from '../features/Auth/AuthScreen';
 import { useAuth } from '../features/Auth/useAuth';
-import { signOut } from '../services/authService';
+
+/** Free recall reaches back ten days; older Recently rows open the paywall. */
+const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000;
+const isLocked = (createdAt: string) =>
+  Date.now() - Date.parse(createdAt) > TEN_DAYS_MS;
+
+/** The mark has no 'answered' state; recall reuses the understanding mark. */
+function symbolFor(state: HomeState) {
+  return state === 'answered' ? 'understanding' : state;
+}
 
 export default function HomeScreen() {
   const { loading, isAuthenticated, user } = useAuth();
@@ -73,17 +85,37 @@ const CHIP_TEXT_LIMIT = 48;
  */
 function KandooHome() {
   const home = useHome();
+  const entitlement = useEntitlement();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [noteId, setNoteId] = useState<string | null>(null);
 
   // Set up notification channels/permissions and rebuild the local schedule
   // from the server's active reminders. Replaces the retired server-push path.
   useReminderSync(true);
 
+  // A Recently row opens its note — unless the capture is older than the free
+  // window, in which case it opens the paywall (the row still looks normal).
+  const openRecent = (item: RecentItem) => {
+    if (isLocked(item.createdAt)) home.openPaywall();
+    else setNoteId(item.id);
+  };
+
   return (
     <View style={styles.screen}>
       <View style={styles.topBar}>
-        <Text style={styles.brand}>Kandoo</Text>
-        <Text style={styles.brand}>●</Text>
+        <Text style={styles.wordmark}>Kandoo</Text>
+        <Pressable
+          style={styles.badge}
+          onPress={() => setAccountOpen(true)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Account"
+        >
+          <Text style={styles.badgeText}>
+            {entitlement.isPro ? 'Kandoo Pro' : 'Free'}
+          </Text>
+        </Pressable>
       </View>
 
       <View style={styles.symbol}>
@@ -109,7 +141,7 @@ function KandooHome() {
           }
           hitSlop={12}
         >
-          <KandooSymbol state={home.state} size={SYMBOL_SIZE} />
+          <KandooSymbol state={symbolFor(home.state)} size={SYMBOL_SIZE} />
         </Pressable>
       </View>
 
@@ -170,7 +202,9 @@ function KandooHome() {
           </View>
         ) : null}
 
-        {home.state === 'idle' ? <Idle recent={home.recent} /> : null}
+        {home.state === 'idle' ? (
+          <Idle recent={home.recent} onSelect={openRecent} />
+        ) : null}
 
         {home.state === 'listening' ? (
           <Listening
@@ -201,6 +235,10 @@ function KandooHome() {
             onEdit={() => setSheetOpen(true)}
           />
         ) : null}
+
+        {home.state === 'answered' && home.response ? (
+          <Answered response={home.response} onDone={home.done} />
+        ) : null}
       </ScrollView>
 
       {home.response ? (
@@ -217,7 +255,24 @@ function KandooHome() {
       <Paywall
         visible={home.paywallVisible}
         onClose={home.closePaywall}
-        onPurchased={home.onProUnlocked}
+        onPurchased={() => {
+          entitlement.refresh();
+          home.onProUnlocked();
+        }}
+      />
+
+      <AccountSheet
+        visible={accountOpen}
+        isPro={entitlement.isPro}
+        onClose={() => setAccountOpen(false)}
+        onGetPro={home.openPaywall}
+        onEntitlementChange={entitlement.refresh}
+      />
+
+      <NoteDetail
+        captureId={noteId}
+        visible={noteId !== null}
+        onClose={() => setNoteId(null)}
       />
     </View>
   );
@@ -227,39 +282,37 @@ function KandooHome() {
 
 type IdleProps = {
   recent: RecentItem[];
+  onSelect: (item: RecentItem) => void;
 };
 
-function Idle({ recent }: IdleProps) {
-  return (
-    <>
-      {recent.length > 0 ? (
-        <View style={styles.recent}>
-          <Text style={styles.eyebrow}>Recently</Text>
-          {recent.map((item) => (
-            <View key={item.id} style={styles.recentRow}>
-              <Text style={styles.recentSummary} numberOfLines={1}>
-                {item.summary}
-              </Text>
-              <Text style={styles.recentMeta}>{describeCounts(item)}</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
+function Idle({ recent, onSelect }: IdleProps) {
+  if (recent.length === 0) {
+    return (
+      <View style={styles.empty}>
+        <Text style={styles.emptyLine}>Nothing yet.</Text>
+        <Text style={styles.emptyHelp}>
+          Tell Kandoo about your day and it’ll remember.
+        </Text>
+      </View>
+    );
+  }
 
-      <Pressable
-        style={styles.signOut}
-        onPress={() => {
-          // Detach the RevenueCat customer first so the next account that signs
-          // in on this device doesn't inherit this one's entitlement.
-          void resetPurchasesUser();
-          signOut().catch((error: unknown) => {
-            console.error('Sign out failed:', error);
-          });
-        }}
-      >
-        <Text style={styles.signOutText}>Sign out</Text>
-      </Pressable>
-    </>
+  return (
+    <View style={styles.recent}>
+      <Text style={styles.eyebrow}>Recently</Text>
+      {recent.map((item) => (
+        <Pressable
+          key={item.id}
+          style={styles.recentRow}
+          onPress={() => onSelect(item)}
+        >
+          <Text style={styles.recentSummary} numberOfLines={1}>
+            {item.summary}
+          </Text>
+          <Text style={styles.recentMeta}>{describeCounts(item)}</Text>
+        </Pressable>
+      ))}
+    </View>
   );
 }
 
@@ -532,6 +585,53 @@ function buildTicks(results: InterpretResult[]): string[] {
   return ticks.length > 0 ? ticks : ['Saved what you said'];
 }
 
+// ------------------------------------------------------------ Answered
+
+function recallAnswer(response: InterpretationResponse): string {
+  for (const result of response.results) {
+    if (result.kind === 'recall' && result.status === 'ok') return result.answer;
+  }
+  return response.summary ?? '';
+}
+
+type AnsweredProps = {
+  response: InterpretationResponse;
+  onDone: () => void;
+};
+
+/**
+ * Recall answers land here, not in Understanding. The answer fades in rather
+ * than snapping — the app's words arrive a beat slower than the user's, and
+ * that rhythm difference is how you know who is talking. (Source rows linking
+ * back to their notes need `capture_id` on the recall payload — a small backend
+ * follow-up; for now the answer stands alone.)
+ */
+function Answered({ response, onDone }: AnsweredProps) {
+  const answer = recallAnswer(response);
+  const shown = useSharedValue(0);
+
+  useEffect(() => {
+    shown.value = withTiming(1, { duration: 520 });
+  }, [shown]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: shown.value,
+    transform: [{ translateY: 6 * (1 - shown.value) }],
+  }));
+
+  return (
+    <>
+      <Text style={styles.eyebrow}>Here’s what you told me</Text>
+      <Animated.Text style={[styles.answerText, style]}>{answer}</Animated.Text>
+      <View style={styles.actions}>
+        <Pressable style={styles.btnPrimary} onPress={onDone}>
+          <Text style={styles.btnPrimaryText}>Done</Text>
+        </Pressable>
+      </View>
+    </>
+  );
+}
+
 // -------------------------------------------------------------- Styles
 
 const styles = StyleSheet.create({
@@ -556,6 +656,44 @@ const styles = StyleSheet.create({
   brand: {
     ...text.label,
     color: colors.inkMuted,
+  },
+  wordmark: {
+    ...text.displayL,
+    fontFamily: text.wordmark.fontFamily,
+    fontSize: 22,
+    color: colors.ink,
+  },
+  badge: {
+    backgroundColor: colors.accentWash,
+    borderRadius: radius.full,
+    paddingVertical: 3,
+    paddingHorizontal: spacing.space2,
+  },
+  badgeText: {
+    ...text.label,
+    color: colors.settled,
+  },
+  empty: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    marginTop: spacing.space8,
+  },
+  emptyLine: {
+    ...text.answer,
+    color: colors.inkMuted,
+    marginBottom: spacing.space2,
+  },
+  emptyHelp: {
+    ...text.body,
+    color: colors.inkFaint,
+    textAlign: 'center',
+    maxWidth: 260,
+  },
+  answerText: {
+    ...text.answer,
+    color: colors.ink,
+    alignSelf: 'stretch',
+    marginBottom: spacing.space3,
   },
   symbol: {
     alignItems: 'center',

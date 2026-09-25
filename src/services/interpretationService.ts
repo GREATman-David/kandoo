@@ -105,6 +105,8 @@ export type CreatedReminder = {
   insistent: boolean;
   status: ReminderStatus;
   created_at: string;
+  /** Present on the reminders-tab list; used to open the parent note. */
+  capture_id?: string | null;
 };
 
 export type CreatedMemory = {
@@ -124,7 +126,7 @@ export type InterpretResult =
       status: 'ok';
       answer: string;
       memories: unknown[];
-      /** The question reached past the free 7-day window; raise the paywall. */
+      /** The question reached past the free 10-day window; raise the paywall. */
       proBoundaryHit: boolean;
     }
   | {
@@ -165,6 +167,8 @@ export type CaptureNote = {
   id: string;
   text: string;
   note: { title: string; body: string } | null;
+  /** `manual` marks a note/memory the user typed themselves ("Written by you"). */
+  source: string | null;
   created_at: string;
   memories: CaptureNoteMemory[];
   reminders: CaptureNoteReminder[];
@@ -247,17 +251,319 @@ export async function fetchActiveReminders(): Promise<CreatedReminder[]> {
   return data.reminders ?? [];
 }
 
-/** The Memory screen: captures that produced a note, newest first. */
-export async function fetchCaptureNotes(): Promise<CaptureNote[]> {
+export type GroupedReminders = {
+  needsReview: CreatedReminder[];
+  active: CreatedReminder[];
+  history: CreatedReminder[];
+};
+
+/** The Reminders tab. The device splits `active` into Today/Upcoming locally. */
+export async function fetchGroupedReminders(): Promise<GroupedReminders> {
   const accessToken = await getAccessTokenOrThrow();
 
+  const data = await apiFetch<Partial<GroupedReminders>>(
+    '/reminders',
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    'Failed to load reminders.'
+  );
+
+  return {
+    needsReview: data.needsReview ?? [],
+    active: data.active ?? [],
+    history: data.history ?? [],
+  };
+}
+
+/** Manual reminder from the + button — created confirmed. Caller schedules it. */
+export async function createManualReminder(input: {
+  task: string;
+  dueAt: string;
+  person: string | null;
+}): Promise<CreatedReminder> {
+  const accessToken = await getAccessTokenOrThrow();
+
+  const data = await apiFetch<{ reminder: CreatedReminder }>(
+    '/reminders',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(input),
+    },
+    'Failed to create reminder.'
+  );
+
+  return data.reminder;
+}
+
+/** Edit task/time/person, or change status (done, snooze). Caller re-syncs the
+ *  local notification. */
+export async function updateReminder(
+  id: string,
+  patch: {
+    task?: string;
+    dueAt?: string | null;
+    person?: string | null;
+    status?: ReminderStatus;
+  }
+): Promise<CreatedReminder> {
+  const accessToken = await getAccessTokenOrThrow();
+
+  const data = await apiFetch<{ reminder: CreatedReminder }>(
+    `/reminders/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(patch),
+    },
+    'Failed to update reminder.'
+  );
+
+  return data.reminder;
+}
+
+export type PersonSummary = {
+  id: string;
+  name: string;
+  summary: string | null;
+  memoryCount: number;
+  reminderCount: number;
+  noteCount: number;
+  hasActiveReminder: boolean;
+  lastMentionedAt: string;
+};
+
+export type PersonMemory = {
+  id: string;
+  content: string;
+  person: string | null;
+  created_at: string;
+  capture_id: string | null;
+};
+
+export type PersonReminder = {
+  id: string;
+  task: string;
+  status: ReminderStatus;
+  due_at: string | null;
+  created_at: string;
+  capture_id: string | null;
+};
+
+export type PersonDetail = {
+  id: string;
+  name: string;
+  memories: PersonMemory[];
+  reminders: PersonReminder[];
+  notes: { id: string; title: string | null; created_at: string }[];
+};
+
+/** The People tab — one row per person, most recently mentioned first. */
+export async function fetchPeople(): Promise<PersonSummary[]> {
+  const accessToken = await getAccessTokenOrThrow();
+  const data = await apiFetch<{ people?: PersonSummary[] }>(
+    '/people',
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    'Failed to load people.'
+  );
+  return data.people ?? [];
+}
+
+export async function fetchPerson(id: string): Promise<PersonDetail | null> {
+  const accessToken = await getAccessTokenOrThrow();
+  const data = await apiFetch<{ person?: PersonDetail }>(
+    `/people/${encodeURIComponent(id)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    'Failed to load that person.'
+  );
+  return data.person ?? null;
+}
+
+/** Merge others into the survivor. The survivor keeps everything. */
+export async function mergePeople(
+  survivorId: string,
+  otherIds: string[]
+): Promise<void> {
+  const accessToken = await getAccessTokenOrThrow();
+  await apiFetch<unknown>(
+    '/people/merge',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ survivorId, otherIds }),
+    },
+    'Failed to merge those people.'
+  );
+}
+
+export async function deletePerson(id: string): Promise<void> {
+  const accessToken = await getAccessTokenOrThrow();
+  await apiFetch<unknown>(
+    `/people/${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+    'Failed to delete that person.'
+  );
+}
+
+/** Hard-delete a reminder. Caller cancels its local notification. */
+export async function deleteReminderById(id: string): Promise<void> {
+  const accessToken = await getAccessTokenOrThrow();
+
+  await apiFetch<unknown>(
+    `/reminders/${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+    'Failed to delete reminder.'
+  );
+}
+
+/**
+ * Captures newest-first. The Memory screen passes `{ requireContent: true }` to
+ * list everything with a note OR a memory (dropping bare recall queries); Home ▸
+ * Recently passes `{ limit: 3, notedOnly: false }` to include one-line captures.
+ */
+export async function fetchCaptureNotes(
+  opts: { limit?: number; notedOnly?: boolean; requireContent?: boolean } = {}
+): Promise<CaptureNote[]> {
+  const accessToken = await getAccessTokenOrThrow();
+
+  const params = new URLSearchParams();
+  if (opts.limit) params.set('limit', String(opts.limit));
+  if (opts.notedOnly === false) params.set('noted', 'false');
+  if (opts.requireContent) params.set('content', 'true');
+  const query = params.toString();
+
   const data = await apiFetch<{ captures?: CaptureNote[] }>(
-    '/captures',
+    `/captures${query ? `?${query}` : ''}`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
     'Failed to load notes.'
   );
 
   return data.captures ?? [];
+}
+
+/**
+ * Manual entry from the + button. Send a note, a memory, or both; Kandoo saves
+ * one `manual`-source capture and embeds the memory. Returns the assembled row.
+ */
+export async function createManualCapture(input: {
+  note?: { title: string; body: string };
+  memory?: { content: string };
+}): Promise<CaptureNote | null> {
+  const accessToken = await getAccessTokenOrThrow();
+
+  const clientTime = new Date().toISOString();
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  const data = await apiFetch<{ capture?: CaptureNote | null }>(
+    '/captures/manual',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ ...input, clientTime, timezone }),
+    },
+    'Could not save that.'
+  );
+
+  return data.capture ?? null;
+}
+
+/** Edit a memory's text; the backend re-embeds so recall matches the new words. */
+export async function updateMemory(
+  id: string,
+  content: string
+): Promise<CreatedMemory> {
+  const accessToken = await getAccessTokenOrThrow();
+
+  const data = await apiFetch<{ memory: CreatedMemory }>(
+    `/memories/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ content }),
+    },
+    'Could not update that memory.'
+  );
+
+  return data.memory;
+}
+
+/** Delete one memory. */
+export async function deleteMemoryById(id: string): Promise<void> {
+  const accessToken = await getAccessTokenOrThrow();
+  await apiFetch<unknown>(
+    `/memories/${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+    'Could not delete that memory.'
+  );
+}
+
+/** Edit a capture's note (title + body only; memories are left untouched). */
+export async function updateCaptureNote(
+  id: string,
+  note: { title: string; body: string }
+): Promise<void> {
+  const accessToken = await getAccessTokenOrThrow();
+  await apiFetch<unknown>(
+    `/captures/${encodeURIComponent(id)}/note`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(note),
+    },
+    'Could not update that note.'
+  );
+}
+
+/** Delete a capture (a note) and the memories it produced. */
+export async function deleteCaptureById(id: string): Promise<void> {
+  const accessToken = await getAccessTokenOrThrow();
+  await apiFetch<unknown>(
+    `/captures/${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+    'Could not delete that note.'
+  );
+}
+
+/** One capture with everything it produced — for the note-detail screen. */
+export async function fetchCaptureNote(id: string): Promise<CaptureNote | null> {
+  const accessToken = await getAccessTokenOrThrow();
+
+  const data = await apiFetch<{ capture?: CaptureNote }>(
+    `/captures/${encodeURIComponent(id)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    'Failed to load that note.'
+  );
+
+  return data.capture ?? null;
 }
 
 /** Dismiss a reminder server-side. The caller cancels its local notification. */

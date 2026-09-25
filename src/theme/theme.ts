@@ -3,43 +3,58 @@ import type { TextStyle } from 'react-native';
 import brand from './brand.json';
 
 /**
- * Kandoo design tokens — dark theme only (dark ships first; light values exist
- * in the source design system but are intentionally not wired up yet).
- * Source: Kandoo Design System v2, project/tokens.json.
+ * Kandoo design tokens — LIGHT / cream theme (the shipping theme).
+ * Source: Kandoo Design System v2, project/tokens.json. Contrast ratios below
+ * are measured against the light grounds (base #FBF6EF, surface #FFFFFF), NOT
+ * copied from the design system's notes — several of those cite the dark values.
  */
 
 export const colors = {
-  base: '#120409',
-  surface: '#1E0A10',
-  surfaceRaised: '#2A1017',
+  base: '#FBF6EF',
+  surface: '#FFFFFF',
+  surfaceRaised: '#F2E9DC',
   /** Identical in both themes — the brand moment has no light variant. */
   brandGround: '#39000D',
-  line: '#3A1C22',
-  ink: '#F7F0E6',
-  inkMuted: '#B5A79A',
-  /** Fails 4.5:1 by design. Placeholders and disabled labels only. */
-  inkFaint: '#7C6E64',
+  line: '#E4D8C8',
+  /** Primary text. 17.9:1 on base, 19.2:1 on surface. */
+  ink: '#1A0A0E',
+  /** Secondary text. 5.5:1 on base. */
+  inkMuted: '#6E625A',
+  /** 2.7:1 — fails 4.5:1 by design. Placeholders and disabled labels only. */
+  inkFaint: '#A2968B',
   /**
-   * ATTENTION. Never decorative. Lives in brand.json because app.config.ts
-   * needs it for the native splash and cannot import TypeScript on every
-   * Node version a judge might clone with.
+   * ATTENTION / primary action. Lives in brand.json because app.config.ts
+   * needs it and cannot import TypeScript on every Node version.
+   * Darkened from the design system's light #B06F00, which measures only
+   * 4.10:1 on white and 3.81:1 as a button label — below 4.5:1. This value is
+   * 4.5:1 on base, 4.9:1 on surface, so it reads as text and as a button.
    */
   accent: brand.accent,
-  accentWash: '#2E1A06',
-  /** LIVE. Capture is open. Nothing else. */
-  live: '#E05500',
-  liveWash: '#33120A',
-  /** SETTLED. Readable form. */
-  settled: '#A8940A',
-  /** Fills, dots and rails only — never text. */
+  accentWash: '#FBEFD8',
+  /** LIVE. Capture is open. Nothing else. 4.7:1 on base — passes as text. */
+  live: '#C04600',
+  liveWash: '#FCE7DA',
+  /** SETTLED. Readable form. 5.8:1 on base. */
+  settled: '#6E6105',
+  /** Fills, dots and rails only — never text (4.1:1 on base). */
   settledFill: '#897800',
-  settledWash: '#1E1C08',
-  /** 2.0:1 — FILL ONLY. Put ink on top of it. */
+  settledWash: '#F1EFDC',
+  /** FILL ONLY. Put ink on top of it; a saturated red fill on cream. */
   alarm: '#930000',
-  /** The readable form of alarm. Icons, large text, "guessed" warnings. */
-  alarmText: '#D94A2B',
-  /** The only cool hue, so a focus ring can never read as brand state. */
-  focus: '#7FC4FF',
+  /** The readable form of alarm. Icons, large text, "guessed" warnings. 6.7:1. */
+  alarmText: '#A32B12',
+  /** The only cool hue, so a focus ring can never read as brand state. 6.5:1. */
+  focus: '#0F5C99',
+
+  // The mark (Adinkrahene) is drawn in FIXED brand colours in both themes — its
+  // rings never take a state colour; state is carried by the glow and motion
+  // behind it. Sampled from the canonical asset.
+  /** Outer ring — dark warm brown. */
+  markOuter: '#2F241B',
+  /** Middle ring — olive-gold. */
+  markRing: '#8A6A00',
+  /** Centre core — amber. */
+  markCore: '#DA8F00',
 } as const;
 
 export type ColorName = keyof typeof colors;

@@ -3,11 +3,13 @@ import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   confirmReminder,
+  fetchCaptureNotes,
   interpretText,
+  type CaptureNote,
   type CreatedReminder,
   type InterpretResult,
   type InterpretationResponse,
@@ -22,16 +24,38 @@ import { scheduleReminder } from '@/services/localNotifications';
  *     ▲                                                                │
  *     └────────────────────────────────done──────────────────────────┘
  */
-export type HomeState = 'idle' | 'listening' | 'understanding' | 'remembered';
+export type HomeState =
+  | 'idle'
+  | 'listening'
+  | 'understanding'
+  | 'remembered'
+  | 'answered';
 
 export type RecentItem = {
   id: string;
   summary: string;
   reminders: number;
   memories: number;
+  /** Capture time, so an older-than-boundary row opens the paywall on tap. */
+  createdAt: string;
 };
 
 const RECENT_LIMIT = 3;
+
+function clip(value: string, max = 52): string {
+  const v = value.trim();
+  return v.length > max ? `${v.slice(0, max - 1).trimEnd()}…` : v;
+}
+
+function toRecentItem(capture: CaptureNote): RecentItem {
+  return {
+    id: capture.id,
+    summary: capture.note?.title ?? clip(capture.text),
+    reminders: capture.reminders.length,
+    memories: capture.memories.length,
+    createdAt: capture.created_at,
+  };
+}
 
 type OkReminder = Extract<InterpretResult, { kind: 'reminder'; status: 'ok' }>;
 
@@ -77,7 +101,7 @@ export function useHome() {
   const [recent, setRecent] = useState<RecentItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
-  // Raised when a recall answer reaches past the free 7-day window. The paywall
+  // Raised when a recall answer reaches past the free 10-day window. The paywall
   // appears at that boundary and nowhere else — never on launch.
   const [paywallVisible, setPaywallVisible] = useState(false);
 
@@ -109,6 +133,25 @@ export function useHome() {
     setTranscript(text);
   }
 
+  // Recently comes from the server (GET /captures?limit=3&noted=false), not
+  // memory — the old in-memory list was empty on every cold start, which is why
+  // Home looked bare. Best-effort: a failure just leaves Recently empty.
+  const loadRecent = useCallback(async () => {
+    try {
+      const captures = await fetchCaptureNotes({
+        limit: RECENT_LIMIT,
+        notedOnly: false,
+      });
+      setRecent(captures.map(toRecentItem));
+    } catch (caught) {
+      console.warn('Loading Recently failed:', caught);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRecent();
+  }, [loadRecent]);
+
   /**
    * Ask the backend what it heard. Reads the transcript from a ref so the
    * voice 'end' path and the typed path share one implementation. The symbol
@@ -128,6 +171,12 @@ export function useHome() {
     try {
       const result = await interpretText(text);
       setResponse(result);
+      // A recall question lands in ANSWERED (the answer streams in with its
+      // sources); a capture stays in UNDERSTANDING (chips + Remember).
+      const isRecall = result.results.some(
+        (r) => r.kind === 'recall' && r.status === 'ok'
+      );
+      setState(isRecall ? 'answered' : 'understanding');
       // The paywall is a recall-boundary event: it opens only when the answer
       // genuinely reached older, Pro-only memories.
       const reachedPro = result.results.some(
@@ -305,6 +354,7 @@ export function useHome() {
     await runInterpret();
   }, [voiceActive, runInterpret]);
 
+  const openPaywall = useCallback(() => setPaywallVisible(true), []);
   const closePaywall = useCallback(() => setPaywallVisible(false), []);
 
   /**
@@ -373,26 +423,9 @@ export function useHome() {
     setState('remembered');
   }, [response, busy]);
 
-  /** Back to idle. The capture joins the short list of recent items. */
+  /** Back to idle, and refresh Recently from the server so the new capture
+   *  (and its note) appears at the top. */
   const done = useCallback(() => {
-    if (response) {
-      const reminders = okReminders(response.results).length;
-      const memories = response.results.filter(
-        (r) => r.kind === 'memory' && r.status === 'ok'
-      ).length;
-      setRecent((current) =>
-        [
-          {
-            id: response.captureId,
-            summary: response.summary ?? submittedText.current,
-            reminders,
-            memories,
-          },
-          ...current,
-        ].slice(0, RECENT_LIMIT)
-      );
-    }
-
     setResponse(null);
     latest.current = '';
     committed.current = '';
@@ -401,7 +434,8 @@ export function useHome() {
     setPaywallVisible(false);
     submittedText.current = '';
     setState('idle');
-  }, [response]);
+    void loadRecent();
+  }, [loadRecent]);
 
   return {
     state,
@@ -413,6 +447,7 @@ export function useHome() {
     voiceActive,
     voiceSupported: VOICE_SUPPORTED,
     paywallVisible,
+    openPaywall,
     closePaywall,
     onProUnlocked,
     submittedText: submittedText.current,

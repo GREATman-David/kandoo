@@ -69,6 +69,19 @@ function hasEntitlement(entitlements: {
   return typeof entitlements.active[ENTITLEMENT_ID] !== 'undefined';
 }
 
+/** Whether this device currently reports `kandoo_pro` active. Drives what the
+ *  UI shows (the Free/Pro badge); the server remains the authority on access. */
+export async function isEntitled(): Promise<boolean> {
+  if (!configured) return false;
+  try {
+    const info = await Purchases.getCustomerInfo();
+    return hasEntitlement(info.entitlements);
+  } catch (error) {
+    console.warn('getCustomerInfo failed:', error);
+    return false;
+  }
+}
+
 /**
  * Buy a package. Returns whether `kandoo_pro` is active afterwards. A cancel
  * throws `userCancelled` — the caller treats that as a quiet no-op, never an

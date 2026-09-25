@@ -27,6 +27,13 @@ export default function AppTabs() {
           <TabTrigger name="memory" href="/memory" asChild>
             <TabButton>Memory</TabButton>
           </TabTrigger>
+          {/* web is cut; cast avoids the typed-routes lag for new routes */}
+          <TabTrigger name="people" href={'/people' as never} asChild>
+            <TabButton>People</TabButton>
+          </TabTrigger>
+          <TabTrigger name="reminders" href={'/reminders' as never} asChild>
+            <TabButton>Reminders</TabButton>
+          </TabTrigger>
         </CustomTabList>
       </TabList>
     </Tabs>

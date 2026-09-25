@@ -104,6 +104,29 @@ export async function linkMemoryToEntities(
   }
 }
 
+/** Link a reminder to people entities — the mirror of linkMemoryToEntities, so
+ *  "What you promised" and merge move reminders across properly. */
+export async function linkReminderToEntities(
+  reminderId: string,
+  entityIds: string[]
+): Promise<void> {
+  if (entityIds.length === 0) return;
+
+  const { error } = await supabase
+    .from('reminder_entities')
+    .upsert(
+      entityIds.map((entityId) => ({
+        reminder_id: reminderId,
+        entity_id: entityId,
+      })),
+      { onConflict: 'reminder_id,entity_id', ignoreDuplicates: true }
+    );
+
+  if (error) {
+    console.error('Reminder/entity link failed:', error);
+  }
+}
+
 /**
  * Attach coordinates to a place entity. Called once the device has geocoded a
  * placeHint, or when the user confirms "yes, this is the place I meant".
