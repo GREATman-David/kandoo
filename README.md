@@ -174,6 +174,7 @@ both reminders `pending` until you confirm them.
 | Voice capture | planned |
 | Place triggers (geofencing) | planned |
 | RevenueCat | planned |
+| Usage-based free tier limits | planned · post-submission |
 
 ---
 
