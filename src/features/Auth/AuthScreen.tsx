@@ -7,44 +7,43 @@ import {
     View,
 } from 'react-native';
 
+import { ForgotPasswordSheet } from '@/components/ForgotPasswordSheet';
 import { colors, radius, spacing, text } from '@/theme/theme';
 
-import { signIn, signUp } from '../../services/authService';
+import { authErrorMessage, signIn, signUp } from '../../services/authService';
 
 export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [message, setMessage] = useState('');
+  // Errors read in alarm colour; a notice (e.g. "account created") reads muted.
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   async function handleSubmit() {
     if (!email.trim() || !password.trim()) {
-      setMessage('Please enter your email and password.');
+      setError('Enter your email and password to continue.');
       return;
     }
 
     setLoading(true);
-    setMessage('');
+    setError(null);
+    setNotice(null);
 
     try {
       if (isCreatingAccount) {
         await signUp(email.trim(), password);
-        setMessage(
-          'Account created. Check your email if confirmation is required.'
-        );
+        setNotice('Account created. Check your email if confirmation is needed.');
       } else {
         await signIn(email.trim(), password);
-        setMessage('Signed in successfully.');
+        // On success the session changes and this screen unmounts — no message.
       }
-    } catch (error) {
-      console.error('Authentication error:', error);
-
-      if (error instanceof Error) {
-        setMessage(error.message);
-      } else {
-        setMessage('Authentication failed.');
-      }
+    } catch (caught) {
+      // Log the raw cause; show the person one plain, mapped line (never .message).
+      console.error('Authentication error:', caught);
+      setError(authErrorMessage(caught, isCreatingAccount ? 'signup' : 'signin'));
     } finally {
       setLoading(false);
     }
@@ -88,18 +87,31 @@ export default function AuthScreen() {
       >
         <Text style={styles.primaryButtonText}>
           {loading
-            ? 'Please wait...'
+            ? isCreatingAccount
+              ? 'Creating account…'
+              : 'Signing in…'
             : isCreatingAccount
               ? 'Create account'
               : 'Sign in'}
         </Text>
       </Pressable>
 
+      {!isCreatingAccount ? (
+        <Pressable
+          style={styles.linkRow}
+          onPress={() => setForgotOpen(true)}
+          disabled={loading}
+        >
+          <Text style={styles.link}>Forgot your password?</Text>
+        </Pressable>
+      ) : null}
+
       <Pressable
         style={styles.secondaryButton}
         onPress={() => {
           setIsCreatingAccount((current) => !current);
-          setMessage('');
+          setError(null);
+          setNotice(null);
         }}
         disabled={loading}
       >
@@ -110,11 +122,14 @@ export default function AuthScreen() {
         </Text>
       </Pressable>
 
-      {message !== '' && (
-        <Text style={styles.message}>
-          {message}
-        </Text>
-      )}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {notice ? <Text style={styles.message}>{notice}</Text> : null}
+
+      <ForgotPasswordSheet
+        visible={forgotOpen}
+        onClose={() => setForgotOpen(false)}
+        initialEmail={email.trim()}
+      />
     </View>
   );
 }
@@ -187,6 +202,25 @@ const styles = StyleSheet.create({
     ...text.caption,
     marginTop: spacing.space4,
     textAlign: 'center',
+    color: colors.inkMuted,
+  },
+
+  error: {
+    ...text.caption,
+    marginTop: spacing.space4,
+    textAlign: 'center',
+    color: colors.alarmText,
+  },
+
+  linkRow: {
+    alignItems: 'center',
+    paddingVertical: spacing.space3,
+    minHeight: 40,
+    justifyContent: 'center',
+  },
+
+  link: {
+    ...text.caption,
     color: colors.inkMuted,
   },
 });

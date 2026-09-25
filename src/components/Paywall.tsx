@@ -37,6 +37,24 @@ function perMonthLabel(pkg: PurchasesPackage): string | null {
   return `${symbol}${(price / 12).toFixed(2)}/mo`;
 }
 
+/**
+ * Is the annual plan actually cheaper per month than the monthly plan? Drives
+ * the "Best value" badge and the default selection, so neither can lie when the
+ * store's prices are configured the wrong way round.
+ */
+function isAnnualBetter(
+  annual: PurchasesPackage | null,
+  monthly: PurchasesPackage | null
+): boolean {
+  const annualPerMonth = annual?.product.price ? annual.product.price / 12 : null;
+  const monthlyPrice = monthly?.product.price ?? null;
+  return (
+    annualPerMonth != null &&
+    monthlyPrice != null &&
+    annualPerMonth < monthlyPrice
+  );
+}
+
 export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
   const [annual, setAnnual] = useState<PurchasesPackage | null>(null);
   const [monthly, setMonthly] = useState<PurchasesPackage | null>(null);
@@ -52,8 +70,14 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
     setError(null);
     getDefaultOffering().then((offering) => {
       if (!active) return;
-      setAnnual(offering?.annual ?? null);
-      setMonthly(offering?.monthly ?? null);
+      const a = offering?.annual ?? null;
+      const m = offering?.monthly ?? null;
+      setAnnual(a);
+      setMonthly(m);
+      // Pre-select whichever plan is genuinely the better per-month deal. Never
+      // assume annual wins — with the store's prices inverted it would default
+      // the user to the more expensive plan and call it "Best value".
+      setSelected(isAnnualBetter(a, m) ? 'annual' : m ? 'monthly' : 'annual');
     });
     return () => {
       active = false;
@@ -61,6 +85,8 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
   }, [visible]);
 
   const selectedPackage = selected === 'annual' ? annual : monthly;
+  // The badge is a claim about value; only show it when it's actually true.
+  const annualIsBetter = isAnnualBetter(annual, monthly);
 
   async function complete(run: () => Promise<boolean>) {
     if (busy) return;
@@ -107,7 +133,7 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
                 label="Annual"
                 priceLine={annual.product.priceString}
                 sublabel={perMonthLabel(annual)}
-                badge="Best value"
+                badge={annualIsBetter ? 'Best value' : null}
                 highlighted={selected === 'annual'}
                 onPress={() => setSelected('annual')}
               />

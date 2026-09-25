@@ -15,7 +15,9 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { AccountSheet } from '@/components/AccountSheet';
+import { EmptyState } from '@/components/EmptyState';
 import { NoteDetail } from '@/components/NoteDetail';
+import { Onboarding } from '@/components/Onboarding';
 import { Paywall } from '@/components/Paywall';
 import { ReviewSheet } from '@/components/ReviewSheet';
 import { KandooSymbol } from '@/components/Symbol';
@@ -26,6 +28,7 @@ import {
 } from '@/features/Home/useHome';
 import { useReminderSync } from '@/features/reminders/useReminderSync';
 import { useEntitlement } from '@/hooks/useEntitlement';
+import { useOnboarding } from '@/hooks/useOnboarding';
 import { configurePurchases, identifyUser } from '@/services/purchases';
 import type {
   InterpretResult,
@@ -49,6 +52,8 @@ function symbolFor(state: HomeState) {
 
 export default function HomeScreen() {
   const { loading, isAuthenticated, user } = useAuth();
+  const { seen: onboardingSeen, loading: onboardingLoading, markSeen } =
+    useOnboarding();
 
   // Configure RevenueCat once, then tie the customer to the Supabase account so
   // the backend can read the entitlement by the same id over the V2 REST API.
@@ -60,12 +65,17 @@ export default function HomeScreen() {
     if (user?.id) void identifyUser(user.id);
   }, [user?.id]);
 
-  if (loading) {
+  if (loading || onboardingLoading) {
     return (
       <View style={styles.loading}>
         <KandooSymbol state="idle" size={62} />
       </View>
     );
+  }
+
+  // Onboarding shows once, before the first sign-up — never for a signed-in user.
+  if (!isAuthenticated && onboardingSeen === false) {
+    return <Onboarding onDone={markSeen} />;
   }
 
   if (!isAuthenticated) {
@@ -288,12 +298,10 @@ type IdleProps = {
 function Idle({ recent, onSelect }: IdleProps) {
   if (recent.length === 0) {
     return (
-      <View style={styles.empty}>
-        <Text style={styles.emptyLine}>Nothing yet.</Text>
-        <Text style={styles.emptyHelp}>
-          Tell Kandoo about your day and it’ll remember.
-        </Text>
-      </View>
+      <EmptyState
+        line="Nothing yet."
+        help="Tell Kandoo about your day and it’ll remember."
+      />
     );
   }
 
@@ -672,22 +680,6 @@ const styles = StyleSheet.create({
   badgeText: {
     ...text.label,
     color: colors.settled,
-  },
-  empty: {
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    marginTop: spacing.space8,
-  },
-  emptyLine: {
-    ...text.answer,
-    color: colors.inkMuted,
-    marginBottom: spacing.space2,
-  },
-  emptyHelp: {
-    ...text.body,
-    color: colors.inkFaint,
-    textAlign: 'center',
-    maxWidth: 260,
   },
   answerText: {
     ...text.answer,

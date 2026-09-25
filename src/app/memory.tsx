@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { EmptyState } from '@/components/EmptyState';
 import { LockedRow } from '@/components/LockedRow';
 import { ManualEntry } from '@/components/ManualEntry';
 import { MemoryDetail, type MemoryDetailTarget } from '@/components/MemoryDetail';
@@ -259,10 +260,10 @@ export default function MemoryScreen() {
         ) : error ? (
           <Text style={styles.errorText}>{error}</Text>
         ) : notes.length === 0 ? (
-          <View style={styles.emptyBlock}>
-            <Text style={styles.emptyTitle}>Nothing saved yet.</Text>
-            <Text style={styles.emptySub}>What you tell Kandoo shows up here.</Text>
-          </View>
+          <EmptyState
+            line="Nothing saved yet."
+            help="What you tell Kandoo shows up here."
+          />
         ) : (
           notes.map((note) => {
             const locked = !isPro && isOld(note.created_at);
@@ -485,19 +486,6 @@ const styles = StyleSheet.create({
     color: colors.inkFaint,
     textAlign: 'center',
     marginTop: spacing.space8,
-  },
-  emptyBlock: {
-    alignItems: 'center',
-    marginTop: spacing.space8,
-  },
-  emptyTitle: {
-    ...text.displayL,
-    color: colors.ink,
-  },
-  emptySub: {
-    ...text.body,
-    color: colors.inkMuted,
-    marginTop: spacing.space2,
   },
   errorText: {
     ...text.body,

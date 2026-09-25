@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { EmptyState } from '@/components/EmptyState';
 import { PersonDetail } from '@/components/PersonDetail';
 import {
   deletePerson,
@@ -152,10 +153,10 @@ export default function PeopleScreen() {
         ) : error ? (
           <Text style={styles.error}>{error}</Text>
         ) : people.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyLine}>No one yet.</Text>
-            <Text style={styles.emptyHelp}>Kandoo learns people from what you say.</Text>
-          </View>
+          <EmptyState
+            line="No one yet."
+            help="Kandoo learns people from what you say."
+          />
         ) : (
           people.map((person) => {
             const isSurvivor = survivor?.id === person.id;
@@ -252,9 +253,6 @@ const styles = StyleSheet.create({
   body: { paddingTop: spacing.space2 },
   dim: { ...text.body, color: colors.inkFaint, marginTop: spacing.space8, textAlign: 'center' },
   error: { ...text.body, color: colors.alarmText, marginTop: spacing.space8, textAlign: 'center' },
-  empty: { alignItems: 'center', marginTop: spacing.space8 },
-  emptyLine: { ...text.answer, color: colors.inkMuted, marginBottom: spacing.space2 },
-  emptyHelp: { ...text.body, color: colors.inkFaint, textAlign: 'center', maxWidth: 260 },
 
   row: {
     flexDirection: 'row',

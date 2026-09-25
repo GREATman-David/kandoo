@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { EmptyState } from '@/components/EmptyState';
 import { ManualReminder } from '@/components/ManualReminder';
 import { NoteDetail } from '@/components/NoteDetail';
 import { ReminderDetail } from '@/components/ReminderDetail';
@@ -164,12 +165,10 @@ export default function RemindersScreen() {
         ) : error ? (
           <Text style={styles.error}>{error}</Text>
         ) : nothing ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyLine}>Nothing due.</Text>
-            <Text style={styles.emptyHelp}>
-              Ask Kandoo to remind you about something.
-            </Text>
-          </View>
+          <EmptyState
+            line="Nothing due."
+            help="Ask Kandoo to remind you about something."
+          />
         ) : (
           <>
             {groups.needsReview.length > 0 ? (
@@ -358,9 +357,6 @@ const styles = StyleSheet.create({
   body: { paddingTop: spacing.space2 },
   dim: { ...text.body, color: colors.inkFaint, marginTop: spacing.space8, textAlign: 'center' },
   error: { ...text.body, color: colors.alarmText, marginTop: spacing.space8, textAlign: 'center' },
-  empty: { alignItems: 'center', marginTop: spacing.space8 },
-  emptyLine: { ...text.answer, color: colors.inkMuted, marginBottom: spacing.space2 },
-  emptyHelp: { ...text.body, color: colors.inkFaint, textAlign: 'center', maxWidth: 260 },
 
   section: { marginBottom: spacing.space6 },
   eyebrow: { ...text.label, color: colors.inkMuted, marginBottom: spacing.space3 },

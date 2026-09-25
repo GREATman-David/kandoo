@@ -15,7 +15,6 @@ import Purchases, {
  * API and the entitlement follows the user across devices.
  */
 export const ENTITLEMENT_ID = 'kandoo_pro';
-const OFFERING_ID = 'default';
 
 let configured = false;
 
@@ -51,12 +50,19 @@ export async function resetPurchasesUser(): Promise<void> {
   }
 }
 
-/** The `default` offering, used to render the paywall's packages. */
+/**
+ * The offering used to render the paywall's packages: the one the RevenueCat
+ * dashboard marks as CURRENT. We used to look this up by the hardcoded name
+ * `default`, but that offering was deleted and recreated as a new current one —
+ * keying off the name found nothing and the paywall rendered empty. `current`
+ * follows whatever the dashboard promotes. The `all` fallback only guards the
+ * case where nothing is marked current but some offering still exists.
+ */
 export async function getDefaultOffering(): Promise<PurchasesOffering | null> {
   if (!configured) return null;
   try {
     const offerings = await Purchases.getOfferings();
-    return offerings.all[OFFERING_ID] ?? offerings.current ?? null;
+    return offerings.current ?? Object.values(offerings.all)[0] ?? null;
   } catch (error) {
     console.warn('Purchases.getOfferings failed:', error);
     return null;
