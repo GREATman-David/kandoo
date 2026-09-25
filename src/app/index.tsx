@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AppState,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -29,6 +31,8 @@ import {
 import { useReminderSync } from '@/features/reminders/useReminderSync';
 import { useEntitlement } from '@/hooks/useEntitlement';
 import { useOnboarding } from '@/hooks/useOnboarding';
+import { useSpeechEnabled } from '@/hooks/useSpeechEnabled';
+import { speakAnswer, stopSpeaking } from '@/services/speech';
 import { configurePurchases, identifyUser } from '@/services/purchases';
 import type {
   InterpretResult,
@@ -247,7 +251,12 @@ function KandooHome() {
         ) : null}
 
         {home.state === 'answered' && home.response ? (
-          <Answered response={home.response} onDone={home.done} />
+          <Answered
+            response={home.response}
+            onDone={home.done}
+            voiceSupported={home.voiceSupported}
+            onAskAgain={home.startVoice}
+          />
         ) : null}
       </ScrollView>
 
@@ -353,6 +362,25 @@ function MicGlyph({ color }: { color: string }) {
       <View style={[styles.micHead, { backgroundColor: color }]} />
       <View style={[styles.micStem, { backgroundColor: color }]} />
       <View style={[styles.micBase, { backgroundColor: color }]} />
+    </View>
+  );
+}
+
+/** A speaker cone (box + flared triangle) with sound bars when on, a slash when
+ *  muted. Drawn with Views like every other glyph — no emoji, no icon library. */
+function SpeakerGlyph({ color, muted }: { color: string; muted: boolean }) {
+  return (
+    <View style={styles.speaker} pointerEvents="none">
+      <View style={[styles.speakerBox, { backgroundColor: color }]} />
+      <View style={[styles.speakerCone, { borderRightColor: color }]} />
+      {muted ? (
+        <View style={[styles.speakerSlash, { backgroundColor: color }]} />
+      ) : (
+        <View style={styles.speakerWaves}>
+          <View style={[styles.wave, styles.waveSm, { backgroundColor: color }]} />
+          <View style={[styles.wave, styles.waveLg, { backgroundColor: color }]} />
+        </View>
+      )}
     </View>
   );
 }
@@ -605,22 +633,75 @@ function recallAnswer(response: InterpretationResponse): string {
 type AnsweredProps = {
   response: InterpretationResponse;
   onDone: () => void;
+  /** MuMu and other recogniser-less devices hide the mic; speech still works. */
+  voiceSupported: boolean;
+  /** Stop speaking and start listening for the next question (no state carries). */
+  onAskAgain: () => void;
 };
 
 /**
- * Recall answers land here, not in Understanding. The answer fades in rather
- * than snapping — the app's words arrive a beat slower than the user's, and
- * that rhythm difference is how you know who is talking. (Source rows linking
- * back to their notes need `capture_id` on the recall payload — a small backend
- * follow-up; for now the answer stands alone.)
+ * Recall answers land here, not in Understanding. The answer fades in, and —
+ * unless muted — Kandoo speaks it aloud (expo-speech, on-device). The text stays
+ * on screen; speech is additive. A speaker toggle silences it (persisted, for a
+ * meeting), and a mic re-asks: it stops the speech at once and listens for the
+ * next question, whose answer replaces this one. Speech stops on every exit —
+ * mute, mic, Done, navigating away, backgrounding — because a voice still
+ * talking after the user has left is the worst failure this feature has.
  */
-function Answered({ response, onDone }: AnsweredProps) {
+function Answered({ response, onDone, voiceSupported, onAskAgain }: AnsweredProps) {
   const answer = recallAnswer(response);
+  const { enabled, loading, toggle } = useSpeechEnabled();
   const shown = useSharedValue(0);
 
   useEffect(() => {
     shown.value = withTiming(1, { duration: 520 });
   }, [shown]);
+
+  // Speak each new answer once the stored preference is known — never before, or
+  // a muted user hears a burst before the `false` loads. Cleanup silences on any
+  // unmount: Done, the mic's transition to listening, or navigating away.
+  useEffect(() => {
+    if (loading) return;
+    if (enabled) speakAnswer(answer);
+    return () => stopSpeaking();
+    // `enabled` is deliberately not a dep: toggling is handled in onToggle so a
+    // mute doesn't re-trigger speech. This runs on a new answer or once loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answer, loading]);
+
+  // A voice must not outlive the foreground — stop the moment the app backgrounds.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') stopSpeaking();
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Navigating away is a blur, not an unmount, under the native tab bar (the Home
+  // screen stays mounted). Stop on blur so speech never follows the user to
+  // another tab — the exact failure this feature must not have.
+  useFocusEffect(
+    useCallback(() => {
+      return () => stopSpeaking();
+    }, [])
+  );
+
+  function onToggle() {
+    const willBeOn = !enabled;
+    toggle();
+    if (willBeOn) speakAnswer(answer);
+    else stopSpeaking();
+  }
+
+  function onMic() {
+    stopSpeaking();
+    onAskAgain();
+  }
+
+  function onPressDone() {
+    stopSpeaking();
+    onDone();
+  }
 
   const style = useAnimatedStyle(() => ({
     opacity: shown.value,
@@ -629,10 +710,33 @@ function Answered({ response, onDone }: AnsweredProps) {
 
   return (
     <>
-      <Text style={styles.eyebrow}>Here’s what you told me</Text>
+      <View style={styles.answeredHead}>
+        <Text style={styles.eyebrow}>Here’s what you told me</Text>
+        <Pressable
+          style={styles.speakerBtn}
+          onPress={onToggle}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={enabled ? 'Mute answers' : 'Speak answers'}
+        >
+          <SpeakerGlyph color={colors.inkMuted} muted={!enabled} />
+        </Pressable>
+      </View>
+
       <Animated.Text style={[styles.answerText, style]}>{answer}</Animated.Text>
+
       <View style={styles.actions}>
-        <Pressable style={styles.btnPrimary} onPress={onDone}>
+        {voiceSupported ? (
+          <Pressable
+            style={styles.btn}
+            onPress={onMic}
+            accessibilityRole="button"
+            accessibilityLabel="Ask another question"
+          >
+            <MicGlyph color={colors.inkMuted} />
+          </Pressable>
+        ) : null}
+        <Pressable style={styles.btnPrimary} onPress={onPressDone}>
           <Text style={styles.btnPrimaryText}>Done</Text>
         </Pressable>
       </View>
@@ -776,6 +880,63 @@ const styles = StyleSheet.create({
     height: 2,
     borderRadius: 1,
     marginTop: 1,
+  },
+  answeredHead: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  speakerBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speaker: {
+    width: 24,
+    height: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speakerBox: {
+    width: 5,
+    height: 8,
+    borderRadius: 1,
+  },
+  speakerCone: {
+    width: 0,
+    height: 0,
+    borderTopWidth: 7,
+    borderBottomWidth: 7,
+    borderRightWidth: 8,
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+    marginLeft: -1,
+  },
+  speakerWaves: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    marginLeft: 3,
+  },
+  wave: {
+    width: 2,
+    borderRadius: 1,
+  },
+  waveSm: {
+    height: 6,
+  },
+  waveLg: {
+    height: 10,
+  },
+  speakerSlash: {
+    position: 'absolute',
+    width: 26,
+    height: 2,
+    borderRadius: 1,
+    transform: [{ rotate: '45deg' }],
   },
   held: {
     ...text.bodyL,
