@@ -1,14 +1,9 @@
 import { useState } from 'react';
-import {
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ForgotPasswordSheet } from '@/components/ForgotPasswordSheet';
-import { colors, radius, spacing, text } from '@/theme/theme';
+import { KandooSymbol } from '@/components/Symbol';
+import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 
 import { authErrorMessage, signIn, signUp } from '../../services/authService';
 
@@ -49,81 +44,88 @@ export default function AuthScreen() {
     }
   }
 
+  const buttonLabel = loading
+    ? isCreatingAccount
+      ? 'Creating account…'
+      : 'Signing in…'
+    : isCreatingAccount
+      ? 'Create account'
+      : 'Sign in';
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Kandoo</Text>
+      <View style={styles.stack}>
+        {/* Brand lockup: wordmark, motto, mark — stacked and centred. */}
+        <View style={styles.lockup}>
+          <Text style={styles.wordmark}>Kandoo</Text>
+          <Text style={styles.signature}>Yes You Kan</Text>
+          <KandooSymbol state="idle" size={72} />
+        </View>
 
-      <Text style={styles.subtitle}>
-        {isCreatingAccount
-          ? 'Create your Kandoo account'
-          : 'Welcome back'}
-      </Text>
+        <TextInput
+          style={styles.field}
+          placeholder="Email"
+          placeholderTextColor={colors.inkFaint}
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          editable={!loading}
+        />
 
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        placeholderTextColor={colors.inkFaint}
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="email-address"
-      />
+        <TextInput
+          style={[styles.field, styles.fieldGap]}
+          placeholder="Password"
+          placeholderTextColor={colors.inkFaint}
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          autoCapitalize="none"
+          editable={!loading}
+        />
 
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        placeholderTextColor={colors.inkFaint}
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        autoCapitalize="none"
-      />
-
-      <Pressable
-        style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
-        onPress={handleSubmit}
-        disabled={loading}
-      >
-        <Text style={styles.primaryButtonText}>
-          {loading
-            ? isCreatingAccount
-              ? 'Creating account…'
-              : 'Signing in…'
-            : isCreatingAccount
-              ? 'Create account'
-              : 'Sign in'}
-        </Text>
-      </Pressable>
-
-      {!isCreatingAccount ? (
         <Pressable
-          style={styles.linkRow}
-          onPress={() => setForgotOpen(true)}
+          style={[styles.button, loading && styles.buttonDim]}
+          onPress={handleSubmit}
           disabled={loading}
+          accessibilityRole="button"
         >
-          <Text style={styles.link}>Forgot your password?</Text>
+          <Text style={styles.buttonLabel}>{buttonLabel}</Text>
         </Pressable>
-      ) : null}
 
-      <Pressable
-        style={styles.secondaryButton}
-        onPress={() => {
-          setIsCreatingAccount((current) => !current);
-          setError(null);
-          setNotice(null);
-        }}
-        disabled={loading}
-      >
-        <Text style={styles.secondaryButtonText}>
-          {isCreatingAccount
-            ? 'Already have an account? Sign in'
-            : 'Need an account? Create one'}
-        </Text>
-      </Pressable>
+        <Pressable
+          style={styles.toggle}
+          onPress={() => {
+            setIsCreatingAccount((current) => !current);
+            setError(null);
+            setNotice(null);
+          }}
+          disabled={loading}
+          accessibilityRole="button"
+        >
+          <Text style={styles.toggleText}>
+            {isCreatingAccount ? 'Already have an account? ' : 'Need an account? '}
+            <Text style={styles.toggleAccent}>
+              {isCreatingAccount ? 'Sign in' : 'Create one'}
+            </Text>
+          </Text>
+        </Pressable>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {notice ? <Text style={styles.message}>{notice}</Text> : null}
+        {!isCreatingAccount ? (
+          <Pressable
+            style={styles.forgot}
+            onPress={() => setForgotOpen(true)}
+            disabled={loading}
+            accessibilityRole="button"
+          >
+            <Text style={styles.forgotText}>Forgot your password?</Text>
+          </Pressable>
+        ) : null}
+
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+      </View>
 
       <ForgotPasswordSheet
         visible={forgotOpen}
@@ -134,93 +136,114 @@ export default function AuthScreen() {
   );
 }
 
+const FIELD_HEIGHT = 48;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: spacing.space5,
-    justifyContent: 'center',
     backgroundColor: colors.base,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Full-width column with a comfortable side gutter — the fields and button
+  // stretch across like the rest of the app, not capped to a narrow card.
+  stack: {
+    width: '100%',
+    paddingHorizontal: spacing.space5,
+    alignItems: 'center',
   },
 
-  title: {
-    ...text.wordmark,
-    textAlign: 'center',
-    color: colors.ink,
-  },
-
-  subtitle: {
-    ...text.bodyL,
-    textAlign: 'center',
-    marginTop: spacing.space3,
+  // Brand lockup —————————————————————————————————————————————
+  lockup: {
+    alignItems: 'center',
+    gap: spacing.space3,
     marginBottom: spacing.space6,
-    color: colors.inkMuted,
+  },
+  wordmark: {
+    ...text.wordmark,
+    color: colors.markOuter,
+    textAlign: 'center',
+  },
+  signature: {
+    fontFamily: fontFamily.displayItalic,
+    fontSize: 18,
+    lineHeight: 22,
+    color: colors.markRing,
+    textAlign: 'center',
   },
 
-  input: {
-    ...text.bodyL,
+  // Fields ———————————————————————————————————————————————————
+  field: {
+    ...text.body,
+    alignSelf: 'stretch',
+    height: FIELD_HEIGHT,
+    paddingHorizontal: spacing.space4,
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: radius.md,
-    padding: spacing.space4,
-    color: colors.ink,
     backgroundColor: colors.surface,
-    marginBottom: spacing.space2,
+    color: colors.ink,
+  },
+  fieldGap: {
+    marginTop: spacing.space3,
   },
 
-  primaryButton: {
-    backgroundColor: colors.accent,
-    padding: spacing.space4,
+  // Primary button ———————————————————————————————————————————
+  button: {
+    alignSelf: 'stretch',
+    height: FIELD_HEIGHT,
+    marginTop: spacing.space5,
     borderRadius: radius.md,
-    marginTop: 2,
-    minHeight: 48,
+    backgroundColor: colors.markCore,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  primaryButtonDisabled: {
+  buttonDim: {
     opacity: 0.6,
   },
-
-  primaryButtonText: {
+  buttonLabel: {
     ...text.bodyStrong,
-    color: colors.base,
+    color: colors.ink,
   },
 
-  secondaryButton: {
-    padding: spacing.space3,
-    minHeight: 44,
+  // Account toggle ———————————————————————————————————————————
+  toggle: {
+    marginTop: spacing.space5,
     alignItems: 'center',
+    minHeight: 24,
     justifyContent: 'center',
   },
-
-  secondaryButtonText: {
-    ...text.bodyStrong,
+  toggleText: {
+    ...text.body,
     color: colors.inkMuted,
-  },
-
-  message: {
-    ...text.caption,
-    marginTop: spacing.space4,
     textAlign: 'center',
-    color: colors.inkMuted,
+  },
+  toggleAccent: {
+    ...text.bodyStrong,
+    color: colors.markRing,
   },
 
+  // Secondary ————————————————————————————————————————————————
+  forgot: {
+    marginTop: spacing.space3,
+    alignItems: 'center',
+    minHeight: 32,
+    justifyContent: 'center',
+  },
+  forgotText: {
+    ...text.caption,
+    color: colors.inkFaint,
+  },
   error: {
     ...text.caption,
     marginTop: spacing.space4,
     textAlign: 'center',
     color: colors.alarmText,
   },
-
-  linkRow: {
-    alignItems: 'center',
-    paddingVertical: spacing.space3,
-    minHeight: 40,
-    justifyContent: 'center',
-  },
-
-  link: {
+  notice: {
     ...text.caption,
+    marginTop: spacing.space4,
+    textAlign: 'center',
     color: colors.inkMuted,
   },
 });

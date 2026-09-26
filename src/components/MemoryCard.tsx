@@ -270,13 +270,13 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: spacing.space4,
     borderRadius: radius.md,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.markCore,
     alignItems: 'center',
     justifyContent: 'center',
   },
   btnPrimaryText: {
     ...text.bodyStrong,
-    color: colors.base,
+    color: colors.ink,
   },
   rail: {
     position: 'absolute',

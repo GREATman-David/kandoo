@@ -324,12 +324,12 @@ const styles = StyleSheet.create({
     flex: 2,
     minHeight: 48,
     borderRadius: radius.md,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.markCore,
     alignItems: 'center',
     justifyContent: 'center',
   },
   btnPrimaryText: {
     ...text.bodyStrong,
-    color: colors.base,
+    color: colors.ink,
   },
 });

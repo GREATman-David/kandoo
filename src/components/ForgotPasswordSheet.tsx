@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
     color: colors.alarmText,
   },
   button: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.markCore,
     borderRadius: radius.md,
     paddingVertical: spacing.space4,
     alignItems: 'center',
@@ -164,7 +164,7 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     ...text.bodyStrong,
-    color: colors.base,
+    color: colors.ink,
   },
   cancel: {
     alignItems: 'center',

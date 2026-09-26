@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
   cta: {
     minHeight: 52,
     borderRadius: radius.md,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.markCore,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: spacing.space2,
@@ -322,7 +322,7 @@ const styles = StyleSheet.create({
   },
   ctaText: {
     ...text.bodyStrong,
-    color: colors.base,
+    color: colors.ink,
   },
   footer: {
     flexDirection: 'row',

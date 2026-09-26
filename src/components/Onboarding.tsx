@@ -167,13 +167,13 @@ const styles = StyleSheet.create({
     width: 20,
   },
   button: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.markCore,
     borderRadius: radius.md,
     paddingVertical: spacing.space4,
     alignItems: 'center',
   },
   buttonText: {
     ...text.bodyStrong,
-    color: colors.base,
+    color: colors.ink,
   },
 });
