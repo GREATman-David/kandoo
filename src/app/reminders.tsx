@@ -1,3 +1,4 @@
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -62,10 +63,14 @@ export default function RemindersScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    if (isAuthenticated) load();
-    else setLoading(false);
-  }, [isAuthenticated, load]);
+  // Refresh on focus, not just on mount, so a reminder captured or confirmed on
+  // another tab shows here (and status changes reflect) without a relaunch.
+  useFocusEffect(
+    useCallback(() => {
+      if (isAuthenticated) load();
+      else setLoading(false);
+    }, [isAuthenticated, load])
+  );
 
   useEffect(
     () => () => {

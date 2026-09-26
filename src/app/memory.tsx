@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -99,10 +100,16 @@ export default function MemoryScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    if (isAuthenticated) load();
-    else setLoading(false);
-  }, [isAuthenticated, load]);
+  // Refresh on focus, not just on mount — otherwise a capture added on Home (or
+  // an edit/delete on a detail screen) leaves this list showing stale data until
+  // the app is relaunched. The reload is silent: loading is already false, so
+  // there is no spinner flash on a tab switch.
+  useFocusEffect(
+    useCallback(() => {
+      if (isAuthenticated) load();
+      else setLoading(false);
+    }, [isAuthenticated, load])
+  );
 
   /** The ask field. Recall runs through the same /interpret path Home uses, so
    *  the model decides recall-vs-capture and the paywall fires at the boundary. */
@@ -114,12 +121,15 @@ export default function MemoryScreen() {
     setAnswer(null);
     try {
       const result = await interpretText(q);
-      const recall = result.results.find(
-        (r) => r.kind === 'recall' && r.status === 'ok'
-      );
+      const ok = result.results.filter((r) => r.status === 'ok');
+      const recall = ok.find((r) => r.kind === 'recall');
       if (recall && recall.kind === 'recall' && recall.status === 'ok') {
         setAnswer(recall.answer);
         if (recall.proBoundaryHit) setPaywall(true);
+      } else if (ok.length === 0) {
+        // Nothing actionable — never clear silently. Kandoo says so in its own
+        // voice (in the answer card) and the question stays in the field.
+        setAnswer("I wasn't sure what to do with that. Try asking it another way?");
       } else {
         // Not a question — the user told Kandoo something. It's saved; surface it.
         setAnswer(null);

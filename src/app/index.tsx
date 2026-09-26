@@ -225,6 +225,7 @@ function KandooHome() {
             canStop={home.voiceActive || home.transcript.trim().length > 0}
             voiceActive={home.voiceActive}
             error={home.error}
+            notice={home.notice}
             busy={home.busy}
             onStop={home.stopListening}
             onCancel={home.cancelListening}
@@ -391,6 +392,7 @@ type ListeningProps = {
   canStop: boolean;
   voiceActive: boolean;
   error: string | null;
+  notice: string | null;
   busy: boolean;
   onStop: () => void;
   onCancel: () => void;
@@ -400,6 +402,7 @@ function Listening({
   canStop,
   voiceActive,
   error,
+  notice,
   busy,
   onStop,
   onCancel,
@@ -407,6 +410,8 @@ function Listening({
   return (
     <>
       {error ? <Text style={styles.error}>{error}</Text> : null}
+      {/* Kandoo's own voice when nothing actionable came back — gentle, not an error. */}
+      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
       <View style={styles.actions}>
         <Pressable style={styles.btn} onPress={onCancel} disabled={busy}>
@@ -1015,6 +1020,12 @@ const styles = StyleSheet.create({
   error: {
     ...text.caption,
     color: colors.alarmText,
+    textAlign: 'center',
+    marginTop: spacing.space3,
+  },
+  notice: {
+    ...text.answer,
+    color: colors.inkMuted,
     textAlign: 'center',
     marginTop: spacing.space3,
   },

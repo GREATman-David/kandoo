@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -47,10 +48,14 @@ export default function PeopleScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    if (isAuthenticated) load();
-    else setLoading(false);
-  }, [isAuthenticated, load]);
+  // Refresh on focus, not just on mount, so a person newly learned from a capture
+  // made on another tab appears without relaunching. Silent reload (no spinner).
+  useFocusEffect(
+    useCallback(() => {
+      if (isAuthenticated) load();
+      else setLoading(false);
+    }, [isAuthenticated, load])
+  );
 
   const longPress = (person: PersonSummary) => {
     Alert.alert(person.name, undefined, [

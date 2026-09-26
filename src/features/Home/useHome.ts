@@ -101,6 +101,9 @@ export function useHome() {
   const [recent, setRecent] = useState<RecentItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
+  // Raised when extraction returns nothing actionable. Kandoo says so in its own
+  // voice and the typed text stays in the field — the UI never shows nothing.
+  const [notice, setNotice] = useState<string | null>(null);
   // Raised when a recall answer reaches past the free 10-day window. The paywall
   // appears at that boundary and nowhere else — never on launch.
   const [paywallVisible, setPaywallVisible] = useState(false);
@@ -166,16 +169,26 @@ export function useHome() {
     busyRef.current = true;
     setBusy(true);
     setError(null);
+    setNotice(null);
     setState('understanding');
 
     try {
       const result = await interpretText(text);
+      // Nothing actionable came back (extraction returned no ok actions). Never
+      // show an empty Understanding screen — say so in Kandoo's voice and leave
+      // the text where the user can reword and resend it.
+      const ok = result.results.filter((r) => r.status === 'ok');
+      if (ok.length === 0) {
+        setNotice(
+          "I wasn't sure what to do with that. Try asking it another way?"
+        );
+        setState('listening');
+        return;
+      }
       setResponse(result);
       // A recall question lands in ANSWERED (the answer streams in with its
       // sources); a capture stays in UNDERSTANDING (chips + Remember).
-      const isRecall = result.results.some(
-        (r) => r.kind === 'recall' && r.status === 'ok'
-      );
+      const isRecall = ok.some((r) => r.kind === 'recall');
       setState(isRecall ? 'answered' : 'understanding');
       // The paywall is a recall-boundary event: it opens only when the answer
       // genuinely reached older, Pro-only memories.
@@ -282,6 +295,7 @@ export function useHome() {
   const updateTranscript = useCallback(
     (text: string) => {
       setTranscriptBoth(text);
+      setNotice(null);
       if (text.length > 0) startListening();
     },
     [startListening]
@@ -338,6 +352,7 @@ export function useHome() {
     setVoiceActive(false);
     setTranscriptBoth('');
     setError(null);
+    setNotice(null);
     setState('idle');
   }, [voiceActive]);
 
@@ -431,6 +446,7 @@ export function useHome() {
     committed.current = '';
     setTranscript('');
     setError(null);
+    setNotice(null);
     setPaywallVisible(false);
     submittedText.current = '';
     setState('idle');
@@ -442,6 +458,7 @@ export function useHome() {
     transcript,
     response,
     error,
+    notice,
     busy,
     recent,
     voiceActive,

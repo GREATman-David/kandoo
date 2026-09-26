@@ -30,13 +30,19 @@ RULES
 1. ONE UTTERANCE MAY CONTAIN MANY ACTIONS. Extract every one of them.
    A meeting recap typically yields SEVERAL reminders AND SEVERAL memories.
    Never stop after the first action you find.
-1a. ANY question about the user's own past — what they said, saved, committed to,
-   or were told — is a "recall" action. This is never an empty result. Phrasings
-   include "when did I…", "what did I say about…", "did I tell you…", "what do I
-   know about…", "when am I supposed to…", "have I got anything about…". Set
-   "query" to the search intent (the subject, not the raw sentence), and
-   "scopePerson" / "scopePlace" when the question names one. A recall never
-   produces a memory or reminder as well — the user is asking, not telling.
+1a. ANY question is a "recall" action. Kandoo answers only from what the user has
+   already told it, so every question is a request to search that — never an empty
+   result. This covers DIRECT questions about the past ("when did I…", "what did I
+   say about…", "did I tell you…", "what do I know about…", "when am I supposed
+   to…", "have I got anything about…") AND INDIRECT questions that ask for a
+   recommendation, a preference, a place, or a detail the user may have mentioned
+   before ("where should I get lunch near work?", "what was that restaurant
+   called?", "who owns the migration now?", "where did I leave the keys?"). If the
+   utterance is phrased as a question, or asks you to retrieve or recommend
+   something, it is recall. Set "query" to the search intent (the subject, not the
+   raw sentence), and "scopePerson" / "scopePlace" when the question names one. A
+   recall never produces a memory or reminder as well — the user is asking, not
+   telling.
 2. dueAt must be a complete ISO 8601 timestamp WITH timezone offset, resolved
    against the current local time above. Never return "4 PM" or "tomorrow".
    Resolve relative times yourself: "in 20 minutes", "tomorrow morning" (09:00),
@@ -47,6 +53,12 @@ RULES
    months. Resolve pronouns to names. Strip filler and hesitation. Never put
    reminder text inside memory content — split them into separate actions.
    Two unrelated facts are two memory actions, not one.
+4a. A memory's "people" are ONLY those the fact is ABOUT, or who said it — never
+   everyone who happened to be present when it was said. "The budget was cut by
+   fifteen percent", said in a meeting with Jed, is about the budget, not about
+   Jed: people = []. "Jed is pushing the migration" is about Jed: people = ["Jed"].
+   Do not attach a person to a memory merely because they were in the room or named
+   elsewhere in the same capture.
 5. insistent = true only for alarms, wake-ups, or explicit urgency.
 6. people = names as spoken, one entry each. No titles unless the title is the
    only identifier available ("the doctor").
@@ -70,21 +82,26 @@ RULES
 EXAMPLE A — a substantial capture: several actions AND a note
 
 Utterance: "Just came out of the standup. Jed's pushing the API migration to Q1
-because of the vendor thing. I need to send Michael the updated spec before 5,
-and remind me to book the review room tomorrow morning."
+because of the vendor thing, and the budget got cut by fifteen percent. I need to
+send Michael the updated spec before 5, and remind me to book the review room
+tomorrow morning."
 
 {
-  "summary": "Standup recap: API migration slipping, two follow-ups.",
+  "summary": "Standup recap: API migration slipping, budget cut, two follow-ups.",
   "confidence": "high",
   "note": {
     "title": "Standup recap",
-    "body": "Came out of the standup. Jed is pushing the API migration to Q1 because of a vendor issue. I need to send Michael the updated spec before 5, and book the review room tomorrow morning."
+    "body": "Came out of the standup. Jed is pushing the API migration to Q1 because of a vendor issue, and the budget was cut by fifteen percent. I need to send Michael the updated spec before 5, and book the review room tomorrow morning."
   },
   "actions": [
     { "kind": "memory",
       "content": "Jed is pushing the API migration to Q1 because of a vendor issue.",
       "people": ["Jed"], "placeHint": null,
       "topics": ["API migration", "vendor"] },
+    { "kind": "memory",
+      "content": "The budget was cut by fifteen percent.",
+      "people": [], "placeHint": null,
+      "topics": ["budget"] },
     { "kind": "reminder", "task": "Send Michael the updated spec",
       "dueAt": "2026-09-18T17:00:00+00:00", "placeHint": null,
       "people": ["Michael"], "insistent": false },
@@ -93,6 +110,9 @@ and remind me to book the review room tomorrow morning."
       "people": [], "insistent": false }
   ]
 }
+
+Note how "The budget was cut by fifteen percent" has people = [] even though Jed
+was in the standup — the fact is not about Jed (rule 4a).
 
 EXAMPLE B — a question about the past is a recall
 
@@ -105,6 +125,20 @@ Utterance: "When did I say I would call Mummy?"
   "actions": [
     { "kind": "recall", "query": "call Mummy",
       "scopePerson": "Mummy", "scopePlace": null }
+  ]
+}
+
+EXAMPLE C — an indirect question is still a recall
+
+Utterance: "Where should I get lunch near work?"
+
+{
+  "summary": "Recall: a lunch spot near work.",
+  "confidence": "high",
+  "note": null,
+  "actions": [
+    { "kind": "recall", "query": "lunch spot near work",
+      "scopePerson": null, "scopePlace": null }
   ]
 }
 `.trim();
