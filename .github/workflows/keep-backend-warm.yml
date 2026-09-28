@@ -1,0 +1,25 @@
+# Render's free tier sleeps after ~15 minutes idle and takes ~35 s to wake,
+# which reads as a frozen app. This pings the health check every 10 minutes so
+# the production backend stays awake for the demo and for judges.
+#
+# One free service kept awake uses ~744 of Render's 750 free hours a month.
+# GitHub may delay scheduled runs by a few minutes under load; that is fine.
+name: Keep backend warm
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping /health
+        run: |
+          curl --silent --show-error --fail --max-time 90 \
+            --retry 2 --retry-delay 10 \
+            https://kandoo-toow.onrender.com/health

@@ -45,8 +45,30 @@ export class NetworkError extends Error {
   }
 }
 
+/**
+ * The backend took too long — most often a free-tier server waking from sleep.
+ * It IS a NetworkError, so reads fall back to saved copies; only the wording
+ * differs, telling the user to try again rather than to check their signal.
+ */
+export class TimeoutError extends NetworkError {
+  constructor() {
+    super();
+    this.message = 'Kandoo is taking longer than usual. Please try again in a moment.';
+    this.name = 'TimeoutError';
+  }
+}
+
 export const isNetworkError = (error: unknown): boolean =>
   error instanceof NetworkError;
+
+/** Reads and simple writes. Long enough for a slow network, short enough to notice. */
+const DEFAULT_TIMEOUT_MS = 20_000;
+/**
+ * Calls that run the model or embeddings. A sleeping free-tier server takes
+ * ~35 s to wake, and a long recap takes a few seconds more to interpret, so
+ * this leaves room for both instead of failing a request that would succeed.
+ */
+const AI_TIMEOUT_MS = 45_000;
 
 /**
  * The backend rejected the session (401). The token is gone for good, so the
@@ -76,15 +98,30 @@ async function apiFetch<T>(
   path: string,
   init: RequestInit,
   fallbackMessage: string,
-  retried = false
+  opts: { timeoutMs?: number; retried?: boolean } = {}
 ): Promise<T> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  // Without a deadline a hung connection (or a server still waking) leaves the
+  // UI waiting forever — "Working it out" with no end.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   let response: Response;
   try {
-    response = await fetch(`${BACKEND_URL}${path}`, init);
+    response = await fetch(`${BACKEND_URL}${path}`, {
+      ...init,
+      signal: controller.signal,
+    });
   } catch (transport) {
+    if (controller.signal.aborted) {
+      console.warn(`Request to ${path} timed out after ${timeoutMs} ms.`);
+      throw new TimeoutError();
+    }
     // No connection, DNS, TLS, or cleartext-blocked: a transport failure.
     console.error(`Network request to ${path} failed:`, transport);
     throw new NetworkError();
+  } finally {
+    clearTimeout(timer);
   }
 
   // The backend is up but could not reach its own services (e.g. to verify the
@@ -122,7 +159,7 @@ async function apiFetch<T>(
     // refresh and one retry. Only a refresh Supabase itself REJECTS (revoked,
     // signed out elsewhere) ends the session; a refresh that fails for lack of
     // a connection is just "offline".
-    if (!retried) {
+    if (!opts.retried) {
       const { data: refreshed, error: refreshError } =
         await supabase.auth.refreshSession();
       if (refreshError && isAuthRetryableFetchError(refreshError)) {
@@ -133,7 +170,10 @@ async function apiFetch<T>(
       if (token) {
         const headers = new Headers(init.headers);
         headers.set('Authorization', `Bearer ${token}`);
-        return apiFetch<T>(path, { ...init, headers }, fallbackMessage, true);
+        return apiFetch<T>(path, { ...init, headers }, fallbackMessage, {
+          ...opts,
+          retried: true,
+        });
       }
     }
 
@@ -295,7 +335,8 @@ export async function interpretText(
         ...(opts.freshEntitlement ? { freshEntitlement: true } : {}),
       }),
     },
-    'Failed to interpret text.'
+    'Failed to interpret text.',
+    { timeoutMs: AI_TIMEOUT_MS }
   );
 }
 
@@ -578,7 +619,8 @@ export async function createManualCapture(input: {
       },
       body: JSON.stringify({ ...input, clientTime, timezone }),
     },
-    'Could not save that.'
+    'Could not save that.',
+    { timeoutMs: AI_TIMEOUT_MS }
   );
 
   return data.capture ?? null;
@@ -601,7 +643,8 @@ export async function updateMemory(
       },
       body: JSON.stringify({ content }),
     },
-    'Could not update that memory.'
+    'Could not update that memory.',
+    { timeoutMs: AI_TIMEOUT_MS }
   );
 
   return data.memory;
@@ -654,7 +697,8 @@ export async function takeNote(
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}` },
     },
-    'Kandoo could not take a note just now.'
+    'Kandoo could not take a note just now.',
+    { timeoutMs: AI_TIMEOUT_MS }
   );
   return result.note;
 }
