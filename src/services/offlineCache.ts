@@ -38,6 +38,30 @@ export function useOffline(): boolean {
   return useSyncExternalStore(subscribe, () => offline);
 }
 
+// ------------------------------------------------------------ known offline
+
+/**
+ * When the last request failed for lack of a connection, the next ones would
+ * each wait out their full deadline (20–45 s) on a dead or captive network.
+ * For a short window after such a failure, reads answer from their saved copy
+ * at once (refreshing quietly behind), and other requests use a short deadline.
+ * Any response from the server ends the window immediately.
+ */
+const OFFLINE_WINDOW_MS = 30_000;
+let lastNetworkFailure = 0;
+
+export function markNetworkFailure(): void {
+  lastNetworkFailure = Date.now();
+}
+
+export function markNetworkOk(): void {
+  lastNetworkFailure = 0;
+}
+
+export function recentlyOffline(): boolean {
+  return lastNetworkFailure > 0 && Date.now() - lastNetworkFailure < OFFLINE_WINDOW_MS;
+}
+
 // ------------------------------------------------------------ whose cache
 
 let currentUser: string | null = null;
@@ -127,6 +151,21 @@ export async function withOfflineCache<T>(
   load: () => Promise<T>,
   isNetworkError: (error: unknown) => boolean
 ): Promise<T> {
+  // Known offline: show the saved copy now instead of waiting on the network,
+  // and let a background request refresh it (and end the window) if it can.
+  if (recentlyOffline()) {
+    const saved = await readCache<T>(name);
+    if (saved !== null) {
+      setOffline(true);
+      load()
+        .then((value) => writeCache(name, value))
+        .catch(() => {
+          // Still offline — the saved copy stands; the failure is already marked.
+        });
+      return saved;
+    }
+  }
+
   try {
     const value = await load();
     void writeCache(name, value);

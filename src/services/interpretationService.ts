@@ -1,6 +1,9 @@
 import {
   clearOfflineCache,
+  markNetworkFailure,
+  markNetworkOk,
   readAllCached,
+  recentlyOffline,
   rememberUser,
   setOffline,
   withOfflineCache,
@@ -132,13 +135,38 @@ export class SessionExpiredError extends Error {
  *   - 401 → refresh the session and retry once; sign out only if Supabase
  *     rejects the refresh outright.
  */
+/** Short deadline while the network is known to be down (see offlineCache). */
+const KNOWN_OFFLINE_TIMEOUT_MS = 8_000;
+
 async function apiFetch<T>(
   path: string,
   init: RequestInit,
   fallbackMessage: string,
   opts: { timeoutMs?: number; retried?: boolean } = {}
 ): Promise<T> {
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  try {
+    const result = await apiFetchOnce<T>(path, init, fallbackMessage, opts);
+    markNetworkOk();
+    return result;
+  } catch (error) {
+    // Only a lost connection or timeout opens the "known offline" window; a
+    // real answer from the server (even an error) means we are online.
+    if (error instanceof NetworkError) markNetworkFailure();
+    else markNetworkOk();
+    throw error;
+  }
+}
+
+async function apiFetchOnce<T>(
+  path: string,
+  init: RequestInit,
+  fallbackMessage: string,
+  opts: { timeoutMs?: number; retried?: boolean } = {}
+): Promise<T> {
+  const timeoutMs = Math.min(
+    opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    recentlyOffline() ? KNOWN_OFFLINE_TIMEOUT_MS : Number.POSITIVE_INFINITY
+  );
   // Without a deadline a hung connection (or a server still waking) leaves the
   // UI waiting forever — "Working it out" with no end.
   const controller = new AbortController();
