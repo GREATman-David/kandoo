@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -38,6 +38,7 @@ import {
   logFailure,
 } from '@/services/interpretationService';
 import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
+import { searchNotes } from '@/utils/searchNotes';
 import { timeAgo } from '@/utils/timeAgo';
 
 import { useAuth } from '../features/Auth/useAuth';
@@ -90,6 +91,10 @@ export default function MemoryScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const [query, setQuery] = useState('');
+  // Typing filters the cards instantly on the device; pressing search also
+  // asks Kandoo for a written answer. Both can show at once.
+  const searching = query.trim().length >= 2;
+  const listRef = useRef<ScrollView>(null);
   const [asking, setAsking] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
   const [askError, setAskError] = useState<string | null>(null);
@@ -102,6 +107,16 @@ export default function MemoryScreen() {
   const [paywall, setPaywall] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  const shown = useMemo(
+    () => (searching ? searchNotes(notes, query) : notes),
+    [notes, query, searching]
+  );
+
+  // New search words → start the results at the top, where the best match is.
+  useEffect(() => {
+    listRef.current?.scrollTo({ y: 0, animated: false });
+  }, [query]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -284,7 +299,7 @@ export default function MemoryScreen() {
           style={styles.ask}
           value={query}
           onChangeText={setQuery}
-          placeholder="Ask about anything you've said…"
+          placeholder="Search or ask anything you've said…"
           placeholderTextColor={colors.inkFaint}
           returnKeyType="search"
           onSubmitEditing={ask}
@@ -313,12 +328,34 @@ export default function MemoryScreen() {
       ) : null}
 
       <ScrollView
+        ref={listRef}
         contentContainerStyle={[
           styles.body,
           { paddingBottom: spacing.space4 },
         ]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
+        {searching && !loading && !error && notes.length > 0 ? (
+          <View style={styles.searchHead}>
+            <Text style={styles.searchCount}>
+              {shown.length === 0
+                ? 'No matching memories — press search to ask Kandoo'
+                : `${shown.length} ${shown.length === 1 ? 'match' : 'matches'}`}
+            </Text>
+            <Pressable
+              onPress={() => {
+                setQuery('');
+                setAnswer(null);
+              }}
+              hitSlop={8}
+              accessibilityRole="button"
+            >
+              <Text style={styles.searchClear}>Clear</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {!isAuthenticated ? (
           <Text style={styles.empty}>Sign in to see your memory.</Text>
         ) : loading ? (
@@ -331,7 +368,7 @@ export default function MemoryScreen() {
             help="What you tell Kandoo shows up here."
           />
         ) : (
-          notes.map((note) => {
+          shown.map((note) => {
             const locked = !isPro && isOld(note.created_at);
             const rowTitle =
               note.note?.title ??
@@ -359,7 +396,7 @@ export default function MemoryScreen() {
           })
         )}
 
-        {hasMore && !loading && !error ? (
+        {hasMore && !loading && !error && !searching ? (
           <Pressable
             style={[styles.more, loadingMore && styles.moreBusy]}
             onPress={() => void loadMore()}
@@ -635,6 +672,13 @@ const styles = StyleSheet.create({
     color: colors.accent,
   },
 
+  searchHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  searchCount: { ...text.caption, color: colors.inkMuted, flexShrink: 1 },
+  searchClear: { ...text.bodyStrong, color: colors.markRing },
   more: {
     alignSelf: 'center',
     paddingVertical: spacing.space3,
