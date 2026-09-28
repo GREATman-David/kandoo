@@ -29,20 +29,16 @@ export async function signIn(email: string, password: string) {
 }
 
 /**
- * Sign out on this phone, always. The global sign-out (revoking the refresh
- * token server-side) needs a connection; without one it fails and would leave
- * the user signed in, so it falls back to a local sign-out. Either way nothing
- * of this account stays on the phone: saved copies and scheduled reminders go.
+ * Sign out of THIS device only. `scope: 'local'` ends just this phone's
+ * session; the same account stays signed in on the user's other devices. (The
+ * default, global, signed every device out at once — signing out on a phone
+ * also logged the emulator out.) Nothing of this account stays on the phone:
+ * saved copies and scheduled reminders go.
  */
 export async function signOut() {
-  const { error } = await supabase.auth.signOut();
-
+  const { error } = await supabase.auth.signOut({ scope: 'local' });
   if (error) {
-    console.warn('Global sign-out failed; signing out on this device:', error);
-    const local = await supabase.auth.signOut({ scope: 'local' });
-    if (local.error) {
-      throw local.error;
-    }
+    throw error;
   }
 
   await Promise.all([clearOfflineCache(), cancelAllReminders()]);

@@ -461,9 +461,15 @@ export default function MemoryScreen() {
           setFork(null);
           setNoteId(capture.id);
         }}
-        onOpenMemory={(capture) => {
+        onOpenMemory={(capture, m) => {
           setFork(null);
-          openMemoryOf(capture);
+          setMemoryTarget({
+            id: m.id,
+            content: m.content,
+            captureId: capture.id,
+            sourceTitle: capture.note?.title ?? null,
+            isManual: capture.source === 'manual',
+          });
         }}
       />
 

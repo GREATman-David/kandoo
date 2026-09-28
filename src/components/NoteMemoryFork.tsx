@@ -1,7 +1,7 @@
-import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { CaptureNote } from '@/services/interpretationService';
+import type { CaptureNote, CaptureNoteMemory } from '@/services/interpretationService';
 import { colors, fontFamily, spacing, text } from '@/theme/theme';
 import { timeAgo } from '@/utils/timeAgo';
 
@@ -18,15 +18,17 @@ export type NoteMemoryForkProps = {
   onClose: () => void;
   /** The Note card: the full note, as the Memory list always opened it. */
   onOpenNote: (capture: CaptureNote) => void;
-  /** The Memory card: the fact(s) Kandoo kept from it. */
-  onOpenMemory: (capture: CaptureNote) => void;
+  /** A fact on the Memory card: that memory, as the Memory screen opens one. */
+  onOpenMemory: (capture: CaptureNote, memory: CaptureNoteMemory) => void;
 };
 
 /**
  * "Two ways to see this" (Figma: kandoo-note-memory-fork). One thing you said
  * can be read as the note Kandoo wrote up, or as the short facts it will
- * remember. Shown when a Memory card has both; a card with only one opens it
- * directly, as before.
+ * remember. They were captured together, which is why they sit side by side;
+ * each still opens exactly as a note or a memory opens anywhere else. With
+ * several facts, each is its own tap on the Memory card. Shown when a Memory
+ * list card has both; a card with only one kind opens it directly, as before.
  */
 export function NoteMemoryFork({
   capture,
@@ -42,7 +44,8 @@ export function NoteMemoryFork({
   }
 
   const noteText = capture.note?.body || capture.note?.title || capture.text;
-  const [first, ...rest] = capture.memories;
+  const memories = capture.memories;
+  const single = memories.length === 1;
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -59,54 +62,77 @@ export function NoteMemoryFork({
           </Pressable>
         </View>
 
-        <Text style={styles.eyebrow}>Two ways to see this</Text>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.body}>
+          <Text style={styles.eyebrow}>Two ways to see this</Text>
 
-        <View style={styles.cards}>
-          <Pressable
-            style={[styles.card, styles.noteCard]}
-            onPress={() => onOpenNote(capture)}
-            accessibilityRole="button"
-            accessibilityLabel="Open the note"
-          >
-            <View style={styles.cardHead}>
-              <Image source={ICONS.note} style={styles.cardIcon} />
-              <Text style={styles.cardLabel}>Note</Text>
-            </View>
-            <Text style={styles.cardText} numberOfLines={6}>
-              {noteText}
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={[styles.card, styles.memoryCard]}
-            onPress={() => onOpenMemory(capture)}
-            accessibilityRole="button"
-            accessibilityLabel="Open the memory"
-          >
-            <View style={styles.cardHead}>
-              <Image source={ICONS.memory} style={styles.cardIcon} />
-              <Text style={styles.cardLabel}>{rest.length ? 'Memories' : 'Memory'}</Text>
-            </View>
-            <Text style={styles.cardText} numberOfLines={rest.length ? 5 : 6}>
-              {first?.content ?? ''}
-            </Text>
-            {rest.length ? (
-              <Text style={styles.more}>
-                +{rest.length} more
+          <View style={styles.cards}>
+            <Pressable
+              style={[styles.card, styles.noteCard]}
+              onPress={() => onOpenNote(capture)}
+              accessibilityRole="button"
+              accessibilityLabel="Open the note"
+            >
+              <View style={styles.cardHead}>
+                <Image source={ICONS.note} style={styles.cardIcon} />
+                <Text style={styles.cardLabel}>Note</Text>
+              </View>
+              <Text style={styles.cardText} numberOfLines={6}>
+                {noteText}
               </Text>
-            ) : null}
-          </Pressable>
-        </View>
+            </Pressable>
 
-        <Text style={styles.captured}>Captured {timeAgo(capture.created_at).toLowerCase()}</Text>
+            {single ? (
+              <Pressable
+                style={[styles.card, styles.memoryCard]}
+                onPress={() => onOpenMemory(capture, memories[0])}
+                accessibilityRole="button"
+                accessibilityLabel="Open the memory"
+              >
+                <View style={styles.cardHead}>
+                  <Image source={ICONS.memory} style={styles.cardIcon} />
+                  <Text style={styles.cardLabel}>Memory</Text>
+                </View>
+                <Text style={styles.cardText} numberOfLines={6}>
+                  {memories[0].content}
+                </Text>
+              </Pressable>
+            ) : (
+              <View style={[styles.card, styles.memoryCard]}>
+                <View style={styles.cardHead}>
+                  <Image source={ICONS.memory} style={styles.cardIcon} />
+                  <Text style={styles.cardLabel}>Memories</Text>
+                </View>
+                {memories.map((m, i) => (
+                  <Pressable
+                    key={m.id}
+                    style={[styles.fact, i > 0 && styles.factDivided]}
+                    onPress={() => onOpenMemory(capture, m)}
+                    hitSlop={4}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open the memory: ${m.content}`}
+                  >
+                    <Text style={styles.cardText}>{m.content}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <Text style={styles.captured}>Captured {timeAgo(capture.created_at).toLowerCase()}</Text>
+        </ScrollView>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.base, paddingHorizontal: spacing.space5 },
+  screen: {
+    flex: 1,
+    backgroundColor: colors.base,
+    paddingHorizontal: spacing.space5,
+  },
   bar: { height: 44, flexDirection: 'row', alignItems: 'center' },
+  body: { paddingBottom: spacing.space6 },
   backBtn: { width: 40, height: 40, justifyContent: 'center' },
   backIcon: { width: 20, height: 20, tintColor: colors.ink },
   eyebrow: {
@@ -116,17 +142,26 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: spacing.space4,
   },
-  cards: { flexDirection: 'row', gap: spacing.space4 },
+  // Side by side and always the same height; a card with several facts grows.
+  cards: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.space4 },
   card: {
     flex: 1,
-    height: 180,
+    minHeight: 180,
     padding: spacing.space4,
     borderRadius: 14,
     borderWidth: 1,
   },
   noteCard: { backgroundColor: colors.surface, borderColor: colors.line },
-  memoryCard: { backgroundColor: colors.accentWash, borderColor: colors.lineStrong },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.space2, marginBottom: spacing.space2 },
+  memoryCard: {
+    backgroundColor: colors.accentWash,
+    borderColor: colors.lineStrong,
+  },
+  cardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.space2,
+    marginBottom: spacing.space2,
+  },
   cardIcon: { width: 16, height: 16, tintColor: colors.markRing },
   cardLabel: { ...text.label, letterSpacing: 1.5, color: colors.markRing },
   cardText: {
@@ -135,7 +170,13 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: colors.ink,
   },
-  more: { ...text.caption, color: colors.markRing, marginTop: 'auto' },
+  fact: { paddingVertical: spacing.space1 },
+  factDivided: {
+    marginTop: spacing.space2,
+    paddingTop: spacing.space2,
+    borderTopWidth: 1,
+    borderTopColor: colors.lineStrong,
+  },
   captured: {
     ...text.caption,
     fontSize: 12,
