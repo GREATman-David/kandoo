@@ -28,6 +28,9 @@ export type SymbolState =
 export type SymbolProps = {
   state: SymbolState;
   size: number;
+  /** The colour between the rings. Defaults to the cream page; a screen on a
+   *  different ground (the reminder alert) passes its own so the gaps match. */
+  gapColor?: string;
 };
 
 /**
@@ -103,7 +106,7 @@ const PULSE_MS = 900;
 /** The ground circle reads as a wash around the mark, not a tight disc. */
 const GROUND_RATIO = 1.45;
 
-export function KandooSymbol({ state, size }: SymbolProps) {
+export function KandooSymbol({ state, size, gapColor }: SymbolProps) {
   const [reduceMotion, setReduceMotion] = useState(false);
   const scale = useSharedValue(1);
 
@@ -169,7 +172,7 @@ export function KandooSymbol({ state, size }: SymbolProps) {
   const core = size * CORE_DIAMETER;
   // The Figma mark fills its gaps with the cream ground, so the rings read
   // the same over a halo as over the page. Alarm keeps them open to its red.
-  const gap = state === 'alarm' ? 'transparent' : colors.base;
+  const gap = state === 'alarm' ? 'transparent' : (gapColor ?? colors.base);
 
   return (
     <View

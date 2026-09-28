@@ -59,6 +59,8 @@ export const colors = {
   markRing: '#8A6A00',
   /** Centre core — amber. */
   markCore: '#DA8F00',
+  /** Pale gold — the light squares of the reminder alert's border and its badge. */
+  markPale: '#FCE9A6',
 } as const;
 
 export type ColorName = keyof typeof colors;

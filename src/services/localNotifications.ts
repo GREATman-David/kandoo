@@ -25,14 +25,21 @@ const CHANNEL_INSISTENT = 'kandoo-alarms';
 
 let channelsReady = false;
 
-/** Fire in the foreground too — a reminder the user doesn't see is useless. */
+/**
+ * Fire in the foreground too — a reminder the user doesn't see is useless. With
+ * the app open, a reminder's full-screen alert (ReminderAlertHost) takes the
+ * place of the banner; its sound still plays and it stays in the shade.
+ */
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notification) => {
+    const isReminder = typeof notification.request.content.data?.reminderId === 'string';
+    return {
+      shouldShowBanner: !isReminder,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    };
+  },
 });
 
 export type NotificationSetup = {
@@ -109,18 +116,23 @@ export async function scheduleReminder(
   const due = new Date(reminder.due_at);
   if (Number.isNaN(due.getTime())) return null;
 
+  const days = normalizeDays(reminder.repeat_days);
   const content = {
     title: reminder.task,
     body: reminder.person ? `With ${reminder.person}` : 'Kandoo reminder',
     sound: true,
-    // Lets a tap open this reminder (NotificationRouter).
-    data: { reminderId: reminder.id },
+    // Lets the full-screen alert show this reminder and act on it
+    // (ReminderAlertHost), with the app open or from a tap.
+    data: {
+      reminderId: reminder.id,
+      repeating: !!days,
+      insistent: reminder.insistent,
+    },
   };
   const channelId = channelFor(reminder);
 
   // Repeating: one weekly notification per chosen day, at due_at's time of
   // day. The OS repeats them, so they keep firing with the app closed.
-  const days = normalizeDays(reminder.repeat_days);
   if (days) {
     const ids: string[] = [];
     for (const day of days) {
@@ -166,6 +178,12 @@ export async function scheduleReminder(
   return notificationId;
 }
 
+/** Whether the phone has this reminder scheduled as a repeating one. */
+export async function isScheduledRepeating(reminderId: string): Promise<boolean> {
+  const entry = await getTrigger(reminderId);
+  return !!entry?.repeat;
+}
+
 /** Cancel a reminder's notification and forget it. Safe if none exists. */
 export async function cancelReminder(reminderId: string): Promise<void> {
   const entry = await getTrigger(reminderId);
@@ -178,6 +196,39 @@ export async function cancelReminder(reminderId: string): Promise<void> {
       }
     }
     await removeTrigger(reminderId);
+  }
+}
+
+/**
+ * Snooze a REPEATING reminder once: one extra notification `minutes` from now,
+ * leaving its weekly times alone (moving due_at would move every repeat). The
+ * extra notification joins the reminder's registry entry, so cancelling the
+ * reminder cancels it too and the launch sweep keeps it.
+ */
+export async function snoozeRepeatingOnce(
+  alert: { reminderId: string; title: string; body: string; insistent: boolean },
+  minutes: number
+): Promise<void> {
+  await ensureChannels();
+  const id = await Notifications.scheduleNotificationAsync({
+    content: {
+      title: alert.title,
+      body: alert.body,
+      sound: true,
+      data: { reminderId: alert.reminderId, repeating: true, insistent: alert.insistent },
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: new Date(Date.now() + minutes * 60_000),
+      channelId: alert.insistent ? CHANNEL_INSISTENT : CHANNEL_DEFAULT,
+    },
+  });
+  const entry = await getTrigger(alert.reminderId);
+  if (entry) {
+    await setTrigger(alert.reminderId, {
+      ...entry,
+      notificationIds: [...entryIds(entry), id],
+    });
   }
 }
 
