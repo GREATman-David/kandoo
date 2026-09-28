@@ -2,6 +2,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,7 +26,13 @@ import {
   logFailure,
 } from '@/services/interpretationService';
 import { cancelReminder, scheduleReminder } from '@/services/localNotifications';
-import { colors, radius, spacing, text } from '@/theme/theme';
+import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
+
+const ICONS = {
+  // Figma puts a clock where "new reminder" lives.
+  add: require('@/assets/images/icons/chip-time.png'),
+  expand: require('@/assets/images/icons/chevron-down.png'),
+};
 import { formatDueDate } from '@/utils/formatDueDate';
 
 import { useAuth } from '../features/Auth/useAuth';
@@ -174,7 +181,7 @@ export default function RemindersScreen() {
     groups.history.length === 0;
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + spacing.space4 }]}>
+    <View style={[styles.screen, { paddingTop: insets.top + spacing.space2 }]}>
       <View style={styles.header}>
         <Text style={styles.heading}>Reminders</Text>
         <Pressable
@@ -184,7 +191,7 @@ export default function RemindersScreen() {
           accessibilityRole="button"
           accessibilityLabel="New reminder"
         >
-          <Text style={styles.addText}>＋</Text>
+          <Image source={ICONS.add} style={styles.addIcon} />
         </Pressable>
       </View>
       <OfflineNote />
@@ -272,10 +279,14 @@ export default function RemindersScreen() {
                   style={styles.historyToggle}
                   onPress={() => setHistoryOpen((v) => !v)}
                 >
-                  <Text style={styles.eyebrow}>
-                    History {groups.history.length}
-                  </Text>
-                  <Text style={styles.chevron}>{historyOpen ? '⌃' : '⌄'}</Text>
+                  <View style={styles.historyLabel}>
+                    <Text style={styles.historyEyebrow}>History</Text>
+                    <Text style={styles.historyCount}>{groups.history.length}</Text>
+                  </View>
+                  <Image
+                    source={ICONS.expand}
+                    style={[styles.expandIcon, historyOpen && styles.expandIconOpen]}
+                  />
                 </Pressable>
                 {historyOpen
                   ? groups.history.map((r) => (
@@ -352,106 +363,134 @@ type RowProps = {
   onDelete: (r: CreatedReminder) => void;
 };
 
+/**
+ * One reminder as a Figma card: the task in serif, its time beneath, the person
+ * as a chip on the right. Tap opens the reminder (Done and Snooze live there);
+ * long-press offers Mark done or Delete. A reminder awaiting review keeps its amber highlight.
+ */
 function Row({ reminder, needsReview, onOpen, onDone, onDelete }: RowProps) {
   const when = formatDueDate(reminder.due_at) ?? reminder.place_hint ?? '';
+
+  // Long-press keeps both quick actions the old time pill and long-press gave:
+  // complete (with its Undo) for a scheduled reminder, and delete.
+  const quickActions = () => {
+    if (needsReview) {
+      onDelete(reminder);
+      return;
+    }
+    Alert.alert(reminder.task, undefined, [
+      { text: 'Mark done', onPress: () => onDone(reminder) },
+      { text: 'Delete', style: 'destructive', onPress: () => onDelete(reminder) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
   return (
-    <View style={[styles.row, needsReview && styles.rowReview]}>
-      <Pressable
-        style={styles.rowMain}
-        onPress={() => onOpen(reminder)}
-        onLongPress={() => onDelete(reminder)}
-      >
+    <Pressable
+      style={[styles.row, needsReview && styles.rowReview]}
+      onPress={() => onOpen(reminder)}
+      onLongPress={quickActions}
+      accessibilityRole="button"
+      accessibilityHint="Long-press to mark done or delete"
+    >
+      <View style={styles.rowMain}>
         <View style={styles.rowTop}>
           {needsReview ? <View style={styles.dot} /> : null}
           <Text style={styles.rowTask} numberOfLines={2}>
             {reminder.task}
           </Text>
         </View>
-        {reminder.person ? (
-          <Text style={styles.rowPerson}>{reminder.person}</Text>
-        ) : null}
-      </Pressable>
-
-      {needsReview ? (
-        <Text style={styles.reviewTag}>Review</Text>
-      ) : reminder.due_at ? (
-        <Pressable
-          style={styles.pill}
-          onPress={() => onDone(reminder)}
-          hitSlop={6}
-          accessibilityLabel={`Mark ${reminder.task} done`}
-        >
-          <Text style={styles.pillText}>{when}</Text>
-        </Pressable>
-      ) : (
-        <Text style={styles.rowWhen}>{when}</Text>
-      )}
-    </View>
+        <Text style={styles.rowWhen}>
+          {needsReview ? `Needs review${when ? ` · ${when}` : ''}` : when}
+        </Text>
+      </View>
+      {reminder.person ? (
+        <View style={styles.personChip}>
+          <Text style={styles.personChipText} numberOfLines={1}>
+            {reminder.person}
+          </Text>
+        </View>
+      ) : null}
+    </Pressable>
   );
 }
 
+// Reminders (Figma: kandoo-reminders).
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.base, paddingHorizontal: spacing.space4 },
+  screen: { flex: 1, backgroundColor: colors.base, paddingHorizontal: spacing.space5 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.space4,
+    marginBottom: spacing.space5,
   },
-  heading: { ...text.displayXl, color: colors.ink },
+  heading: { ...text.displayL, letterSpacing: 0, color: colors.ink },
   add: {
     width: 40,
     height: 40,
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'center',
   },
-  addText: { fontSize: 28, color: colors.accent, lineHeight: 30 },
-  body: { paddingTop: spacing.space2 },
+  addIcon: { width: 20, height: 20, tintColor: colors.markRing },
+  body: { paddingTop: spacing.space1 },
   dim: { ...text.body, color: colors.inkFaint, marginTop: spacing.space8, textAlign: 'center' },
   error: { ...text.body, color: colors.alarmText, marginTop: spacing.space8, textAlign: 'center' },
 
-  section: { marginBottom: spacing.space6 },
-  eyebrow: { ...text.label, color: colors.inkMuted, marginBottom: spacing.space3 },
+  section: { marginBottom: spacing.space5, gap: spacing.space2 },
+  eyebrow: { ...text.label, letterSpacing: 1.5, color: colors.markRing },
 
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: spacing.space3,
-    paddingVertical: spacing.space3,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.space4,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
   },
   rowReview: {
     backgroundColor: colors.accentWash,
-    borderTopWidth: 0,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.space3,
-    marginBottom: spacing.space2,
+    borderBottomColor: colors.lineStrong,
   },
-  rowMain: { flex: 1 },
+  rowMain: { flex: 1, gap: spacing.space1 },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.space2 },
   dot: { width: 7, height: 7, borderRadius: radius.full, backgroundColor: colors.accent },
-  rowTask: { ...text.body, color: colors.ink, flexShrink: 1 },
-  rowPerson: { ...text.caption, color: colors.inkMuted, marginTop: 2 },
-  pill: {
+  rowTask: {
+    fontFamily: fontFamily.displayRegular,
+    fontSize: 16,
+    lineHeight: 22,
+    color: colors.ink,
+    flexShrink: 1,
+  },
+  rowWhen: { ...text.caption, color: colors.inkMuted },
+  personChip: {
+    maxWidth: 120,
+    paddingVertical: spacing.space1,
+    paddingHorizontal: spacing.space2,
     borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.accentWash,
   },
-  pillText: { ...text.caption, color: colors.ink },
-  rowWhen: { ...text.caption, color: colors.inkMuted },
-  reviewTag: { ...text.label, color: colors.accent },
+  personChipText: {
+    fontFamily: fontFamily.textRegular,
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.markRing,
+  },
 
   historyToggle: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: spacing.space1,
   },
-  chevron: { ...text.body, color: colors.inkMuted },
+  historyLabel: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  historyEyebrow: { ...text.label, letterSpacing: 1.5, color: colors.markRing },
+  historyCount: { ...text.caption, color: colors.inkMuted },
+  expandIcon: { width: 16, height: 16, tintColor: colors.inkMuted },
+  expandIconOpen: { transform: [{ rotate: '180deg' }] },
   historyRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
