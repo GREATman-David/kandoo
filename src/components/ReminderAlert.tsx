@@ -22,6 +22,8 @@ export type AlertReminder = {
   body: string;
   repeating: boolean;
   insistent: boolean;
+  /** When it went off (ms), shown beside IT'S TIME. */
+  firedAt: number;
 };
 
 export type ReminderAlertProps = {
@@ -167,7 +169,13 @@ export function ReminderAlert({ alert, onClose }: ReminderAlertProps) {
               <KandooSymbol state="idle" size={112} gapColor={colors.accentWash} />
             </View>
             <View style={styles.message}>
-              <Text style={styles.eyebrow}>It’s time</Text>
+              <Text style={styles.eyebrow}>
+                It’s time ·{' '}
+                {new Date(alert.firedAt).toLocaleTimeString(undefined, {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </Text>
               <Text style={styles.task} accessibilityRole="header">
                 {alert.title}
               </Text>

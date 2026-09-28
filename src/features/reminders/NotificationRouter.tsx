@@ -16,6 +16,8 @@ function alertFrom(notification: Notifications.Notification): AlertReminder | nu
     body: content.body ?? '',
     repeating: content.data?.repeating === true,
     insistent: content.data?.insistent === true,
+    // The moment it was delivered; a tapped-later alert still shows that time.
+    firedAt: Number.isFinite(notification.date) && notification.date > 0 ? notification.date : Date.now(),
   };
 }
 
