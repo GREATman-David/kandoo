@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -7,6 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   fetchPerson,
@@ -16,8 +18,9 @@ import {
   logFailure,
 } from '@/services/interpretationService';
 import { useEntitlement } from '@/hooks/useEntitlement';
-import { colors, radius, spacing, text } from '@/theme/theme';
+import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 import { formatDueDate } from '@/utils/formatDueDate';
+import { timeAgo } from '@/utils/timeAgo';
 
 import { LockedRow } from './LockedRow';
 import { NoteDetail } from './NoteDetail';
@@ -25,6 +28,34 @@ import { Paywall } from './Paywall';
 import { ReminderDetail } from './ReminderDetail';
 
 const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000;
+
+const ICONS = {
+  back: require('@/assets/images/icons/chevron-left.png'),
+  open: require('@/assets/images/icons/chevron-right.png'),
+};
+
+/** One tappable line in a section: serif text, optional meta, gold chevron. */
+function Row({
+  title,
+  meta,
+  onPress,
+}: {
+  title: string;
+  meta?: string | null;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={styles.row} onPress={onPress} accessibilityRole="button">
+      <View style={styles.rowMain}>
+        <Text style={styles.rowText} numberOfLines={3}>
+          {title}
+        </Text>
+        {meta ? <Text style={styles.rowMeta}>{meta}</Text> : null}
+      </View>
+      <Image source={ICONS.open} style={styles.rowIcon} />
+    </Pressable>
+  );
+}
 const isOld = (iso: string) => Date.now() - Date.parse(iso) > TEN_DAYS_MS;
 
 export type PersonDetailProps = {
@@ -62,6 +93,7 @@ export function PersonDetail({
   onClose,
   onChanged,
 }: PersonDetailProps) {
+  const insets = useSafeAreaInsets();
   const { isPro, refresh } = useEntitlement();
   const [person, setPerson] = useState<PersonDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,9 +134,14 @@ export function PersonDetail({
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.screen}>
-        <View style={styles.bar}>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <Text style={styles.back}>‹ Back</Text>
+        <View style={[styles.bar, { marginTop: insets.top + spacing.space4 }]}>
+          <Pressable
+            onPress={onClose}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+          >
+            <Image source={ICONS.back} style={styles.barIcon} />
           </Pressable>
         </View>
 
@@ -135,15 +172,11 @@ export function PersonDetail({
                 <View style={styles.section}>
                   <Text style={styles.eyebrow}>What you know</Text>
                   {recentMemories.map((m) => (
-                    <Pressable
+                    <Row
                       key={m.id}
-                      style={styles.row}
+                      title={m.content}
                       onPress={() => m.capture_id && setNoteId(m.capture_id)}
-                    >
-                      <Text style={styles.rowText} numberOfLines={2}>
-                        {m.content}
-                      </Text>
-                    </Pressable>
+                    />
                   ))}
                   {lockedMemories.map((m) => (
                     <LockedRow key={m.id} title={m.content} onPress={() => setPaywall(true)} />
@@ -155,18 +188,12 @@ export function PersonDetail({
                 <View style={styles.section}>
                   <Text style={styles.eyebrow}>What you promised</Text>
                   {person.reminders.map((r) => (
-                    <Pressable
+                    <Row
                       key={r.id}
-                      style={styles.row}
+                      title={r.task}
+                      meta={formatDueDate(r.due_at) ?? 'No time set'}
                       onPress={() => setReminder(toReminder(r, person.name))}
-                    >
-                      <Text style={styles.rowText} numberOfLines={1}>
-                        {r.task}
-                      </Text>
-                      <Text style={styles.rowMeta}>
-                        {formatDueDate(r.due_at) ?? 'No time set'}
-                      </Text>
-                    </Pressable>
+                    />
                   ))}
                 </View>
               ) : null}
@@ -175,11 +202,12 @@ export function PersonDetail({
                 <View style={styles.section}>
                   <Text style={styles.eyebrow}>Mentioned in</Text>
                   {person.notes.map((n) => (
-                    <Pressable key={n.id} style={styles.row} onPress={() => setNoteId(n.id)}>
-                      <Text style={styles.rowText} numberOfLines={1}>
-                        {n.title ?? 'A note'}
-                      </Text>
-                    </Pressable>
+                    <Row
+                      key={n.id}
+                      title={n.title ?? 'A note'}
+                      meta={timeAgo(n.created_at)}
+                      onPress={() => setNoteId(n.id)}
+                    />
                   ))}
                 </View>
               ) : null}
@@ -224,29 +252,54 @@ function countLine(m: number, r: number, n: number): string {
   return parts.join(' · ') || 'Nothing yet';
 }
 
+// Person profile (Figma: kandoo-jed-profile).
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.base, paddingHorizontal: spacing.space4 },
-  bar: { paddingTop: spacing.space7, paddingBottom: spacing.space2 },
-  back: { ...text.body, color: colors.inkMuted },
-  body: { paddingBottom: spacing.space8 },
+  screen: { flex: 1, backgroundColor: colors.base, paddingHorizontal: spacing.space5 },
+  bar: { height: 44, flexDirection: 'row', alignItems: 'center' },
+  barIcon: { width: 20, height: 20, tintColor: colors.ink },
+  body: { paddingTop: 20, paddingBottom: spacing.space8 },
   dim: { ...text.body, color: colors.inkFaint, marginTop: spacing.space6 },
   error: { ...text.body, color: colors.alarmText, marginTop: spacing.space6 },
-  head: { alignItems: 'center', marginTop: spacing.space4, marginBottom: spacing.space6 },
+  head: { alignItems: 'center', marginBottom: spacing.space6 },
   avatar: {
-    width: 64,
-    height: 64,
+    width: 72,
+    height: 72,
     borderRadius: radius.full,
     backgroundColor: colors.accentWash,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.space3,
   },
-  avatarText: { ...text.displayL, color: colors.settled },
-  name: { ...text.displayL, color: colors.ink },
-  counts: { ...text.caption, color: colors.inkMuted, marginTop: spacing.space1 },
+  avatarText: {
+    fontFamily: fontFamily.textSemiBold,
+    fontSize: 24,
+    lineHeight: 30,
+    color: colors.markRing,
+  },
+  name: { ...text.displayL, letterSpacing: 0, color: colors.ink, textAlign: 'center' },
+  counts: { ...text.caption, color: colors.inkMuted, marginTop: 6, textAlign: 'center' },
   section: { marginBottom: spacing.space6 },
-  eyebrow: { ...text.label, color: colors.inkMuted, marginBottom: spacing.space2 },
-  row: { paddingVertical: spacing.space3, borderTopWidth: 1, borderTopColor: colors.line },
-  rowText: { ...text.body, color: colors.ink },
-  rowMeta: { ...text.caption, color: colors.inkMuted, marginTop: 2 },
+  eyebrow: {
+    ...text.label,
+    letterSpacing: 1.5,
+    color: colors.markRing,
+    marginBottom: spacing.space1,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.space3,
+    paddingVertical: spacing.space3,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  rowMain: { flex: 1, gap: spacing.space1 },
+  rowText: {
+    fontFamily: fontFamily.displayRegular,
+    fontSize: 16,
+    lineHeight: 24,
+    color: colors.ink,
+  },
+  rowMeta: { ...text.caption, color: colors.inkMuted },
+  rowIcon: { width: 16, height: 16, tintColor: colors.markRing },
 });
