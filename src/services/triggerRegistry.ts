@@ -65,3 +65,12 @@ export async function removeTrigger(reminderId: string): Promise<void> {
     await write(registry);
   }
 }
+
+/** Forget every trigger (sign-out). */
+export async function clearTriggers(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(KEY);
+  } catch (error) {
+    console.warn('Trigger registry clear failed:', error);
+  }
+}

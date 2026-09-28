@@ -91,9 +91,13 @@ async function resolveEntitlementId(
  * RevenueCat outage must never hand out Pro, and free still answers the last
  * 10 days, so the user is never blocked — only asked to upgrade for older ones.
  */
-export async function isProUser(userId: string): Promise<boolean> {
+export async function isProUser(
+  userId: string,
+  /** Skip the cache — the app sends this right after a purchase. */
+  opts: { fresh?: boolean } = {}
+): Promise<boolean> {
   const cached = proStatusCache.get(userId);
-  if (cached && Date.now() - cached.at < PRO_STATUS_TTL_MS) {
+  if (!opts.fresh && cached && Date.now() - cached.at < PRO_STATUS_TTL_MS) {
     return cached.value;
   }
 

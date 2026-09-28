@@ -4,11 +4,11 @@
 
 Kandoo is a personal memory and action assistant. You speak naturally — a messy
 recap after a meeting, a thought on the walk home — and it works out the people,
-places, times and commitments in what you said, keeps what matters, and brings it
-back at the moment it becomes useful: at the time, at the place, with the person.
+times and commitments in what you said, keeps what matters, and brings it back
+when it matters: as a reminder at the right time, or the moment you ask.
 
-Most assistants wait to be asked. Kandoo remembers *where* and *when* a memory
-becomes useful, and hands it to you there.
+Most assistants wait to be told exactly what to do. Kandoo takes one unstructured
+sentence and turns it into the reminders, memories and notes inside it.
 
 Built for the **RevenueCat Shipaton 2026 — Next Gen Award**.
 
@@ -26,9 +26,10 @@ Built for the **RevenueCat Shipaton 2026 — Next Gen Award**.
 
 ## The mark
 
-Kandoo's symbol is **Mmere Dane**, an Adinkra symbol from Ghana meaning *time
-changes* — which is the product: information is worthless at the wrong moment
-and valuable at the right one.
+Kandoo's symbol is **Adinkrahene**, the Adinkra symbol from Ghana known as the
+"chief" of the Adinkra symbols — concentric circles standing for greatness,
+leadership and the idea at the centre of everything else. For Kandoo it is the
+one place everything you've told it comes back to.
 
 ---
 
@@ -47,8 +48,24 @@ CAPTURE  →  EXTRACT  →  LINK  →  SURFACE
    meeting recap can produce several of each.
 3. **Link.** Each action is anchored to who, where and when, and memories are
    embedded for semantic search.
-4. **Surface.** Nothing is committed until you review it. Once confirmed, the
-   device — not the server — owns the trigger: a time, a place, a person.
+4. **Surface.** Nothing is scheduled until you review it. Once confirmed, the
+   device — not the server — owns the trigger, so a reminder fires on time even
+   with no connection. (Place and person triggers are on the roadmap.)
+
+### What's in this build
+
+- **Voice or text capture** — on-device speech recognition; one utterance can
+  hold several reminders and memories.
+- **Understood → review → remember** — every extracted action is shown before it
+  counts; reminders stay `pending` until you confirm them.
+- **Recall** — ask about anything you've said; the answer is written from your
+  own memories, and can be read aloud.
+- **Take note** — turn any capture into a clean, professional note.
+- **Local reminders** — scheduled on the phone, delivered with the server off.
+- **Offline** — what you've already seen stays readable with no connection, and
+  questions are answered from what's saved.
+- **Kandoo Pro (RevenueCat)** — Free recall reaches back ten days; Pro reaches
+  back across your whole history.
 
 ### Architecture in brief
 
@@ -73,6 +90,19 @@ USER → AI INTERPRETS → BUSINESS LOGIC DECIDES → DATABASE PERSISTS → USER
 **Stack:** React Native · Expo · TypeScript · Expo Router · Reanimated — Node ·
 Express 5 — Supabase (Postgres, pgvector, Auth) — Google Gemini via a provider
 abstraction (OpenAI and a mock provider are also implemented).
+
+### Monetization — RevenueCat
+
+Kandoo Pro is a single `kandoo_pro` entitlement sold as monthly and annual
+packages from the RevenueCat **current offering**. The line between Free and Pro
+is *memory depth*, and it is enforced **on the server**: the backend reads the
+entitlement from RevenueCat's V2 REST API, keyed by the Supabase user id (the
+app calls `Purchases.logIn` with that id), so a modified client cannot unlock
+older memories. The paywall appears only at that boundary — when a question
+reaches past the free ten days — never on launch.
+
+This build uses RevenueCat's **Test Store**, since it is distributed as an APK
+rather than through Google Play.
 
 ### AI provider
 
@@ -104,9 +134,11 @@ cp .env.example .env     # then fill it in
 npm run dev
 ```
 
-`backend/.env` needs your Supabase URL and **service-role** key, and
-`GEMINI_API_KEY` / `GEMINI_MODEL` (see `.env.example` for the current model).
-The service-role key must never reach the mobile app.
+`backend/.env` needs your Supabase URL and **service-role** key,
+`GEMINI_API_KEY` / `GEMINI_MODEL` with `AI_PROVIDER=gemini`, and
+`REVENUECAT_SECRET_KEY` / `REVENUECAT_PROJECT_ID` for the Pro check (without
+them everyone is treated as Free). The service-role key must never reach the
+mobile app.
 
 The server listens on port 3000. `GET /health` confirms it's up.
 
@@ -117,9 +149,11 @@ npm install
 cp .env.example .env     # then fill it in
 ```
 
-`.env` needs your Supabase URL and **anon/publishable** key, and the backend URL.
-From an Android emulator the host machine is reachable at `10.0.2.2`, so use
-`EXPO_PUBLIC_API_URL=http://10.0.2.2:3000`.
+`.env` needs your Supabase URL and **anon/publishable** key, the backend URL,
+and `EXPO_PUBLIC_REVENUECAT_KEY` (the RevenueCat public SDK key). From a Google
+AVD the host is reachable at `10.0.2.2`, so use
+`EXPO_PUBLIC_API_URL=http://10.0.2.2:3000`; with `adb reverse tcp:3000 tcp:3000`
+(any emulator, including MuMu) `http://127.0.0.1:3000` works too.
 
 Everything in the root `.env` is inlined into the JS bundle at build time — never
 put a secret there. After changing it, restart Metro with `--clear`.
@@ -168,12 +202,15 @@ both reminders `pending` until you confirm them.
 |---|---|
 | Multi-action extraction | ✅ |
 | Hybrid semantic recall | ✅ |
-| Review sheet with confirm | ✅ |
-| Design system and brand | in progress |
-| Local notifications | planned |
-| Voice capture | planned |
+| Understood / review / remember | ✅ |
+| Voice capture and spoken answers | ✅ |
+| Local notifications (fire offline) | ✅ |
+| Take note | ✅ |
+| Offline reading and recall | ✅ |
+| RevenueCat Pro (server-enforced) | ✅ |
+| Design system and brand | ✅ |
 | Place triggers (geofencing) | planned |
-| RevenueCat | planned |
+| Person triggers | planned |
 | Usage-based free tier limits | planned · post-submission |
 
 ---

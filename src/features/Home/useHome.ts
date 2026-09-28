@@ -121,6 +121,9 @@ export function useHome() {
   // immediately after the final 'result'.
   const latest = useRef('');
   const busyRef = useRef(false);
+  // Set by onProUnlocked so the re-asked question re-checks Pro on the server
+  // instead of hitting its short "free" cache and raising the paywall again.
+  const freshEntitlementNext = useRef(false);
   // Set when the user asks to send while the mic is still live, so the 'end'
   // handler submits the final transcript rather than a mid-word interim.
   const submitOnEnd = useRef(false);
@@ -180,7 +183,9 @@ export function useHome() {
     setState('understanding');
 
     try {
-      const result = await interpretText(text);
+      const freshEntitlement = freshEntitlementNext.current;
+      freshEntitlementNext.current = false;
+      const result = await interpretText(text, { freshEntitlement });
       // Nothing actionable came back (extraction returned no ok actions). Never
       // show an empty Understanding screen — say so in Kandoo's voice and leave
       // the text where the user can reword and resend it.
@@ -408,6 +413,7 @@ export function useHome() {
   const onProUnlocked = useCallback(() => {
     setPaywallVisible(false);
     latest.current = submittedText.current;
+    freshEntitlementNext.current = true;
     void runInterpret();
   }, [runInterpret]);
 

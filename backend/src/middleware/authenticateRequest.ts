@@ -1,3 +1,4 @@
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import type { NextFunction, Request, Response } from 'express';
 
 import { supabase } from '../services/supabase';
@@ -36,6 +37,16 @@ export async function authenticateRequest(
       error,
     } = await supabase.auth.getUser(token);
 
+    // "Can't reach Supabase to check" is NOT "this token is bad". Answering 401
+    // for a network failure made the app sign the user out whenever the server
+    // lost its connection; 503 tells the client to treat it as offline.
+    if (error && (isAuthRetryableFetchError(error) || !error.status || error.status >= 500)) {
+      console.error('Token verification unavailable:', error);
+      return res.status(503).json({
+        error: 'Kandoo could not verify your session just now. Please try again.',
+      });
+    }
+
     if (error || !user) {
       return res.status(401).json({
         error: 'Invalid or expired access token.',
@@ -49,10 +60,12 @@ export async function authenticateRequest(
 
     next();
   } catch (error) {
+    // An exception here is the verification call failing, not a verdict on
+    // the token — same reasoning as above.
     console.error('Authentication error:', error);
 
-    return res.status(401).json({
-      error: 'Authentication failed.',
+    return res.status(503).json({
+      error: 'Kandoo could not verify your session just now. Please try again.',
     });
   }
 }

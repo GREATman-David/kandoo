@@ -254,7 +254,9 @@ zero rows.
 Full system: **https://claude.ai/artifact/6sDsL44XFTZzigvBGQeq7E**
 Read `project/README.md` first, then `project/tokens.json`.
 
-**The mark is Mmere Dane**, an Adinkra symbol from Ghana meaning *time changes*.
+**The mark is Adinkrahene**, the "chief" of the Adinkra symbols (Ghana) —
+concentric circles standing for greatness and leadership. (Earlier notes called
+it Mmere Dane; that is a different symbol and was wrong.)
 **Never deform it** — no morphing, stretching, or animating its paths
 independently. Expression is colour, uniform scale, glow and opacity only.
 
@@ -363,8 +365,8 @@ Confirm the LICENSE is MIT and assigned to the author, not to the Expo template.
 Keep scratch files out: `.gradle-build.log`, `backend/.dev-server.log`,
 `backend/.test-*.cjs`.
 
-Worth one line in the public README: the mark is Mmere Dane, an Adinkra symbol
-meaning *time changes*. Also state honestly that development runs on the Gemini
+Worth one line in the public README: the mark is Adinkrahene, the "chief" of the
+Adinkra symbols. Also state honestly that development runs on the Gemini
 free tier, and that production would require Tier 1 for the no-training
 commitment.
 

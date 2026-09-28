@@ -5,6 +5,8 @@ import {
   setOffline,
   withOfflineCache,
 } from './offlineCache';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
+
 import { supabase } from './supabase';
 
 function requireEnv(value: string | undefined, name: string): string {
@@ -66,11 +68,15 @@ export class SessionExpiredError extends Error {
  *     backend already sanitises its errors (AGENTS §10), so it is safe to show.
  *   - a non-ok response with no usable body (an HTML 5xx from a proxy, a 204) →
  *     NetworkError, because there is nothing meaningful to say.
+ *   - 503 (backend can't reach its services) → NetworkError: offline, not failure.
+ *   - 401 → refresh the session and retry once; sign out only if Supabase
+ *     rejects the refresh outright.
  */
 async function apiFetch<T>(
   path: string,
   init: RequestInit,
-  fallbackMessage: string
+  fallbackMessage: string,
+  retried = false
 ): Promise<T> {
   let response: Response;
   try {
@@ -78,6 +84,13 @@ async function apiFetch<T>(
   } catch (transport) {
     // No connection, DNS, TLS, or cleartext-blocked: a transport failure.
     console.error(`Network request to ${path} failed:`, transport);
+    throw new NetworkError();
+  }
+
+  // The backend is up but could not reach its own services (e.g. to verify the
+  // session). For the user that is "offline", not an error or a sign-out.
+  if (response.status === 503) {
+    console.warn(`Backend unavailable for ${path} (503).`);
     throw new NetworkError();
   }
 
@@ -105,7 +118,26 @@ async function apiFetch<T>(
   }
 
   if (response.status === 401) {
-    console.error(`Request to ${path} was unauthorised; signing out.`);
+    // Stay signed in until the user signs out: a 401 first gets a session
+    // refresh and one retry. Only a refresh Supabase itself REJECTS (revoked,
+    // signed out elsewhere) ends the session; a refresh that fails for lack of
+    // a connection is just "offline".
+    if (!retried) {
+      const { data: refreshed, error: refreshError } =
+        await supabase.auth.refreshSession();
+      if (refreshError && isAuthRetryableFetchError(refreshError)) {
+        console.warn(`Session refresh for ${path} failed offline.`);
+        throw new NetworkError();
+      }
+      const token = refreshed.session?.access_token;
+      if (token) {
+        const headers = new Headers(init.headers);
+        headers.set('Authorization', `Bearer ${token}`);
+        return apiFetch<T>(path, { ...init, headers }, fallbackMessage, true);
+      }
+    }
+
+    console.error(`Session for ${path} was rejected after refresh; signing out.`);
     try {
       await supabase.auth.signOut({ scope: 'local' });
     } catch (signOutError) {
@@ -233,7 +265,9 @@ async function getAccessTokenOrThrow(): Promise<string> {
 }
 
 export async function interpretText(
-  text: string
+  text: string,
+  /** Right after a purchase: ask the server to re-check Pro, not use its cache. */
+  opts: { freshEntitlement?: boolean } = {}
 ): Promise<InterpretationResponse> {
   const trimmedText = text.trim();
 
@@ -254,7 +288,12 @@ export async function interpretText(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({ text: trimmedText, clientTime, timezone }),
+      body: JSON.stringify({
+        text: trimmedText,
+        clientTime,
+        timezone,
+        ...(opts.freshEntitlement ? { freshEntitlement: true } : {}),
+      }),
     },
     'Failed to interpret text.'
   );
@@ -285,18 +324,22 @@ export async function confirmReminder(
  * Confirmed + pending reminders, used on launch to rebuild the device's local
  * notification schedule. The device — not the server — decides what to fire.
  */
+/**
+ * Live server truth for the launch-time notification rebuild. Deliberately NOT
+ * cached: reconcile cancels any notification missing from this list, so a stale
+ * offline copy would silently cancel reminders confirmed since it was saved.
+ * Offline, this throws and the sync is skipped — scheduled reminders stay put.
+ */
 export async function fetchActiveReminders(): Promise<CreatedReminder[]> {
-  return withOfflineCache('reminders:active', async () => {
-    const accessToken = await getAccessTokenOrThrow();
+  const accessToken = await getAccessTokenOrThrow();
 
-    const data = await apiFetch<{ reminders?: CreatedReminder[] }>(
-      '/reminders/active',
-      { headers: { Authorization: `Bearer ${accessToken}` } },
-      'Failed to load reminders.'
-    );
+  const data = await apiFetch<{ reminders?: CreatedReminder[] }>(
+    '/reminders/active',
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    'Failed to load reminders.'
+  );
 
-    return data.reminders ?? [];
-  }, isNetworkError);
+  return data.reminders ?? [];
 }
 
 export type GroupedReminders = {

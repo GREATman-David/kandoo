@@ -4,6 +4,7 @@ import {
   authenticateRequest,
   type AuthenticatedRequest,
 } from '../middleware/authenticateRequest';
+import { MAX_CAPTURE_CHARS, aiRateLimit } from '../middleware/rateLimit';
 
 import { aiProvider } from '../modules/ai';
 import {
@@ -56,12 +57,17 @@ type ActionResult =
     }
   | { kind: KandooAction['kind']; status: 'failed'; reason: string };
 
-router.post('/interpret', authenticateRequest, async (req, res) => {
+router.post('/interpret', authenticateRequest, aiRateLimit, async (req, res) => {
   const userId = (req as AuthenticatedRequest).user.id;
 
   const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
   if (!text) {
     return res.status(400).json({ error: 'Text is required.' });
+  }
+  if (text.length > MAX_CAPTURE_CHARS) {
+    return res.status(400).json({
+      error: 'That’s a lot for one go — try telling Kandoo in a couple of parts.',
+    });
   }
 
   // Time and timezone come from the DEVICE. Using the server clock meant a
@@ -112,8 +118,13 @@ router.post('/interpret', authenticateRequest, async (req, res) => {
     // Resolved at most once per request, only if a recall action needs it, so
     // capture/extraction stay off the RevenueCat path entirely.
     let proStatus: boolean | null = null;
+    // After a purchase the app asks for a fresh check, so the cached "free"
+    // from the question that raised the paywall can't raise it again.
+    const freshEntitlement = req.body?.freshEntitlement === true;
     const ensureProStatus = async () => {
-      if (proStatus === null) proStatus = await isProUser(userId);
+      if (proStatus === null) {
+        proStatus = await isProUser(userId, { fresh: freshEntitlement });
+      }
       return proStatus;
     };
 
@@ -159,10 +170,9 @@ router.post('/interpret', authenticateRequest, async (req, res) => {
         results.push({
           kind: action.kind,
           status: 'failed',
-          reason:
-            actionError instanceof Error
-              ? actionError.message
-              : 'Could not process this item.',
+          // Never the raw error: it can carry Supabase/provider internals and
+          // this repository is public. The real cause is logged just above.
+          reason: 'Could not save this item.',
         });
       }
     }
@@ -339,7 +349,7 @@ router.get('/captures', authenticateRequest, async (req, res) => {
  * given (extraction is OFF for manual input, but embedding is not — recall must
  * still find it). Returns the assembled row so the list can prepend it.
  */
-router.post('/captures/manual', authenticateRequest, async (req, res) => {
+router.post('/captures/manual', authenticateRequest, aiRateLimit, async (req, res) => {
   const userId = (req as AuthenticatedRequest).user.id;
 
   const noteTitle = typeof req.body?.note?.title === 'string' ? req.body.note.title.trim() : '';
@@ -348,6 +358,10 @@ router.post('/captures/manual', authenticateRequest, async (req, res) => {
     typeof req.body?.memory?.content === 'string' ? req.body.memory.content.trim() : '';
   const hasNote = !!(noteTitle && noteBody);
   const hasMemory = !!memoryContent;
+
+  if (noteBody.length > MAX_CAPTURE_CHARS * 3 || memoryContent.length > MAX_CAPTURE_CHARS) {
+    return res.status(400).json({ error: 'That’s too long to save in one entry.' });
+  }
 
   if (!hasNote && !hasMemory) {
     return res.status(400).json({ error: 'Add a note or a memory first.' });
@@ -391,7 +405,7 @@ router.post('/captures/manual', authenticateRequest, async (req, res) => {
  * persists the result. A capture that already has a note returns it as-is, so
  * a double tap never spends a second model call or overwrites an edited note.
  */
-router.post('/captures/:id/note', authenticateRequest, async (req, res) => {
+router.post('/captures/:id/note', authenticateRequest, aiRateLimit, async (req, res) => {
   const userId = (req as AuthenticatedRequest).user.id;
   const captureId = String(req.params.id);
   try {
@@ -457,7 +471,7 @@ router.get('/captures/:id', authenticateRequest, async (req, res) => {
 // ---- Memories ----
 
 /** Edit a memory's text; re-embeds on save so recall matches the new wording. */
-router.patch('/memories/:id', authenticateRequest, async (req, res) => {
+router.patch('/memories/:id', authenticateRequest, aiRateLimit, async (req, res) => {
   const userId = (req as AuthenticatedRequest).user.id;
   const content = typeof req.body?.content === 'string' ? req.body.content : '';
   if (!content.trim()) {

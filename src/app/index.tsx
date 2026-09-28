@@ -156,10 +156,11 @@ function KandooHome() {
   // from the server's active reminders. Replaces the retired server-push path.
   useReminderSync(true);
 
-  // A Recently row opens its note — unless the capture is older than the free
-  // window, in which case it opens the paywall (the row still looks normal).
+  // A Recently row opens its note — unless a FREE user taps a capture older
+  // than the free window, which opens the paywall (the row still looks normal).
+  // Pro reaches back forever, so Pro never sees the paywall here.
   const openRecent = (item: RecentItem) => {
-    if (isLocked(item.createdAt)) home.openPaywall();
+    if (!entitlement.isPro && isLocked(item.createdAt)) home.openPaywall();
     else setNoteId(item.id);
   };
 
@@ -361,6 +362,8 @@ function KandooHome() {
               value={home.transcript}
               onChangeText={home.updateTranscript}
               multiline
+              // Matches the server's MAX_CAPTURE_CHARS.
+              maxLength={4000}
             />
             {/* Mic at the right edge of the field is the standard, primary way
                 to start voice. The mark stays tappable as a shortcut. Toggling

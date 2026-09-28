@@ -1,5 +1,6 @@
-import { supabase } from './supabase';
+import { cancelAllReminders } from './localNotifications';
 import { clearOfflineCache } from './offlineCache';
+import { supabase } from './supabase';
 
 export async function signUp(email: string, password: string) {
   const { data, error } = await supabase.auth.signUp({
@@ -27,14 +28,24 @@ export async function signIn(email: string, password: string) {
   return data;
 }
 
+/**
+ * Sign out on this phone, always. The global sign-out (revoking the refresh
+ * token server-side) needs a connection; without one it fails and would leave
+ * the user signed in, so it falls back to a local sign-out. Either way nothing
+ * of this account stays on the phone: saved copies and scheduled reminders go.
+ */
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
 
   if (error) {
-    throw error;
+    console.warn('Global sign-out failed; signing out on this device:', error);
+    const local = await supabase.auth.signOut({ scope: 'local' });
+    if (local.error) {
+      throw local.error;
+    }
   }
-  // Nothing of this account stays on the phone for the next person.
-  await clearOfflineCache();
+
+  await Promise.all([clearOfflineCache(), cancelAllReminders()]);
 }
 
 /** Send a password-reset email. Errors bubble up for authErrorMessage to map. */

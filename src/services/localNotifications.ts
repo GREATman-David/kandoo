@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 
 import type { CreatedReminder } from './interpretationService';
 import {
+  clearTriggers,
   getAllTriggers,
   getTrigger,
   removeTrigger,
@@ -202,4 +203,18 @@ export async function reconcileReminders(
       }
     }
   }
+}
+
+/**
+ * Sign-out: cancel every reminder this account scheduled on the phone, so they
+ * don't keep firing on the lock screen for whoever uses it next. The next
+ * sign-in's launch reconcile schedules that account's own reminders.
+ */
+export async function cancelAllReminders(): Promise<void> {
+  try {
+    await Notifications.cancelAllScheduledNotificationsAsync();
+  } catch (error) {
+    console.warn('Cancelling scheduled reminders failed:', error);
+  }
+  await clearTriggers();
 }
