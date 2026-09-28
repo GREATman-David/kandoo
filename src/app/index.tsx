@@ -390,7 +390,13 @@ function KandooHome() {
           confidence={home.response.confidence}
           results={home.response.results}
           rawText={home.submittedText}
+          captureId={home.response.captureId}
           onClose={() => setSheetOpen(false)}
+          onResultsChanged={home.replaceResults}
+          onKeptAll={() => {
+            setSheetOpen(false);
+            home.markRemembered();
+          }}
         />
       ) : null}
 

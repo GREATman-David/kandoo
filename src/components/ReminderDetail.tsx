@@ -107,6 +107,13 @@ export function ReminderDetail({
   const confirm = () =>
     apply({ status: 'confirmed' }, (u) => scheduleReminder(u));
 
+  // A pending reminder Kandoo proposed but the user doesn't want: dismissed,
+  // never scheduled. It leaves Needs review and the review sheet.
+  const dontKeep = async () => {
+    const done = await apply({ status: 'dismissed' }, () => cancelReminder(r.id));
+    if (done) onClose();
+  };
+
   const snooze = async (iso: string) => {
     setSnoozeOpen(false);
     await apply({ dueAt: iso, status: 'confirmed' }, (u) => rescheduleReminder(u));
@@ -198,13 +205,18 @@ export function ReminderDetail({
         {!editing ? (
           <View style={styles.actions}>
             {r.status === 'pending' ? (
-              <Pressable
-                style={[styles.btnPrimary, busy && styles.dim]}
-                onPress={confirm}
-                disabled={busy}
-              >
-                <Text style={styles.btnPrimaryText}>Confirm</Text>
-              </Pressable>
+              <>
+                <Pressable style={styles.btn} onPress={dontKeep} disabled={busy}>
+                  <Text style={styles.btnText}>Don’t keep</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.btnPrimary, busy && styles.dim]}
+                  onPress={confirm}
+                  disabled={busy}
+                >
+                  <Text style={styles.btnPrimaryText}>Confirm</Text>
+                </Pressable>
+              </>
             ) : (
               <>
                 <Pressable

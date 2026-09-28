@@ -405,6 +405,20 @@ export function useHome() {
   }, [voiceActive, runInterpret]);
 
   const openPaywall = useCallback(() => setPaywallVisible(true), []);
+
+  /** The review sheet edited, removed or confirmed items: keep Home in step. */
+  const replaceResults = useCallback((results: InterpretResult[]) => {
+    setResponse((current) => (current ? { ...current, results } : current));
+  }, []);
+
+  /**
+   * Everything was kept from the review sheet — it already confirmed and
+   * scheduled each reminder, so Home just shows Complete (no second confirm).
+   */
+  const markRemembered = useCallback(() => {
+    haptic(Haptics.ImpactFeedbackStyle.Soft);
+    setState('remembered');
+  }, []);
   const closePaywall = useCallback(() => setPaywallVisible(false), []);
 
   /**
@@ -504,6 +518,8 @@ export function useHome() {
     openPaywall,
     closePaywall,
     onProUnlocked,
+    replaceResults,
+    markRemembered,
     submittedText: submittedText.current,
     updateTranscript,
     startListening,

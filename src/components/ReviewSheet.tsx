@@ -1,13 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { MemoryCard, type MemoryCardChip } from '@/components/MemoryCard';
+import { MemoryDetail, type MemoryDetailTarget } from '@/components/MemoryDetail';
+import { ReminderDetail } from '@/components/ReminderDetail';
 import {
   confirmReminder,
+  fetchCaptureNote,
+  type CaptureNote,
   type CreatedMemory,
   type CreatedReminder,
   type InterpretResult,
 } from '@/services/interpretationService';
+import { scheduleReminder } from '@/services/localNotifications';
 import { colors, radius, spacing, text, withOpacity } from '@/theme/theme';
 import { formatDueDate } from '@/utils/formatDueDate';
 
@@ -18,10 +23,61 @@ export type ReviewSheetProps = {
   results: InterpretResult[];
   /** The verbatim capture, for the "nothing actionable" fallback. */
   rawText: string;
+  /** The capture these results came from — reloaded after an edit or removal. */
+  captureId: string;
   onClose: () => void;
+  /** The results after an edit, removal or confirm, so Home stays in step. */
+  onResultsChanged: (results: InterpretResult[]) => void;
+  /** Everything was kept: Home moves on to its Complete screen. */
+  onKeptAll: () => void;
 };
 
 const CONFIRM_STAGGER_MS = 90;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * The capture's CURRENT reminders and memories, as results. A reminder the
+ * user chose not to keep (dismissed/cancelled) or a deleted memory drops out;
+ * recall answers and failed items from the original response are kept as-is.
+ */
+function resultsFromCapture(
+  capture: CaptureNote,
+  previous: InterpretResult[]
+): InterpretResult[] {
+  const reminders: InterpretResult[] = capture.reminders
+    .filter((r) => r.status === 'pending' || r.status === 'confirmed')
+    .map((r) => ({
+      kind: 'reminder' as const,
+      status: 'ok' as const,
+      reminder: {
+        id: r.id,
+        task: r.task,
+        person: r.person,
+        due_at: r.due_at,
+        place_hint: r.place_hint,
+        place_id: null,
+        insistent: false,
+        status: r.status,
+        created_at: r.created_at,
+        capture_id: capture.id,
+      },
+    }));
+  const memories: InterpretResult[] = capture.memories.map((m) => ({
+    kind: 'memory' as const,
+    status: 'ok' as const,
+    memory: {
+      id: m.id,
+      content: m.content,
+      person: m.person,
+      location: m.location,
+      topics: m.topics,
+      created_at: m.created_at,
+    },
+  }));
+  const kept = previous.filter((r) => r.kind === 'recall' || r.status === 'failed');
+  return [...reminders, ...memories, ...kept];
+}
 
 type OkReminder = Extract<InterpretResult, { kind: 'reminder'; status: 'ok' }>;
 type OkMemory = Extract<InterpretResult, { kind: 'memory'; status: 'ok' }>;
@@ -61,32 +117,74 @@ export function ReviewSheet({
   confidence,
   results,
   rawText,
+  captureId,
   onClose,
+  onResultsChanged,
+  onKeptAll,
 }: ReviewSheetProps) {
   const [confirmedIds, setConfirmedIds] = useState<Set<string>>(new Set());
   const [failedConfirmIds, setFailedConfirmIds] = useState<Set<string>>(new Set());
+  const [keeping, setKeeping] = useState(false);
+  // The sheet works on its own copy so an edit or removal shows at once; each
+  // change is reloaded from the server and handed back to Home.
+  const [items, setItems] = useState<InterpretResult[]>(results);
+  const [editingReminder, setEditingReminder] = useState<CreatedReminder | null>(null);
+  const [editingMemory, setEditingMemory] = useState<MemoryDetailTarget | null>(null);
 
-  const okReminders = results.filter(
+  useEffect(() => {
+    if (visible) setItems(results);
+  }, [visible, results]);
+
+  async function reload() {
+    try {
+      const capture = await fetchCaptureNote(captureId);
+      if (!capture) return;
+      const next = resultsFromCapture(capture, items);
+      setItems(next);
+      onResultsChanged(next);
+    } catch (error) {
+      console.error('Reloading the reviewed capture failed:', error);
+    }
+  }
+
+  const okReminders = items.filter(
     (r): r is OkReminder => r.kind === 'reminder' && r.status === 'ok'
   );
-  const okMemories = results.filter(
+  const okMemories = items.filter(
     (r): r is OkMemory => r.kind === 'memory' && r.status === 'ok'
   );
-  const okRecalls = results.filter(
+  const okRecalls = items.filter(
     (r): r is OkRecall => r.kind === 'recall' && r.status === 'ok'
   );
-  const failedCount = results.filter((r) => r.status === 'failed').length;
+  const failedCount = items.filter((r) => r.status === 'failed').length;
 
   const totalConfirmable = okReminders.length + okMemories.length;
   const hasNothingActionable = totalConfirmable === 0 && okRecalls.length === 0;
 
-  async function confirmOne(kind: 'reminder' | 'memory', id: string) {
+  /** Returns false when a reminder could not be confirmed. */
+  async function confirmOne(kind: 'reminder' | 'memory', id: string): Promise<boolean> {
     setConfirmedIds((prev) => new Set(prev).add(id));
 
-    if (kind !== 'reminder') return;
+    if (kind !== 'reminder') return true;
 
     try {
-      await confirmReminder(id);
+      const confirmed = await confirmReminder(id);
+      // The device owns the trigger (§3.2): a reminder kept here must be
+      // scheduled here, exactly as Remember does. Best-effort — the confirm is
+      // committed, and launch reconcile retries a failed schedule.
+      try {
+        await scheduleReminder(confirmed);
+      } catch (error) {
+        console.error(`Scheduling reminder ${id} failed:`, error);
+      }
+      const next = items.map((r) =>
+        r.kind === 'reminder' && r.status === 'ok' && r.reminder.id === id
+          ? { ...r, reminder: { ...r.reminder, status: confirmed.status } }
+          : r
+      );
+      setItems(next);
+      onResultsChanged(next);
+      return true;
     } catch (error) {
       // Swallowing this is what made the confirm failure impossible to
       // diagnose: the retry line below says something went wrong, and this
@@ -99,20 +197,33 @@ export function ReviewSheet({
         return next;
       });
       setFailedConfirmIds((prev) => new Set(prev).add(id));
+      return false;
     }
   }
 
-  function confirmAll() {
-    const items: Array<{ kind: 'reminder' | 'memory'; id: string }> = [
-      ...okReminders.map((r) => ({ kind: 'reminder' as const, id: r.reminder.id })),
+  /** Confirm every card in a quick cascade; when all hold, move Home on. */
+  async function confirmAll() {
+    if (keeping) return;
+    setKeeping(true);
+    const queue: Array<{ kind: 'reminder' | 'memory'; id: string }> = [
+      ...okReminders
+        .filter((r) => r.reminder.status !== 'confirmed')
+        .map((r) => ({ kind: 'reminder' as const, id: r.reminder.id })),
       ...okMemories.map((m) => ({ kind: 'memory' as const, id: m.memory.id })),
     ];
 
-    items.forEach((item, index) => {
-      setTimeout(() => {
-        confirmOne(item.kind, item.id);
-      }, index * CONFIRM_STAGGER_MS);
-    });
+    let allKept = true;
+    for (const [index, item] of queue.entries()) {
+      if (index > 0) await wait(CONFIRM_STAGGER_MS);
+      if (!(await confirmOne(item.kind, item.id))) allKept = false;
+    }
+    setKeeping(false);
+
+    if (allKept) {
+      // Let the last card's settle animation land before the sheet leaves.
+      await wait(450);
+      onKeptAll();
+    }
   }
 
   return (
@@ -151,7 +262,8 @@ export function ReviewSheet({
                     </Text>
                     {okReminders.map((item) => {
                       const id = item.reminder.id;
-                      const isConfirmed = confirmedIds.has(id);
+                      const isConfirmed =
+                        confirmedIds.has(id) || item.reminder.status === 'confirmed';
                       const guessedTime = confidence === 'low' && !!item.reminder.due_at;
                       return (
                         <MemoryCard
@@ -167,7 +279,14 @@ export function ReviewSheet({
                           content={item.reminder.task}
                           chips={buildReminderChips(item.reminder, guessedTime)}
                           onConfirm={
-                            isConfirmed ? undefined : () => confirmOne('reminder', id)
+                            isConfirmed ? undefined : () => void confirmOne('reminder', id)
+                          }
+                          onEdit={
+                            isConfirmed
+                              ? undefined
+                              : () =>
+                                  // No "open the note" link: we are in its review.
+                                  setEditingReminder({ ...item.reminder, capture_id: null })
                           }
                         />
                       );
@@ -192,7 +311,19 @@ export function ReviewSheet({
                           content={item.memory.content}
                           chips={buildMemoryChips(item.memory)}
                           onConfirm={
-                            isConfirmed ? undefined : () => confirmOne('memory', id)
+                            isConfirmed ? undefined : () => void confirmOne('memory', id)
+                          }
+                          onEdit={
+                            isConfirmed
+                              ? undefined
+                              : () =>
+                                  setEditingMemory({
+                                    id,
+                                    content: item.memory.content,
+                                    captureId: null,
+                                    sourceTitle: null,
+                                    isManual: false,
+                                  })
                           }
                         />
                       );
@@ -229,7 +360,11 @@ export function ReviewSheet({
               <Text style={styles.btnText}>Not now</Text>
             </Pressable>
             {totalConfirmable > 0 ? (
-              <Pressable style={styles.btnPrimary} onPress={confirmAll}>
+              <Pressable
+                style={[styles.btnPrimary, keeping && styles.btnDisabled]}
+                onPress={() => void confirmAll()}
+                disabled={keeping}
+              >
                 <Text style={styles.btnPrimaryText}>Keep all</Text>
               </Pressable>
             ) : (
@@ -240,6 +375,21 @@ export function ReviewSheet({
           </View>
         </View>
       </View>
+
+      <ReminderDetail
+        reminder={editingReminder}
+        visible={editingReminder !== null}
+        onClose={() => setEditingReminder(null)}
+        onChanged={() => void reload()}
+        onOpenNote={() => {}}
+      />
+
+      <MemoryDetail
+        memory={editingMemory}
+        visible={editingMemory !== null}
+        onClose={() => setEditingMemory(null)}
+        onChanged={() => void reload()}
+      />
     </Modal>
   );
 }
@@ -331,5 +481,8 @@ const styles = StyleSheet.create({
   btnPrimaryText: {
     ...text.bodyStrong,
     color: colors.ink,
+  },
+  btnDisabled: {
+    opacity: 0.6,
   },
 });
