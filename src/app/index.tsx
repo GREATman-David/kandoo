@@ -342,6 +342,7 @@ function KandooHome() {
             busy={home.busy}
             onStop={home.stopListening}
             onCancel={home.cancelListening}
+            onSaveAsMemory={home.saveAsMemory}
           />
         ) : null}
 
@@ -518,6 +519,8 @@ type ListeningProps = {
   busy: boolean;
   onStop: () => void;
   onCancel: () => void;
+  /** Keep the words as a memory when Kandoo found nothing to act on. */
+  onSaveAsMemory: () => void;
 };
 
 function Listening({
@@ -528,12 +531,28 @@ function Listening({
   busy,
   onStop,
   onCancel,
+  onSaveAsMemory,
 }: ListeningProps) {
   return (
     <>
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      {/* Kandoo's own voice when nothing actionable came back — gentle, not an error. */}
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+      {/* Kandoo's own voice when nothing actionable came back — gentle, not an
+          error — with a way to keep the words anyway, so nothing is lost. */}
+      {notice ? (
+        <>
+          <Text style={styles.notice}>{notice}</Text>
+          <Pressable
+            style={[styles.saveMemory, busy && styles.btnDisabled]}
+            onPress={onSaveAsMemory}
+            disabled={busy}
+            accessibilityRole="button"
+          >
+            <Text style={styles.saveMemoryText}>
+              {busy ? 'Saving…' : 'Save it as a memory'}
+            </Text>
+          </Pressable>
+        </>
+      ) : null}
 
       <View style={styles.actions}>
         <Pressable style={styles.btn} onPress={onCancel} disabled={busy}>
@@ -1417,6 +1436,20 @@ const styles = StyleSheet.create({
     color: colors.alarmText,
     textAlign: 'center',
     marginTop: spacing.space3,
+  },
+  saveMemory: {
+    alignSelf: 'center',
+    marginTop: spacing.space3,
+    paddingVertical: spacing.space2,
+    paddingHorizontal: spacing.space4,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.accentWash,
+  },
+  saveMemoryText: {
+    ...text.bodyStrong,
+    color: colors.markRing,
   },
   notice: {
     ...text.answer,

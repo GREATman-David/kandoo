@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   confirmReminder,
+  createManualCapture,
   fetchCaptureNotes,
   interpretText,
   isNetworkError,
@@ -406,6 +407,34 @@ export function useHome() {
     await runInterpret();
   }, [voiceActive, runInterpret]);
 
+  /**
+   * Kandoo found nothing actionable, but the user wants it kept: save their
+   * words, as they said them, as a memory. Uses the same path as Memory's
+   * "Add something new", so it is embedded and recall can find it.
+   */
+  const saveAsMemory = useCallback(async () => {
+    const text = (latest.current || submittedText.current).trim();
+    if (!text || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await createManualCapture({ memory: { content: text } });
+      committed.current = '';
+      setTranscriptBoth('');
+      setNotice(null);
+      haptic(Haptics.ImpactFeedbackStyle.Soft);
+      setState('idle');
+      void loadRecent();
+    } catch (caught) {
+      logFailure('Saving as a memory failed:', caught);
+      setError(userMessage(caught, 'Could not save that. Please try again.'));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }, [loadRecent]);
+
   const openPaywall = useCallback(() => setPaywallVisible(true), []);
 
   /** The review sheet edited, removed or confirmed items: keep Home in step. */
@@ -520,6 +549,7 @@ export function useHome() {
     openPaywall,
     closePaywall,
     onProUnlocked,
+    saveAsMemory,
     replaceResults,
     markRemembered,
     submittedText: submittedText.current,

@@ -22,7 +22,9 @@ ${KANDOO_JSON_SHAPE}
 ACTION KINDS
 
 reminder — something the user must DO later.
-memory   — a fact worth keeping.
+memory   — anything worth keeping that the user TELLS you: a fact, a plan or
+           intention ("I'm going to the market to buy tomatoes"), a list, a
+           preference, where something is, what someone said.
 recall   — the user is ASKING what they previously said, committed to, or were told.
 
 RULES
@@ -64,9 +66,14 @@ RULES
    only identifier available ("the doctor").
 7. confidence = "low" if a time is ambiguous, a name is unclear, or you are
    unsure how to split the utterance. The user reviews low-confidence output.
-8. If — and only if — the utterance is neither an instruction, a fact, nor a
-   question about the user's past, return "actions": []. A question about the
-   past is a recall action (rule 1a), never an empty result.
+8. The user is telling Kandoo something so it is kept. Anything they state about
+   themselves, their plans, their day, their people, their things or their lists
+   is AT LEAST a memory — "I'll be going to the market today to buy tomatoes,
+   onions, garlic and pepper" is a memory, never an empty result. (A plan that
+   names a specific time may ALSO be a reminder.) Return "actions": [] ONLY for
+   pure filler with nothing to keep: greetings, thanks, acknowledgements ("ok",
+   "hello", "thanks"). A question about the past is a recall action (rule 1a),
+   never an empty result.
 9. Never invent facts, times, people or places that are not in the utterance.
 10. note — a cleaned-up written record of this capture, produced in THIS call.
    Fill it ONLY for a SUBSTANTIAL capture: a recap, several facts, or more than
