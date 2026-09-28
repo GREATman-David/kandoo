@@ -28,6 +28,44 @@ export function configurePurchases(): void {
   if (__DEV__) Purchases.setLogLevel(LOG_LEVEL.WARN);
   Purchases.configure({ apiKey });
   configured = true;
+  // Every entitlement change (purchase, restore, logIn/logOut, renewal,
+  // expiry) is pushed to whoever is listening — see useEntitlement.
+  Purchases.addCustomerInfoUpdateListener((info) => {
+    const pro = hasEntitlement(info.entitlements);
+    entitlementListeners.forEach((listener) => listener(pro));
+  });
+  entitlementListeners.forEach((listener) => listener(null));
+}
+
+/** Receives Pro status on every change; `null` means "configured, re-check". */
+type EntitlementListener = (pro: boolean | null) => void;
+const entitlementListeners = new Set<EntitlementListener>();
+
+export function onEntitlementChange(listener: EntitlementListener): () => void {
+  entitlementListeners.add(listener);
+  return () => {
+    entitlementListeners.delete(listener);
+  };
+}
+
+/**
+ * Pro status, or null when it can't be read right now (not configured yet,
+ * offline). Callers keep their last known value on null instead of treating
+ * an unanswered question as "free".
+ */
+export async function readEntitlement(
+  /** Skip RevenueCat's ~5 min cache — e.g. on returning to the app. */
+  fresh = false
+): Promise<boolean | null> {
+  if (!configured) return null;
+  try {
+    if (fresh) await Purchases.invalidateCustomerInfoCache();
+    const info = await Purchases.getCustomerInfo();
+    return hasEntitlement(info.entitlements);
+  } catch (error) {
+    console.warn('getCustomerInfo failed:', error);
+    return null;
+  }
 }
 
 /** Tie the RevenueCat customer to the signed-in Supabase user. */
