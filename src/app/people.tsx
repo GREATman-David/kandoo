@@ -2,6 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,7 +22,10 @@ import {
   userMessage,
   logFailure,
 } from '@/services/interpretationService';
-import { colors, radius, spacing, text } from '@/theme/theme';
+import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
+
+/** Figma's clock: this person has a reminder still to come. */
+const CLOCK_ICON = require('@/assets/images/icons/chip-time.png');
 
 import { useAuth } from '../features/Auth/useAuth';
 
@@ -143,10 +147,10 @@ export default function PeopleScreen() {
   const merging = survivor !== null;
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + spacing.space4 }]}>
+    <View style={[styles.screen, { paddingTop: insets.top + spacing.space2 }]}>
       <Text style={styles.heading}>People</Text>
-      <OfflineNote />
       <Text style={styles.sub}>People Kandoo knows from what you’ve said.</Text>
+      <OfflineNote />
 
       <ScrollView
         contentContainerStyle={[
@@ -167,13 +171,13 @@ export default function PeopleScreen() {
             help="Kandoo learns people from what you say."
           />
         ) : (
-          people.map((person) => {
+          people.map((person, index) => {
             const isSurvivor = survivor?.id === person.id;
             const picked = picks.has(person.id);
             return (
               <Pressable
                 key={person.id}
-                style={[styles.row, picked && styles.rowPicked]}
+                style={[styles.row, index > 0 && styles.rowDivider, picked && styles.rowPicked]}
                 onPress={() =>
                   merging
                     ? isSurvivor
@@ -191,7 +195,6 @@ export default function PeopleScreen() {
                 <View style={styles.rowMain}>
                   <View style={styles.nameRow}>
                     <Text style={styles.name}>{person.name}</Text>
-                    {person.hasActiveReminder ? <ClockGlyph /> : null}
                     {merging && isSurvivor ? (
                       <Text style={styles.survivorTag}>keeps everything</Text>
                     ) : null}
@@ -204,6 +207,9 @@ export default function PeopleScreen() {
                   ) : null}
                   <Text style={styles.counts}>{countLine(person)}</Text>
                 </View>
+                {person.hasActiveReminder ? (
+                  <Image source={CLOCK_ICON} style={styles.clockIcon} />
+                ) : null}
               </Pressable>
             );
           })
@@ -245,28 +251,22 @@ function countLine(p: PersonSummary): string {
   return parts.join(' · ') || 'Mentioned';
 }
 
-/** A small clock, drawn from Views — shown when the person has an active reminder. */
-function ClockGlyph() {
-  return (
-    <View style={styles.clock}>
-      <View style={styles.clockHandV} />
-      <View style={styles.clockHandH} />
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.base, paddingHorizontal: spacing.space4 },
-  heading: { ...text.displayXl, color: colors.ink },
-  sub: { ...text.body, color: colors.inkMuted, marginTop: spacing.space1, marginBottom: spacing.space4 },
-  body: { paddingTop: spacing.space2 },
+  // People (Figma: kandoo-people).
+  screen: { flex: 1, backgroundColor: colors.base, paddingHorizontal: spacing.space5 },
+  heading: { ...text.displayL, letterSpacing: 0, color: colors.ink },
+  sub: { ...text.caption, color: colors.inkMuted, marginTop: spacing.space2, marginBottom: spacing.space6 },
+  body: { paddingTop: spacing.space5 },
   dim: { ...text.body, color: colors.inkFaint, marginTop: spacing.space8, textAlign: 'center' },
   error: { ...text.body, color: colors.alarmText, marginTop: spacing.space8, textAlign: 'center' },
 
   row: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing.space3,
-    paddingVertical: spacing.space3,
+    paddingVertical: spacing.space4,
+  },
+  rowDivider: {
     borderTopWidth: 1,
     borderTopColor: colors.line,
   },
@@ -279,24 +279,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { ...text.bodyStrong, color: colors.settled },
+  avatarText: { ...text.bodyStrong, color: colors.markRing },
   rowMain: { flex: 1 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.space2 },
-  name: { ...text.bodyStrong, color: colors.ink },
+  name: { fontFamily: fontFamily.displaySemiBold, fontSize: 17, lineHeight: 22, color: colors.ink },
   survivorTag: { ...text.caption, color: colors.settled },
   pickTag: { ...text.bodyStrong, color: colors.accent },
-  summary: { ...text.body, color: colors.inkMuted, marginTop: 2 },
-  counts: { ...text.caption, color: colors.inkFaint, marginTop: 2 },
-
-  clock: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 1.5,
-    borderColor: colors.accent,
+  summary: {
+    fontFamily: fontFamily.displayRegular,
+    fontSize: 15,
+    lineHeight: 20,
+    color: colors.inkMuted,
+    marginTop: spacing.space1,
   },
-  clockHandV: { position: 'absolute', width: 1.4, height: 4, backgroundColor: colors.accent, left: 4.6, top: 2 },
-  clockHandH: { position: 'absolute', width: 3.4, height: 1.4, backgroundColor: colors.accent, left: 5.3, top: 5.3 },
+  counts: {
+    fontFamily: fontFamily.textRegular,
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.inkMuted,
+    marginTop: spacing.space1,
+  },
+  clockIcon: { width: 14, height: 14, tintColor: colors.markRing },
 
   mergeBar: {
     position: 'absolute',
