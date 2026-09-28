@@ -60,3 +60,8 @@ backend/.backfill.ts
 # local launcher scripts (hard-code a machine path); keep dev.bat.example
 *.bat
 !dev.bat.example
+
+# editor and assistant settings — local to each developer
+/.idea/
+/.vscode/
+/.claude/

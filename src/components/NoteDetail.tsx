@@ -202,7 +202,7 @@ export function NoteDetail({
                 {capture.note?.title ?? 'What you said'}
               </Text>
               <Text style={styles.captured}>
-                Captured {capturedAgo(capture.created_at)}
+                Captured {capturedAgo(capture.created_at).toLowerCase()}
                 {isManual ? ' · Written by you' : ''}
               </Text>
 

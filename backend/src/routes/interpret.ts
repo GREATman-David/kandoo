@@ -115,6 +115,29 @@ router.post('/interpret', authenticateRequest, aiRateLimit, async (req, res) => 
 
     const results: ActionResult[] = [];
 
+    // Embed every memory in ONE call rather than one call per memory — a recap
+    // with five facts was five sequential round trips. If the batch fails, each
+    // memory falls back to embedding itself (and, failing that, saves without a
+    // vector), exactly as before.
+    const memoryActions = interpretation.actions.filter(
+      (a): a is Extract<KandooAction, { kind: 'memory' }> => a.kind === 'memory'
+    );
+    const batchedVectors = new Map<KandooAction, number[]>();
+    if (memoryActions.length > 1) {
+      try {
+        const vectors = await aiProvider.embed(
+          memoryActions.map((a) => a.content.trim()),
+          'document'
+        );
+        memoryActions.forEach((action, index) => {
+          const vector = vectors[index];
+          if (vector) batchedVectors.set(action, vector);
+        });
+      } catch (error) {
+        console.error('Batch embedding failed; embedding memories one by one:', error);
+      }
+    }
+
     // Resolved at most once per request, only if a recall action needs it, so
     // capture/extraction stay off the RevenueCat path entirely.
     let proStatus: boolean | null = null;
@@ -142,7 +165,12 @@ router.post('/interpret', authenticateRequest, aiRateLimit, async (req, res) => 
             break;
           }
           case 'memory': {
-            const memory = await createMemory(userId, capture.id, action);
+            const memory = await createMemory(
+              userId,
+              capture.id,
+              action,
+              batchedVectors.get(action)
+            );
             results.push({ kind: 'memory', status: 'ok', memory });
             break;
           }
@@ -332,6 +360,11 @@ router.get('/captures', authenticateRequest, async (req, res) => {
   // Recently passes ?actions=true to drop captures that produced nothing
   // (questions, unparseable remarks). Older app builds omit it and are unchanged.
   const requireActions = req.query.actions === 'true';
+  // Memory's "Show older": a created_at cursor from the last row it holds.
+  const before =
+    typeof req.query.before === 'string' && !Number.isNaN(Date.parse(req.query.before))
+      ? req.query.before
+      : undefined;
   const notedOnly =
     requireContent || requireActions ? false : req.query.noted !== 'false';
   try {
@@ -340,6 +373,7 @@ router.get('/captures', authenticateRequest, async (req, res) => {
       notedOnly,
       requireContent,
       requireActions,
+      before,
     });
     return res.json({ success: true, captures });
   } catch (error) {

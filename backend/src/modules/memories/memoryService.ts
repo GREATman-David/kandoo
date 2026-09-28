@@ -28,19 +28,26 @@ export type CreatedMemory = {
 export async function createMemory(
   userId: string,
   captureId: string | null,
-  action: MemoryAction
+  action: MemoryAction,
+  /**
+   * A vector already computed in a batch with the capture's other memories
+   * (one embedding call per capture, not one per memory). Omitted → embed here.
+   */
+  precomputed?: number[]
 ): Promise<CreatedMemory> {
   const content = action.content.trim();
   if (!content) {
     throw new Error('Memory content cannot be empty.');
   }
 
-  let embedding: number[] | null = null;
-  try {
-    const [vector] = await aiProvider.embed([content], 'document');
-    embedding = vector ?? null;
-  } catch (error) {
-    console.error('Embedding failed; saving memory without vector:', error);
+  let embedding: number[] | null = precomputed ?? null;
+  if (!precomputed) {
+    try {
+      const [vector] = await aiProvider.embed([content], 'document');
+      embedding = vector ?? null;
+    } catch (error) {
+      console.error('Embedding failed; saving memory without vector:', error);
+    }
   }
 
   const { data, error } = await supabase

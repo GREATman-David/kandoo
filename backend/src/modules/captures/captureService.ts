@@ -119,6 +119,8 @@ export async function listCaptureNotes(
     requireContent?: boolean;
     /** Home ▸ Recently: anything that produced a note, memory OR reminder. */
     requireActions?: boolean;
+    /** Cursor for "load more": only captures created before this ISO instant. */
+    before?: string;
   } = {}
 ): Promise<CaptureNote[]> {
   const {
@@ -126,6 +128,7 @@ export async function listCaptureNotes(
     notedOnly = true,
     requireContent = false,
     requireActions = false,
+    before,
   } = opts;
   let query = supabase
     .from('captures')
@@ -134,6 +137,7 @@ export async function listCaptureNotes(
   // Memory lists only captures that produced a note; Home ▸ Recently lists the
   // most recent captures whether or not they did (a one-line reminder has none).
   if (notedOnly) query = query.not('note', 'is', null);
+  if (before) query = query.lt('created_at', before);
 
   // The Memory screen wants everything with substance — a note OR memories —
   // but not bare recall queries. requireContent can't be a SQL filter (it

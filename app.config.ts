@@ -9,13 +9,14 @@ import brand from './src/theme/brand.json';
  * `expo prebuild` for anyone on Node 20 or 22.
  */
 const config: ExpoConfig = {
-  name: 'kandoo',
+  name: 'Kandoo',
   slug: 'kandoo',
   version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
   scheme: 'kandoo',
-  userInterfaceStyle: 'automatic',
+  // One cream theme: system dialogs, pickers and the keyboard stay light too.
+  userInterfaceStyle: 'light',
   ios: {
     icon: './assets/expo.icon',
   },

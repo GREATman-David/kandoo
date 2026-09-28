@@ -146,7 +146,7 @@ async function apiFetch<T>(
       throw new TimeoutError();
     }
     // No connection, DNS, TLS, or cleartext-blocked: a transport failure.
-    console.error(`Network request to ${path} failed:`, transport);
+    console.warn(`Network request to ${path} failed:`, transport);
     throw new NetworkError();
   } finally {
     clearTimeout(timer);
@@ -608,6 +608,8 @@ export async function fetchCaptureNotes(
     requireContent?: boolean;
     /** Only captures that produced a note, memory or reminder (Home ▸ Recently). */
     requireActions?: boolean;
+    /** Only captures created before this ISO instant — the "load more" cursor. */
+    before?: string;
   } = {}
 ): Promise<CaptureNote[]> {
   const params = new URLSearchParams();
@@ -615,6 +617,7 @@ export async function fetchCaptureNotes(
   if (opts.notedOnly === false) params.set('noted', 'false');
   if (opts.requireContent) params.set('content', 'true');
   if (opts.requireActions) params.set('actions', 'true');
+  if (opts.before) params.set('before', opts.before);
   const query = params.toString();
 
   // Each list shape (Home's Recently, the Memory tab) is kept separately.

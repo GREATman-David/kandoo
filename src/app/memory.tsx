@@ -42,6 +42,8 @@ import { timeAgo } from '@/utils/timeAgo';
 import { useAuth } from '../features/Auth/useAuth';
 
 const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000;
+/** Captures per page; "Show older" fetches the next page before the last one. */
+const PAGE = 50;
 
 const ICONS = {
   search: require('@/assets/images/icons/search.png'),
@@ -97,15 +99,18 @@ export default function MemoryScreen() {
   const [personId, setPersonId] = useState<string | null>(null);
   const [reminder, setReminder] = useState<CreatedReminder | null>(null);
   const [paywall, setPaywall] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
     try {
       const [captures, peopleList] = await Promise.all([
-        fetchCaptureNotes({ requireContent: true, limit: 50 }),
+        fetchCaptureNotes({ requireContent: true, limit: PAGE }),
         fetchPeople().catch(() => [] as PersonSummary[]),
       ]);
       setNotes(captures);
+      setHasMore(captures.length === PAGE);
       setPeople(peopleList);
     } catch (caught) {
       console.error('Loading memory failed:', caught);
@@ -125,6 +130,30 @@ export default function MemoryScreen() {
       else setLoading(false);
     }, [isAuthenticated, load])
   );
+
+  /** The next page, older than the last card shown. Pro's "whole history". */
+  const loadMore = useCallback(async () => {
+    const last = notes[notes.length - 1];
+    if (!last || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const older = await fetchCaptureNotes({
+        requireContent: true,
+        limit: PAGE,
+        before: last.created_at,
+      });
+      setNotes((current) => {
+        const seen = new Set(current.map((n) => n.id));
+        return [...current, ...older.filter((n) => !seen.has(n.id))];
+      });
+      setHasMore(older.length === PAGE);
+    } catch (caught) {
+      console.error('Loading older memory failed:', caught);
+      Alert.alert('Couldn’t load more', userMessage(caught, 'Please try again.'));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [notes, loadingMore]);
 
   /** The ask field. Recall runs through the same /interpret path Home uses, so
    *  the model decides recall-vs-capture and the paywall fires at the boundary. */
@@ -328,6 +357,19 @@ export default function MemoryScreen() {
             );
           })
         )}
+
+        {hasMore && !loading && !error ? (
+          <Pressable
+            style={[styles.more, loadingMore && styles.moreBusy]}
+            onPress={() => void loadMore()}
+            disabled={loadingMore}
+            accessibilityRole="button"
+          >
+            <Text style={styles.moreText}>
+              {loadingMore ? 'Loading…' : 'Show older'}
+            </Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       {/* Docked above the tab bar, so it never scrolls away under a long list. */}
@@ -592,6 +634,18 @@ const styles = StyleSheet.create({
     color: colors.accent,
   },
 
+  more: {
+    alignSelf: 'center',
+    paddingVertical: spacing.space3,
+    paddingHorizontal: spacing.space5,
+  },
+  moreBusy: {
+    opacity: 0.6,
+  },
+  moreText: {
+    ...text.bodyStrong,
+    color: colors.markRing,
+  },
   addDock: {
     paddingTop: spacing.space3,
     paddingBottom: spacing.space3,
