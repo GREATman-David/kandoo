@@ -1,7 +1,10 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
+  Image,
+  type ImageSourcePropType,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +18,7 @@ import Animated, {
   withDelay,
   withTiming,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AccountSheet } from '@/components/AccountSheet';
 import { EmptyState } from '@/components/EmptyState';
@@ -38,7 +42,15 @@ import type {
   InterpretResult,
   InterpretationResponse,
 } from '@/services/interpretationService';
-import { colors, duration, radius, spacing, text } from '@/theme/theme';
+import {
+  colors,
+  duration,
+  fontFamily,
+  radius,
+  spacing,
+  text,
+  withOpacity,
+} from '@/theme/theme';
 import { formatDueDate } from '@/utils/formatDueDate';
 
 import AuthScreen from '../features/Auth/AuthScreen';
@@ -89,7 +101,38 @@ export default function HomeScreen() {
   return <KandooHome />;
 }
 
-const SYMBOL_SIZE = 62;
+const SYMBOL_SIZE = 120;
+/** Full-screen moments show the Figma 72px mark inside a soft halo. */
+const HALO_SYMBOL_SIZE = 72;
+/** Figma halos: a pale-amber disc of `radius`, blurred by `blur` (listening / understood). */
+const LISTENING_HALO = { radius: 100, blur: 20 };
+const UNDERSTOOD_HALO = { radius: 65, blur: 15 };
+
+/**
+ * Reproduces Figma's blurred glow disc (accentWash at 55%, Gaussian blur) as a
+ * radial gradient, since RN has no blur filter. Stops follow the blurred edge:
+ * solid to r - 2σ, half strength at r, gone by r + 2σ. `box` is the layout size.
+ */
+function haloStyles({ radius: r, blur }: { radius: number; blur: number }) {
+  const outer = r + 2 * blur;
+  const at = (distance: number) => `${Math.round((distance / outer) * 100)}%`;
+  const wash = (alpha: number) => withOpacity(colors.accentWash, alpha);
+  return {
+    box: { width: r * 2, height: r * 2 },
+    glow: {
+      width: outer * 2,
+      height: outer * 2,
+      experimental_backgroundImage: `radial-gradient(circle closest-side, ${wash(0.55)} 0%, ${wash(0.54)} ${at(r - 2 * blur)}, ${wash(0.46)} ${at(r - blur)}, ${wash(0.28)} ${at(r)}, ${wash(0.09)} ${at(r + blur)}, ${wash(0)} 100%)`,
+    },
+  };
+}
+
+const CHIP_ICONS: Record<ChipKind, ImageSourcePropType> = {
+  person: require('@/assets/images/icons/chip-person.png'),
+  topic: require('@/assets/images/icons/chip-topic.png'),
+  time: require('@/assets/images/icons/chip-time.png'),
+};
+const MIC_ICON = require('@/assets/images/icons/mic.png');
 const CHIP_LIMIT = 6;
 const CHIP_TEXT_LIMIT = 48;
 
@@ -100,6 +143,7 @@ const CHIP_TEXT_LIMIT = 48;
 function KandooHome() {
   const home = useHome();
   const entitlement = useEntitlement();
+  const insets = useSafeAreaInsets();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [noteId, setNoteId] = useState<string | null>(null);
@@ -115,8 +159,93 @@ function KandooHome() {
     else setNoteId(item.id);
   };
 
+  // Voice listening and a spoken answer are full-screen moments (Figma's
+  // Listening frame): no top bar, no input, no tabs — the mark in its halo, the
+  // words, and two buttons. They sit in a full-screen layer over the tab bar
+  // (hiding the native bar leaves its strip untappable). Typing stays inline.
+  const voiceListening = home.state === 'listening' && home.voiceActive;
+  const immersive =
+    voiceListening || home.state === 'answered' || home.state === 'understanding';
+  const halo = haloStyles(
+    home.state === 'understanding' ? UNDERSTOOD_HALO : LISTENING_HALO
+  );
+
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top + spacing.space5 }]}>
+      <Modal
+        visible={immersive}
+        animationType="fade"
+        statusBarTranslucent
+        navigationBarTranslucent
+        onRequestClose={
+          voiceListening
+            ? home.cancelListening
+            : home.state === 'answered'
+              ? home.done
+              : // Understood waits on Edit or Remember; back never drops a
+                // pending capture on the floor.
+                () => {}
+        }
+      >
+        <View
+          style={[
+            styles.screen,
+            {
+              paddingTop:
+                insets.top +
+                (home.state === 'understanding'
+                  ? spacing.space5
+                  : spacing.space6 + spacing.space2),
+              paddingBottom: insets.bottom,
+            },
+          ]}
+        >
+          <View style={[styles.halo, halo.box]}>
+            <View style={[styles.haloGlow, halo.glow]} pointerEvents="none" />
+            <Pressable
+              onPress={voiceListening ? home.stopListening : undefined}
+              accessibilityRole={voiceListening ? 'button' : undefined}
+              accessibilityLabel={voiceListening ? 'Stop and send' : undefined}
+              hitSlop={12}
+            >
+              <KandooSymbol state={symbolFor(home.state)} size={HALO_SYMBOL_SIZE} />
+            </Pressable>
+          </View>
+
+          {voiceListening ? (
+            <VoiceListening
+              transcript={home.transcript}
+              canSend={home.voiceActive || home.transcript.trim().length > 0}
+              error={home.error}
+              notice={home.notice}
+              busy={home.busy}
+              onSend={home.stopListening}
+              onCancel={home.cancelListening}
+            />
+          ) : null}
+
+          {home.state === 'understanding' ? (
+            <Understanding
+              transcript={home.submittedText}
+              response={home.response}
+              error={home.error}
+              busy={home.busy}
+              onRemember={home.remember}
+              onEdit={() => setSheetOpen(true)}
+            />
+          ) : null}
+
+          {home.state === 'answered' && home.response ? (
+            <Answered
+              response={home.response}
+              onDone={home.done}
+              voiceSupported={home.voiceSupported}
+              onAskAgain={home.startVoice}
+            />
+          ) : null}
+        </View>
+      </Modal>
+
       <View style={styles.topBar}>
         <Text style={styles.wordmark}>Kandoo</Text>
         <Pressable
@@ -165,34 +294,57 @@ function KandooHome() {
         keyboardShouldPersistTaps="handled"
       >
         {home.state === 'idle' ? (
-          <>
+          <View style={styles.header}>
             <Text style={styles.greeting}>{greeting()}</Text>
             <Text style={styles.ask}>What should I remember for you?</Text>
-            {home.voiceSupported ? (
-              <Text style={styles.voiceHint}>Tap the mic to speak, or just type.</Text>
-            ) : null}
-          </>
+          </View>
         ) : null}
 
         {home.state === 'listening' ? (
-          <Text style={styles.greeting}>Listening…</Text>
+          <Text style={styles.listeningLabel}>Listening…</Text>
         ) : null}
 
-        {/*
-          One input across idle and listening, like the symbol. The TextInput
-          is the SAME element and stays in the SAME parent row in both states —
-          swapping or reparenting it on the first keystroke would drop focus and
-          blink the keyboard. Only the row's border and the mic button toggle.
-        */}
-        {home.state === 'idle' || home.state === 'listening' ? (
-          <View
-            style={[
-              styles.inputRow,
-              home.state === 'listening' && styles.inputRowBare,
-            ]}
-          >
+        {home.state === 'idle' ? (
+          <Idle
+            recent={home.recent}
+            loaded={home.recentLoaded}
+            onSelect={openRecent}
+          />
+        ) : null}
+
+        {home.state === 'listening' ? (
+          <Listening
+            canStop={home.voiceActive || home.transcript.trim().length > 0}
+            voiceActive={home.voiceActive}
+            error={home.error}
+            notice={home.notice}
+            busy={home.busy}
+            onStop={home.stopListening}
+            onCancel={home.cancelListening}
+          />
+        ) : null}
+
+        {home.state === 'remembered' && home.response ? (
+          <Remembered
+            response={home.response}
+            onDone={home.done}
+            onEdit={() => setSheetOpen(true)}
+          />
+        ) : null}
+
+      </ScrollView>
+
+      {/*
+        One input across idle and listening, like the symbol, docked above the
+        tab bar. The TextInput is the SAME element in the SAME parent in both
+        states — swapping or reparenting it on the first keystroke would drop
+        focus and blink the keyboard. Only the mic button toggles.
+      */}
+      {(home.state === 'idle' || home.state === 'listening') && !voiceListening ? (
+        <View style={styles.inputDock}>
+          <View style={styles.inputRow}>
             <TextInput
-              style={home.state === 'listening' ? styles.transcript : styles.field}
+              style={styles.field}
               placeholder="Tell Kandoo anything…"
               placeholderTextColor={colors.inkFaint}
               value={home.transcript}
@@ -210,56 +362,12 @@ function KandooHome() {
                 accessibilityLabel="Speak"
                 hitSlop={8}
               >
-                <MicGlyph color={colors.inkMuted} />
+                <Image source={MIC_ICON} style={styles.micIcon} />
               </Pressable>
             ) : null}
           </View>
-        ) : null}
-
-        {home.state === 'idle' ? (
-          <Idle recent={home.recent} onSelect={openRecent} />
-        ) : null}
-
-        {home.state === 'listening' ? (
-          <Listening
-            canStop={home.voiceActive || home.transcript.trim().length > 0}
-            voiceActive={home.voiceActive}
-            error={home.error}
-            notice={home.notice}
-            busy={home.busy}
-            onStop={home.stopListening}
-            onCancel={home.cancelListening}
-          />
-        ) : null}
-
-        {home.state === 'understanding' ? (
-          <Understanding
-            transcript={home.submittedText}
-            response={home.response}
-            error={home.error}
-            busy={home.busy}
-            onRemember={home.remember}
-            onEdit={() => setSheetOpen(true)}
-          />
-        ) : null}
-
-        {home.state === 'remembered' && home.response ? (
-          <Remembered
-            response={home.response}
-            onDone={home.done}
-            onEdit={() => setSheetOpen(true)}
-          />
-        ) : null}
-
-        {home.state === 'answered' && home.response ? (
-          <Answered
-            response={home.response}
-            onDone={home.done}
-            voiceSupported={home.voiceSupported}
-            onAskAgain={home.startVoice}
-          />
-        ) : null}
-      </ScrollView>
+        </View>
+      ) : null}
 
       {home.response ? (
         <ReviewSheet
@@ -302,32 +410,40 @@ function KandooHome() {
 
 type IdleProps = {
   recent: RecentItem[];
+  loaded: boolean;
   onSelect: (item: RecentItem) => void;
 };
 
-function Idle({ recent, onSelect }: IdleProps) {
+function Idle({ recent, loaded, onSelect }: IdleProps) {
+  // Nothing until the first fetch settles — no flash of "Nothing yet.".
+  if (!loaded) return null;
+
+  // Home already shows the symbol large above, so its empty state is words only.
   if (recent.length === 0) {
     return (
       <EmptyState
         line="Nothing yet."
         help="Tell Kandoo about your day and it’ll remember."
+        showMark={false}
       />
     );
   }
 
   return (
     <View style={styles.recent}>
-      <Text style={styles.eyebrow}>Recently</Text>
+      <Text style={styles.recentLabel}>Recently</Text>
       {recent.map((item) => (
         <Pressable
           key={item.id}
           style={styles.recentRow}
           onPress={() => onSelect(item)}
         >
-          <Text style={styles.recentSummary} numberOfLines={1}>
+          <Text style={styles.recentSummary} numberOfLines={2}>
             {item.summary}
           </Text>
-          <Text style={styles.recentMeta}>{describeCounts(item)}</Text>
+          <Text style={styles.recentMeta}>
+            {timeAgo(item.createdAt)} · {describeCounts(item)}
+          </Text>
         </Pressable>
       ))}
     </View>
@@ -341,6 +457,17 @@ function greeting(): string {
   return 'Good evening.';
 }
 
+/** "Just now", "12 min ago", "2 hours ago", "Yesterday", "3 days ago". */
+function timeAgo(iso: string): string {
+  const minutes = Math.floor((Date.now() - Date.parse(iso)) / 60000);
+  if (!Number.isFinite(minutes) || minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? 'Yesterday' : `${days} days ago`;
+}
+
 function describeCounts(item: RecentItem): string {
   const parts: string[] = [];
   if (item.reminders > 0) {
@@ -350,21 +477,6 @@ function describeCounts(item: RecentItem): string {
     parts.push(`${item.memories} memor${item.memories === 1 ? 'y' : 'ies'}`);
   }
   return parts.join(' · ') || 'Saved what you said';
-}
-
-/**
- * A microphone drawn from plain Views — no icon font or SVG (we removed
- * react-native-svg for the Fabric gap). A filled capsule head over a short
- * stem and base reads as a mic; `color` lets it follow colour-as-state.
- */
-function MicGlyph({ color }: { color: string }) {
-  return (
-    <View style={styles.mic} pointerEvents="none">
-      <View style={[styles.micHead, { backgroundColor: color }]} />
-      <View style={[styles.micStem, { backgroundColor: color }]} />
-      <View style={[styles.micBase, { backgroundColor: color }]} />
-    </View>
-  );
 }
 
 /** A speaker cone (box + flared triangle) with sound bars when on, a slash when
@@ -423,7 +535,57 @@ function Listening({
           disabled={busy || !canStop}
         >
           {/* Live mic: stop it, then submit. Typed or already stopped: send now. */}
-          <Text style={styles.btnPrimaryText}>{voiceActive ? 'Stop' : 'Send'}</Text>
+          <Text style={styles.btnPrimaryText}>Send</Text>
+        </Pressable>
+      </View>
+    </>
+  );
+}
+
+// ------------------------------------------------------ Voice listening
+
+type VoiceListeningProps = {
+  transcript: string;
+  canSend: boolean;
+  error: string | null;
+  notice: string | null;
+  busy: boolean;
+  onSend: () => void;
+  onCancel: () => void;
+};
+
+/**
+ * The mic is live: the words appear in Kandoo's serif as they are heard, and
+ * Send stops the mic and submits in one tap (useHome.stopListening).
+ */
+function VoiceListening({
+  transcript,
+  canSend,
+  error,
+  notice,
+  busy,
+  onSend,
+  onCancel,
+}: VoiceListeningProps) {
+  return (
+    <>
+      <ScrollView style={styles.body} contentContainerStyle={styles.immersiveContent}>
+        <Text style={styles.immersiveLabel}>Listening…</Text>
+        {transcript ? <Text style={styles.spoken}>{transcript}</Text> : null}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+      </ScrollView>
+
+      <View style={styles.dockActions}>
+        <Pressable style={styles.btn} onPress={onCancel} disabled={busy}>
+          <Text style={styles.btnText}>Cancel</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btnPrimary, (busy || !canSend) && styles.btnDisabled]}
+          onPress={onSend}
+          disabled={busy || !canSend}
+        >
+          <Text style={styles.btnPrimaryText}>Send</Text>
         </Pressable>
       </View>
     </>
@@ -449,70 +611,89 @@ function Understanding({
   onRemember,
   onEdit,
 }: UnderstandingProps) {
-  // While the backend is working, the breathing accent symbol is the whole
-  // signal. The words stay on screen, dimmed. No spinner, ever.
-  if (!response) {
-    return (
-      <>
-        <Text style={styles.eyebrow}>Working it out</Text>
-        <Text style={styles.held}>{transcript}</Text>
-      </>
-    );
-  }
+  // While the backend is working, the breathing mark is the whole signal and
+  // the words wait in the card, dimmed. No spinner, ever.
+  const chips = response ? buildChips(response) : [];
+  const nothingActionable = response ? !hasActions(response) : false;
 
-  const chips = buildChips(response);
-  const nothingActionable = chips.length === 0;
+  const label = !response
+    ? 'Working it out'
+    : nothingActionable
+      ? 'Saved what you said'
+      : 'I understood';
+  const title =
+    !response || nothingActionable ? transcript : response.summary ?? transcript;
 
   return (
     <>
-      <Text style={styles.eyebrow}>
-        {nothingActionable ? 'Saved what you said' : 'I understood'}
-      </Text>
-      <Text style={styles.task}>
-        {nothingActionable ? transcript : response.summary ?? transcript}
-      </Text>
+      <ScrollView style={styles.body} contentContainerStyle={styles.understoodContent}>
+        <Text style={styles.understoodLabel}>{label}</Text>
 
-      {chips.length > 0 ? (
-        <View style={styles.chips}>
-          {chips.map((chip, index) => (
-            <StaggerChip key={`${chip.label}-${index}`} chip={chip} index={index} />
-          ))}
+        <View style={styles.card}>
+          <Text style={[styles.cardTitle, !response && styles.cardTitleHeld]}>
+            {title}
+          </Text>
+          {chips.length > 0 ? (
+            <View style={styles.chips}>
+              {chips.map((chip, index) => (
+                <StaggerChip key={`${chip.label}-${index}`} chip={chip} index={index} />
+              ))}
+            </View>
+          ) : null}
+        </View>
+
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+      </ScrollView>
+
+      {response ? (
+        <View style={styles.dockActions}>
+          {!nothingActionable ? (
+            <Pressable style={styles.btn} onPress={onEdit} disabled={busy}>
+              <Text style={styles.btnText}>Edit</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            style={[styles.btnPrimary, busy && styles.btnDisabled]}
+            onPress={onRemember}
+            disabled={busy}
+          >
+            <Text style={styles.btnPrimaryText}>
+              {nothingActionable ? 'Done' : 'Remember'}
+            </Text>
+          </Pressable>
         </View>
       ) : null}
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      <View style={styles.actions}>
-        {!nothingActionable ? (
-          <Pressable style={styles.btn} onPress={onEdit} disabled={busy}>
-            <Text style={styles.btnText}>Edit</Text>
-          </Pressable>
-        ) : null}
-        <Pressable
-          style={[styles.btnPrimary, busy && styles.btnDisabled]}
-          onPress={onRemember}
-          disabled={busy}
-        >
-          <Text style={styles.btnPrimaryText}>
-            {nothingActionable ? 'Done' : 'Remember'}
-          </Text>
-        </Pressable>
-      </View>
     </>
   );
 }
 
-type Chip = { label: string; guessed?: boolean };
+type ChipKind = 'person' | 'topic' | 'time';
+/** `kind` picks the Figma icon; the "+N" overflow chip has none. */
+type Chip = { kind: ChipKind | null; label: string; guessed?: boolean };
+
+function hasActions(response: InterpretationResponse): boolean {
+  return response.results.some(
+    (r) => r.status === 'ok' && (r.kind === 'reminder' || r.kind === 'memory')
+  );
+}
 
 /**
- * One chip per thing Kandoo understood, plus the people it heard. Capped so
- * a long recap reads as a summary, not a wall. Low confidence becomes the one
- * word "guessed" on the time chip — never a number.
+ * Figma's Understood card: the people Kandoo heard, then the topics it filed
+ * the memories under, then each reminder with its time. A memory with no
+ * person or topic still gets a chip, so nothing extracted goes unseen. Capped
+ * so a long recap reads as a summary, not a wall. Low confidence becomes the
+ * one word "guessed" on the time chip — never a number.
  */
 function buildChips(response: InterpretationResponse): Chip[] {
-  const chips: Chip[] = [];
-  const people = new Set<string>();
+  const people = new Map<string, string>();
+  const topics = new Map<string, string>();
+  const loose: Chip[] = [];
+  const times: Chip[] = [];
   const guessedTimes = response.confidence === 'low';
+  const add = (into: Map<string, string>, value: string) => {
+    const key = value.trim().toLowerCase();
+    if (key && !into.has(key)) into.set(key, value.trim());
+  };
 
   for (const result of response.results) {
     if (result.status !== 'ok') continue;
@@ -520,23 +701,33 @@ function buildChips(response: InterpretationResponse): Chip[] {
     if (result.kind === 'reminder') {
       const r = result.reminder;
       const when = formatDueDate(r.due_at) ?? r.place_hint ?? 'Reminder';
-      chips.push({
-        label: `${clip(r.task)} · ${when}${guessedTimes && r.due_at ? ' — guessed' : ''}`,
-        guessed: guessedTimes && !!r.due_at,
+      const guessed = guessedTimes && !!r.due_at;
+      times.push({
+        kind: 'time',
+        label: `${clip(r.task)} · ${when}${guessed ? ' — guessed' : ''}`,
+        guessed,
       });
-      if (r.person) people.add(r.person);
+      if (r.person) add(people, r.person);
     } else if (result.kind === 'memory') {
-      chips.push({ label: `${clip(result.memory.content)} · Memory` });
-      if (result.memory.person) people.add(result.memory.person);
+      const m = result.memory;
+      if (m.person) add(people, m.person);
+      if (m.topics.length > 0) m.topics.forEach((topic) => add(topics, topic));
+      else if (!m.person) loose.push({ kind: 'topic', label: clip(m.content) });
     }
   }
 
-  for (const person of people) {
-    chips.push({ label: `${person} · Person` });
-  }
+  const chips: Chip[] = [
+    ...[...people.values()].map((label) => ({ kind: 'person' as const, label })),
+    ...[...topics.values()].map((label) => ({ kind: 'topic' as const, label })),
+    ...loose,
+    ...times,
+  ];
 
   if (chips.length <= CHIP_LIMIT) return chips;
-  return [...chips.slice(0, CHIP_LIMIT - 1), { label: `+${chips.length - CHIP_LIMIT + 1}` }];
+  return [
+    ...chips.slice(0, CHIP_LIMIT - 1),
+    { kind: null, label: `+${chips.length - CHIP_LIMIT + 1}` },
+  ];
 }
 
 function clip(value: string): string {
@@ -563,10 +754,13 @@ function StaggerChip({ chip, index }: { chip: Chip; index: number }) {
 
   return (
     <Animated.View style={[styles.chip, chip.guessed && styles.chipGuessed, style]}>
-      <Text
-        style={[styles.chipText, chip.guessed && styles.chipTextGuessed]}
-        numberOfLines={1}
-      >
+      {chip.kind ? (
+        <Image
+          source={CHIP_ICONS[chip.kind]}
+          style={[styles.chipIcon, chip.guessed && styles.chipIconGuessed]}
+        />
+      ) : null}
+      <Text style={[styles.chipText, chip.guessed && styles.chipTextGuessed]}>
         {chip.label}
       </Text>
     </Animated.View>
@@ -657,6 +851,25 @@ function Answered({ response, onDone, voiceSupported, onAskAgain }: AnsweredProp
   const answer = recallAnswer(response);
   const { enabled, loading, toggle } = useSpeechEnabled();
   const shown = useSharedValue(0);
+  // True while Kandoo is saying this answer: the primary button reads Stop, then
+  // Done once it falls quiet. Each utterance gets an id so a stale end callback
+  // (the previous answer being cut off) can't flip a newer one to Done.
+  const [speaking, setSpeaking] = useState(false);
+  const utterance = useRef(0);
+
+  function say(value: string) {
+    const id = ++utterance.current;
+    setSpeaking(true);
+    speakAnswer(value, () => {
+      if (utterance.current === id) setSpeaking(false);
+    });
+  }
+
+  function silence() {
+    utterance.current++;
+    setSpeaking(false);
+    stopSpeaking();
+  }
 
   useEffect(() => {
     shown.value = withTiming(1, { duration: 520 });
@@ -667,8 +880,11 @@ function Answered({ response, onDone, voiceSupported, onAskAgain }: AnsweredProp
   // unmount: Done, the mic's transition to listening, or navigating away.
   useEffect(() => {
     if (loading) return;
-    if (enabled) speakAnswer(answer);
-    return () => stopSpeaking();
+    if (enabled) say(answer);
+    return () => {
+      utterance.current++;
+      stopSpeaking();
+    };
     // `enabled` is deliberately not a dep: toggling is handled in onToggle so a
     // mute doesn't re-trigger speech. This runs on a new answer or once loaded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -694,17 +910,17 @@ function Answered({ response, onDone, voiceSupported, onAskAgain }: AnsweredProp
   function onToggle() {
     const willBeOn = !enabled;
     toggle();
-    if (willBeOn) speakAnswer(answer);
-    else stopSpeaking();
+    if (willBeOn) say(answer);
+    else silence();
   }
 
   function onMic() {
-    stopSpeaking();
+    silence();
     onAskAgain();
   }
 
   function onPressDone() {
-    stopSpeaking();
+    silence();
     onDone();
   }
 
@@ -713,24 +929,31 @@ function Answered({ response, onDone, voiceSupported, onAskAgain }: AnsweredProp
     transform: [{ translateY: 6 * (1 - shown.value) }],
   }));
 
+  // Same full-screen layout as voice listening: the answer in Kandoo's serif,
+  // Ask again on the left, Stop (while speaking) then Done on the right. The
+  // speaker keeps the persisted mute preference one tap away.
   return (
     <>
-      <View style={styles.answeredHead}>
-        <Text style={styles.eyebrow}>Here’s what you told me</Text>
-        <Pressable
-          style={styles.speakerBtn}
-          onPress={onToggle}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={enabled ? 'Mute answers' : 'Speak answers'}
-        >
-          <SpeakerGlyph color={colors.inkMuted} muted={!enabled} />
-        </Pressable>
-      </View>
+      <ScrollView style={styles.body} contentContainerStyle={styles.immersiveContent}>
+        <View style={styles.answeredHead}>
+          <Text style={styles.immersiveLabel}>
+            {speaking ? 'Speaking…' : 'Here’s what you told me'}
+          </Text>
+          <Pressable
+            style={styles.speakerBtn}
+            onPress={onToggle}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={enabled ? 'Mute answers' : 'Speak answers'}
+          >
+            <SpeakerGlyph color={colors.markRing} muted={!enabled} />
+          </Pressable>
+        </View>
 
-      <Animated.Text style={[styles.answerText, style]}>{answer}</Animated.Text>
+        <Animated.Text style={[styles.spoken, style]}>{answer}</Animated.Text>
+      </ScrollView>
 
-      <View style={styles.actions}>
+      <View style={styles.dockActions}>
         {voiceSupported ? (
           <Pressable
             style={styles.btn}
@@ -738,11 +961,11 @@ function Answered({ response, onDone, voiceSupported, onAskAgain }: AnsweredProp
             accessibilityRole="button"
             accessibilityLabel="Ask another question"
           >
-            <MicGlyph color={colors.inkMuted} />
+            <Text style={styles.btnText}>Ask again</Text>
           </Pressable>
         ) : null}
-        <Pressable style={styles.btnPrimary} onPress={onPressDone}>
-          <Text style={styles.btnPrimaryText}>Done</Text>
+        <Pressable style={styles.btnPrimary} onPress={speaking ? silence : onPressDone}>
+          <Text style={styles.btnPrimaryText}>{speaking ? 'Stop' : 'Done'}</Text>
         </Pressable>
       </View>
     </>
@@ -761,34 +984,35 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.base,
-    paddingTop: spacing.space5,
-    paddingHorizontal: spacing.space4,
   },
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.space6,
+    paddingHorizontal: spacing.space5,
+    marginBottom: spacing.space5,
   },
   brand: {
     ...text.label,
     color: colors.inkMuted,
   },
   wordmark: {
-    ...text.displayL,
     fontFamily: text.wordmark.fontFamily,
-    fontSize: 22,
+    fontSize: 16,
+    lineHeight: 20,
     color: colors.ink,
   },
   badge: {
     backgroundColor: colors.accentWash,
     borderRadius: radius.full,
-    paddingVertical: 3,
-    paddingHorizontal: spacing.space2,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
   },
   badgeText: {
     ...text.label,
-    color: colors.settled,
+    textTransform: 'none',
+    letterSpacing: 1,
+    color: colors.markRing,
   },
   answerText: {
     ...text.answer,
@@ -805,92 +1029,103 @@ const styles = StyleSheet.create({
   },
   bodyContent: {
     alignItems: 'center',
-    paddingBottom: spacing.space7,
+    paddingHorizontal: spacing.space5,
+    paddingTop: spacing.space5,
+    paddingBottom: spacing.space5,
   },
 
+  header: {
+    alignSelf: 'stretch',
+    gap: spacing.space2,
+    marginBottom: spacing.space6,
+  },
   greeting: {
+    ...text.body,
+    color: colors.inkMuted,
+  },
+  ask: {
+    ...text.displayL,
+    letterSpacing: 0,
+    color: colors.ink,
+  },
+  listeningLabel: {
     ...text.caption,
     color: colors.inkMuted,
     marginBottom: spacing.space2,
   },
-  ask: {
-    ...text.displayL,
-    color: colors.ink,
-    textAlign: 'center',
-    maxWidth: 300,
-    marginBottom: spacing.space3,
-  },
-  voiceHint: {
-    ...text.caption,
-    color: colors.inkFaint,
-    textAlign: 'center',
-    marginBottom: spacing.space5,
+
+  // The input docks above the tab bar; the keyboard lifts it with the window.
+  inputDock: {
+    paddingHorizontal: spacing.space5,
+    paddingTop: spacing.space2,
+    paddingBottom: spacing.space3,
   },
   inputRow: {
-    alignSelf: 'stretch',
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 64,
+    minHeight: 52,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineStrong,
     backgroundColor: colors.surface,
+    paddingLeft: spacing.space4,
     paddingRight: spacing.space2,
-  },
-  // Listening: drop the box so the centered transcript reads plainly, matching
-  // the pre-mic-button look. The mic hides here, so no right padding is needed.
-  inputRowBare: {
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    paddingRight: 0,
   },
   field: {
     ...text.body,
     flex: 1,
     color: colors.ink,
-    paddingHorizontal: spacing.space4,
-    paddingVertical: spacing.space3,
-  },
-  transcript: {
-    ...text.bodyL,
-    flex: 1,
-    color: colors.ink,
-    textAlign: 'center',
+    maxHeight: 120,
     paddingVertical: spacing.space3,
   },
   micBtn: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mic: {
-    width: 24,
-    height: 24,
+  micIcon: {
+    width: 20,
+    height: 20,
+    tintColor: colors.markRing,
+  },
+  // Voice listening / spoken answer (Figma: kandoo-listening).
+  halo: {
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  micHead: {
-    width: 11,
-    height: 15,
-    borderRadius: 5.5,
+  // Sized and shaded per state by haloStyles().
+  haloGlow: {
+    position: 'absolute',
   },
-  micStem: {
-    width: 2,
-    height: 3,
-    marginTop: 1,
+  immersiveContent: {
+    paddingHorizontal: spacing.space5,
+    paddingTop: spacing.space4,
+    paddingBottom: spacing.space5,
   },
-  micBase: {
-    width: 12,
-    height: 2,
-    borderRadius: 1,
-    marginTop: 1,
+  immersiveLabel: {
+    ...text.caption,
+    color: colors.markRing,
+    textAlign: 'center',
+  },
+  spoken: {
+    ...text.memory,
+    color: colors.ink,
+    marginTop: spacing.space6,
+  },
+  dockActions: {
+    flexDirection: 'row',
+    gap: spacing.space3,
+    paddingHorizontal: spacing.space5,
+    paddingTop: spacing.space3,
+    paddingBottom: spacing.space5,
   },
   answeredHead: {
-    alignSelf: 'stretch',
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     alignItems: 'center',
+    gap: spacing.space1,
   },
   speakerBtn: {
     width: 40,
@@ -952,21 +1187,30 @@ const styles = StyleSheet.create({
 
   recent: {
     alignSelf: 'stretch',
-    marginTop: spacing.space6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  recentLabel: {
+    ...text.label,
+    letterSpacing: 1.5,
+    color: colors.markRing,
+    marginBottom: spacing.space1,
   },
   recentRow: {
-    paddingVertical: spacing.space3,
+    paddingVertical: spacing.space4,
+    gap: spacing.space1,
     borderTopWidth: 1,
     borderTopColor: colors.line,
   },
   recentSummary: {
-    ...text.body,
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 17,
+    lineHeight: 22,
     color: colors.ink,
   },
   recentMeta: {
     ...text.caption,
     color: colors.inkMuted,
-    marginTop: 2,
   },
 
   eyebrow: {
@@ -981,27 +1225,67 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     marginBottom: spacing.space3,
   },
+  // Understood (Figma: kandoo-understood).
+  understoodContent: {
+    paddingHorizontal: spacing.space5,
+    paddingTop: spacing.space3,
+    paddingBottom: spacing.space5,
+  },
+  understoodLabel: {
+    ...text.label,
+    letterSpacing: 1.5,
+    color: colors.markRing,
+    textAlign: 'center',
+    marginBottom: spacing.space6,
+  },
+  card: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.lg,
+    padding: 20,
+    gap: spacing.space4,
+  },
+  cardTitle: {
+    ...text.answer,
+    color: colors.ink,
+  },
+  cardTitleHeld: {
+    color: colors.inkMuted,
+  },
   chips: {
-    alignSelf: 'stretch',
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.space2,
   },
   chip: {
     maxWidth: '100%',
-    paddingVertical: 5,
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.accentWash,
   },
   chipGuessed: {
     borderColor: colors.alarmText,
   },
+  chipIcon: {
+    width: 14,
+    height: 14,
+    tintColor: colors.ink,
+  },
+  chipIconGuessed: {
+    tintColor: colors.alarmText,
+  },
   chipText: {
     ...text.caption,
-    color: colors.inkMuted,
+    flexShrink: 1,
+    color: colors.ink,
   },
   chipTextGuessed: {
     color: colors.alarmText,
@@ -1038,10 +1322,11 @@ const styles = StyleSheet.create({
   },
   btn: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 48,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1050,8 +1335,8 @@ const styles = StyleSheet.create({
     color: colors.inkMuted,
   },
   btnPrimary: {
-    flex: 2,
-    minHeight: 44,
+    flex: 1,
+    minHeight: 48,
     borderRadius: radius.md,
     backgroundColor: colors.markCore,
     alignItems: 'center',

@@ -9,6 +9,8 @@ export type EmptyStateProps = {
   line: string;
   /** The help line — how the user fills it. */
   help: string;
+  /** Hide the watermark mark where the screen already shows the symbol (Home). */
+  showMark?: boolean;
 };
 
 /**
@@ -17,12 +19,14 @@ export type EmptyStateProps = {
  * help line. Same shape everywhere so an empty Home and an empty Reminders read
  * as the same app resting, not four different blank screens.
  */
-export function EmptyState({ line, help }: EmptyStateProps) {
+export function EmptyState({ line, help, showMark = true }: EmptyStateProps) {
   return (
     <View style={styles.wrap}>
-      <View style={styles.mark}>
-        <KandooSymbol state="idle" size={72} />
-      </View>
+      {showMark ? (
+        <View style={styles.mark}>
+          <KandooSymbol state="idle" size={72} />
+        </View>
+      ) : null}
       <Text style={styles.line}>{line}</Text>
       <Text style={styles.help}>{help}</Text>
     </View>

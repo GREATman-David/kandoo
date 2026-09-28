@@ -8,15 +8,21 @@ import * as Speech from 'expo-speech';
  * Every entry point stops any current utterance first, so a new answer never
  * overlaps the previous one — the caller doesn't have to track "am I speaking?".
  */
-export function speakAnswer(text: string): void {
+export function speakAnswer(text: string, onEnd?: () => void): void {
   const trimmed = text.trim();
-  if (!trimmed) return;
+  if (!trimmed) {
+    onEnd?.();
+    return;
+  }
   try {
     Speech.stop();
-    Speech.speak(trimmed);
+    // `onEnd` fires once this utterance is over, however it ended — finished,
+    // stopped, or failed — so the UI can swap Stop for Done.
+    Speech.speak(trimmed, { onDone: onEnd, onStopped: onEnd, onError: onEnd });
   } catch (error) {
     // TTS is a nicety, never load-bearing — the answer is on screen regardless.
     console.warn('Speech.speak failed:', error);
+    onEnd?.();
   }
 }
 

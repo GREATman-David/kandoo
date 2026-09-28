@@ -15,7 +15,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { colors, duration, radius, shadow, withOpacity } from '@/theme/theme';
+import { colors, duration, radius, shadow } from '@/theme/theme';
 
 export type SymbolState =
   | 'idle'
@@ -39,13 +39,14 @@ export type SymbolProps = {
  * glowless remembered, a calm and glowless idle. Never deform it: uniform scale,
  * glow and opacity only.
  *
- * Ring geometry as fractions of `size`, sampled from the canonical asset:
- * outer ring 0.79..1.00, middle ring 0.40..0.60, core 0..0.21 of the radius.
+ * Ring geometry as fractions of `size`, from the Figma master (a 72px mark:
+ * outer ring r27..36, olive ring r12..20, amber core r6, cream gaps between).
  */
-const OUTER_BORDER = 0.07;
-const MIDDLE_DIAMETER = 0.72;
-const MIDDLE_BORDER = 0.19;
-const CORE_DIAMETER = 0.22;
+const MASTER = 72;
+const OUTER_BORDER = 9 / MASTER;
+const MIDDLE_DIAMETER = 40 / MASTER;
+const MIDDLE_BORDER = 8 / MASTER;
+const CORE_DIAMETER = 12 / MASTER;
 
 type Motion = 'breathe' | 'pulse' | 'moment' | 'still';
 
@@ -59,16 +60,18 @@ type StateStyle = {
 const STATES: Record<SymbolState, StateStyle> = {
   idle: { ground: null, glow: null, motion: 'breathe', label: 'Kandoo is idle' },
   listening: {
-    // A low-opacity live-orange wash reads orange on cream; the fixed liveWash
-    // token washed out to pink at this size.
-    ground: withOpacity(colors.live, 0.15),
-    glow: shadow.live,
+    // The Figma listening frame carries this state with a soft pale-amber halo
+    // behind the mark, which Home draws at full width; the mark itself pulses.
+    ground: null,
+    glow: null,
     motion: 'pulse',
     label: 'Kandoo is listening',
   },
   understanding: {
+    // Home draws the Figma halo behind the mark in this state. An elevation
+    // glow here rendered as an octagon on Android, so it is left off.
     ground: null,
-    glow: shadow.accent,
+    glow: null,
     motion: 'breathe',
     label: 'Kandoo is working it out',
   },
@@ -164,6 +167,9 @@ export function KandooSymbol({ state, size }: SymbolProps) {
 
   const middle = size * MIDDLE_DIAMETER;
   const core = size * CORE_DIAMETER;
+  // The Figma mark fills its gaps with the cream ground, so the rings read
+  // the same over a halo as over the page. Alarm keeps them open to its red.
+  const gap = state === 'alarm' ? 'transparent' : colors.base;
 
   return (
     <View
@@ -188,7 +194,7 @@ export function KandooSymbol({ state, size }: SymbolProps) {
       ) : null}
 
       <Animated.View style={animatedStyle}>
-        {/* Fixed brand colours; gaps fall through to the cream ground. */}
+        {/* Fixed brand colours; gaps filled with the cream ground. */}
         <View
           style={{
             width: size,
@@ -196,6 +202,7 @@ export function KandooSymbol({ state, size }: SymbolProps) {
             borderRadius: radius.full,
             borderWidth: size * OUTER_BORDER,
             borderColor: colors.markOuter,
+            backgroundColor: gap,
             alignItems: 'center',
             justifyContent: 'center',
           }}
@@ -207,6 +214,7 @@ export function KandooSymbol({ state, size }: SymbolProps) {
               borderRadius: radius.full,
               borderWidth: size * MIDDLE_BORDER,
               borderColor: colors.markRing,
+              backgroundColor: gap,
               alignItems: 'center',
               justifyContent: 'center',
             }}

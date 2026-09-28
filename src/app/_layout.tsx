@@ -1,6 +1,6 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import { DefaultTheme, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
@@ -9,15 +9,17 @@ import { useKandooFonts } from '@/theme/useKandooFonts';
 SplashScreen.preventAutoHideAsync();
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
   const [fontsLoaded, fontError] = useKandooFonts();
 
   if (!fontsLoaded && !fontError) {
     return null;
   }
 
+  // Kandoo ships a single cream theme; a dark system scheme must not leak in
+  // as dark navigation chrome or light status-bar icons on a cream ground.
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={DefaultTheme}>
+      <StatusBar style="dark" />
       <AnimatedSplashOverlay />
       <AppTabs />
     </ThemeProvider>

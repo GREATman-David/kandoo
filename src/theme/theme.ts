@@ -4,24 +4,27 @@ import brand from './brand.json';
 
 /**
  * Kandoo design tokens — LIGHT / cream theme (the shipping theme).
- * Source: Kandoo Design System v2, project/tokens.json. Contrast ratios below
- * are measured against the light grounds (base #FBF6EF, surface #FFFFFF), NOT
- * copied from the design system's notes — several of those cite the dark values.
+ * Source: Kandoo Design System v2, project/tokens.json; the ground, ink and
+ * line values were retuned to the Kandoo UI Figma frames. Contrast ratios below
+ * are measured against the light grounds (base #F7F0E6, surface #FFFFFF).
  */
 
 export const colors = {
-  base: '#FBF6EF',
+  base: '#F7F0E6',
   surface: '#FFFFFF',
   surfaceRaised: '#F2E9DC',
   /** Identical in both themes — the brand moment has no light variant. */
   brandGround: '#39000D',
-  line: '#E4D8C8',
-  /** Primary text. 17.9:1 on base, 19.2:1 on surface. */
-  ink: '#1A0A0E',
-  /** Secondary text. 5.5:1 on base. */
-  inkMuted: '#6E625A',
-  /** 2.7:1 — fails 4.5:1 by design. Placeholders and disabled labels only. */
-  inkFaint: '#A2968B',
+  /** Hairlines: row dividers, the tab bar's top rule. */
+  line: '#E8D8C4',
+  /** Input and field borders — one step stronger than a hairline. */
+  lineStrong: '#D8C7B5',
+  /** Primary text. 13.4:1 on base, 15.1:1 on surface. */
+  ink: '#2F241B',
+  /** Secondary text. 4.75:1 on base, 5.4:1 on surface. */
+  inkMuted: '#7A6758',
+  /** 2.0:1 — fails 4.5:1 by design. Placeholders and disabled labels only. */
+  inkFaint: '#B8A89C',
   /**
    * ATTENTION / primary action. Lives in brand.json because app.config.ts
    * needs it and cannot import TypeScript on every Node version.
@@ -30,7 +33,8 @@ export const colors = {
    * 4.5:1 on base, 4.9:1 on surface, so it reads as text and as a button.
    */
   accent: brand.accent,
-  accentWash: '#FBEFD8',
+  /** Pale amber pill ground (the Free / Pro badge). */
+  accentWash: '#FFF7D1',
   /** LIVE. Capture is open. Nothing else. 4.7:1 on base — passes as text. */
   live: '#C04600',
   liveWash: '#FCE7DA',

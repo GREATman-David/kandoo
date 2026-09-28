@@ -99,6 +99,9 @@ export function useHome() {
   const [response, setResponse] = useState<InterpretationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recent, setRecent] = useState<RecentItem[]>([]);
+  // False until the first Recently fetch settles, so Home never flashes the
+  // empty state at a returning user whose rows are still on the way.
+  const [recentLoaded, setRecentLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
   // Raised when extraction returns nothing actionable. Kandoo says so in its own
@@ -148,6 +151,8 @@ export function useHome() {
       setRecent(captures.map(toRecentItem));
     } catch (caught) {
       console.warn('Loading Recently failed:', caught);
+    } finally {
+      setRecentLoaded(true);
     }
   }, []);
 
@@ -461,6 +466,7 @@ export function useHome() {
     notice,
     busy,
     recent,
+    recentLoaded,
     voiceActive,
     voiceSupported: VOICE_SUPPORTED,
     paywallVisible,
