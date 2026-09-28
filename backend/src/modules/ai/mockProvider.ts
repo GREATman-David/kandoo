@@ -7,6 +7,7 @@ import type {
 import type {
   KandooAction,
   KandooInterpretation,
+  KandooNote,
 } from './interpretationSchema';
 
 import { EMBEDDING_DIMENSIONS } from './openaiProvider';
@@ -113,6 +114,13 @@ export class MockAIProvider implements AIProvider {
       .slice(0, 3)
       .map((memory) => memory.content)
       .join(' ')}`;
+  }
+
+  /** The words themselves, titled by their opening — enough to exercise the path. */
+  async writeNote(text: string): Promise<KandooNote> {
+    const body = text.trim();
+    const title = body.split(/\s+/).slice(0, 5).join(' ') || 'Note';
+    return { title, body };
   }
 
   /**

@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/EmptyState';
+import { OfflineNote } from '@/components/OfflineNote';
 import { PersonDetail } from '@/components/PersonDetail';
 import {
   deletePerson,
@@ -142,6 +143,7 @@ export default function PeopleScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.space4 }]}>
       <Text style={styles.heading}>People</Text>
+      <OfflineNote />
       <Text style={styles.sub}>People Kandoo knows from what you’ve said.</Text>
 
       <ScrollView

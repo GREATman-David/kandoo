@@ -230,7 +230,7 @@ export function ReviewSheet({
             </Pressable>
             {totalConfirmable > 0 ? (
               <Pressable style={styles.btnPrimary} onPress={confirmAll}>
-                <Text style={styles.btnPrimaryText}>Keep all {totalConfirmable}</Text>
+                <Text style={styles.btnPrimaryText}>Keep all</Text>
               </Pressable>
             ) : (
               <Pressable style={styles.btnPrimary} onPress={onClose}>

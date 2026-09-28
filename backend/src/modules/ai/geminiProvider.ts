@@ -2,11 +2,14 @@ import { GoogleGenAI } from '@google/genai';
 
 import {
   kandooInterpretationSchema,
+  noteSchema,
   type KandooInterpretation,
+  type KandooNote,
 } from './interpretationSchema';
 
 import {
   EMPTY_RECALL_ANSWER,
+  NOTE_SYSTEM_PROMPT,
   RECALL_SYSTEM_PROMPT,
   extractionPrompt,
   recallUserPrompt,
@@ -268,6 +271,17 @@ export class GeminiProvider implements AIProvider {
     throw new Error(
       `Interpretation failed validation after repair: ${second.error.message}`
     );
+  }
+
+  async writeNote(text: string): Promise<KandooNote> {
+    const { value } = await this.completeJson(NOTE_SYSTEM_PROMPT, [
+      { role: 'user', parts: [{ text }] },
+    ]);
+    const parsed = noteSchema.safeParse(value);
+    if (!parsed.success) {
+      throw new Error(`Note failed validation: ${parsed.error.message}`);
+    }
+    return parsed.data;
   }
 
   private async completeJson(

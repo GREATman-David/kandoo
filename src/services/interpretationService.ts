@@ -1,3 +1,10 @@
+import {
+  clearOfflineCache,
+  readAllCached,
+  rememberUser,
+  setOffline,
+  withOfflineCache,
+} from './offlineCache';
 import { supabase } from './supabase';
 
 function requireEnv(value: string | undefined, name: string): string {
@@ -36,6 +43,21 @@ export class NetworkError extends Error {
   }
 }
 
+export const isNetworkError = (error: unknown): boolean =>
+  error instanceof NetworkError;
+
+/**
+ * The backend rejected the session (401). The token is gone for good, so the
+ * app signs out locally and the auth screen takes over; the UI shows this one
+ * line rather than the server's wording.
+ */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super('Your session ended. Please sign in again.');
+    this.name = 'SessionExpiredError';
+  }
+}
+
 /**
  * The single door to the backend. Every call goes through here so the
  * transport-vs-application error boundary is decided in exactly one place:
@@ -59,6 +81,8 @@ async function apiFetch<T>(
     throw new NetworkError();
   }
 
+  setOffline(false);
+
   let body = '';
   try {
     body = await response.text();
@@ -78,6 +102,17 @@ async function apiFetch<T>(
       );
       throw new NetworkError();
     }
+  }
+
+  if (response.status === 401) {
+    console.error(`Request to ${path} was unauthorised; signing out.`);
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch (signOutError) {
+      console.error('Local sign-out after 401 failed:', signOutError);
+    }
+    await clearOfflineCache();
+    throw new SessionExpiredError();
   }
 
   if (!response.ok) {
@@ -140,6 +175,8 @@ export type InterpretationResponse = {
   captureId: string;
   summary: string | null;
   confidence: 'high' | 'low';
+  /** Set when extraction judged the capture substantial enough to write up. */
+  note?: { title: string; body: string } | null;
   results: InterpretResult[];
 };
 
@@ -177,12 +214,21 @@ export type CaptureNote = {
 async function getAccessTokenOrThrow(): Promise<string> {
   const {
     data: { session },
+    error,
   } = await supabase.auth.getSession();
+
+  // An expired token that could not be refreshed for lack of a connection is a
+  // network failure, not a sign-out — offline copies can still be shown.
+  if (error?.name === 'AuthRetryableFetchError') {
+    console.error('Session refresh failed (offline?):', error);
+    throw new NetworkError();
+  }
 
   if (!session) {
     throw new Error('You must be signed in to use Kandoo.');
   }
 
+  void rememberUser(session.user.id);
   return session.access_token;
 }
 
@@ -240,15 +286,17 @@ export async function confirmReminder(
  * notification schedule. The device — not the server — decides what to fire.
  */
 export async function fetchActiveReminders(): Promise<CreatedReminder[]> {
-  const accessToken = await getAccessTokenOrThrow();
+  return withOfflineCache('reminders:active', async () => {
+    const accessToken = await getAccessTokenOrThrow();
 
-  const data = await apiFetch<{ reminders?: CreatedReminder[] }>(
-    '/reminders/active',
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-    'Failed to load reminders.'
-  );
+    const data = await apiFetch<{ reminders?: CreatedReminder[] }>(
+      '/reminders/active',
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+      'Failed to load reminders.'
+    );
 
-  return data.reminders ?? [];
+    return data.reminders ?? [];
+  }, isNetworkError);
 }
 
 export type GroupedReminders = {
@@ -259,19 +307,21 @@ export type GroupedReminders = {
 
 /** The Reminders tab. The device splits `active` into Today/Upcoming locally. */
 export async function fetchGroupedReminders(): Promise<GroupedReminders> {
-  const accessToken = await getAccessTokenOrThrow();
+  return withOfflineCache('reminders:grouped', async () => {
+    const accessToken = await getAccessTokenOrThrow();
 
-  const data = await apiFetch<Partial<GroupedReminders>>(
-    '/reminders',
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-    'Failed to load reminders.'
-  );
+    const data = await apiFetch<Partial<GroupedReminders>>(
+      '/reminders',
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+      'Failed to load reminders.'
+    );
 
-  return {
-    needsReview: data.needsReview ?? [],
-    active: data.active ?? [],
-    history: data.history ?? [],
-  };
+    return {
+      needsReview: data.needsReview ?? [],
+      active: data.active ?? [],
+      history: data.history ?? [],
+    };
+  }, isNetworkError);
 }
 
 /** Manual reminder from the + button — created confirmed. Caller schedules it. */
@@ -365,23 +415,27 @@ export type PersonDetail = {
 
 /** The People tab — one row per person, most recently mentioned first. */
 export async function fetchPeople(): Promise<PersonSummary[]> {
-  const accessToken = await getAccessTokenOrThrow();
-  const data = await apiFetch<{ people?: PersonSummary[] }>(
-    '/people',
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-    'Failed to load people.'
-  );
-  return data.people ?? [];
+  return withOfflineCache('people', async () => {
+    const accessToken = await getAccessTokenOrThrow();
+    const data = await apiFetch<{ people?: PersonSummary[] }>(
+      '/people',
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+      'Failed to load people.'
+    );
+    return data.people ?? [];
+  }, isNetworkError);
 }
 
 export async function fetchPerson(id: string): Promise<PersonDetail | null> {
-  const accessToken = await getAccessTokenOrThrow();
-  const data = await apiFetch<{ person?: PersonDetail }>(
-    `/people/${encodeURIComponent(id)}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-    'Failed to load that person.'
-  );
-  return data.person ?? null;
+  return withOfflineCache(`person:${id}`, async () => {
+    const accessToken = await getAccessTokenOrThrow();
+    const data = await apiFetch<{ person?: PersonDetail }>(
+      `/people/${encodeURIComponent(id)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+      'Failed to load that person.'
+    );
+    return data.person ?? null;
+  }, isNetworkError);
 }
 
 /** Merge others into the survivor. The survivor keeps everything. */
@@ -438,21 +492,24 @@ export async function deleteReminderById(id: string): Promise<void> {
 export async function fetchCaptureNotes(
   opts: { limit?: number; notedOnly?: boolean; requireContent?: boolean } = {}
 ): Promise<CaptureNote[]> {
-  const accessToken = await getAccessTokenOrThrow();
-
   const params = new URLSearchParams();
   if (opts.limit) params.set('limit', String(opts.limit));
   if (opts.notedOnly === false) params.set('noted', 'false');
   if (opts.requireContent) params.set('content', 'true');
   const query = params.toString();
 
-  const data = await apiFetch<{ captures?: CaptureNote[] }>(
-    `/captures${query ? `?${query}` : ''}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-    'Failed to load notes.'
-  );
+  // Each list shape (Home's Recently, the Memory tab) is kept separately.
+  return withOfflineCache(`captures:list:${query}`, async () => {
+    const accessToken = await getAccessTokenOrThrow();
 
-  return data.captures ?? [];
+    const data = await apiFetch<{ captures?: CaptureNote[] }>(
+      `/captures${query ? `?${query}` : ''}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+      'Failed to load notes.'
+    );
+
+    return data.captures ?? [];
+  }, isNetworkError);
 }
 
 /**
@@ -540,6 +597,25 @@ export async function updateCaptureNote(
   );
 }
 
+/**
+ * "Take note": ask Kandoo to write a clean note for one capture. Returns the
+ * saved note (or the one it already had — a capture is never noted twice).
+ */
+export async function takeNote(
+  captureId: string
+): Promise<{ title: string; body: string }> {
+  const accessToken = await getAccessTokenOrThrow();
+  const result = await apiFetch<{ note: { title: string; body: string } }>(
+    `/captures/${encodeURIComponent(captureId)}/note`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+    'Kandoo could not take a note just now.'
+  );
+  return result.note;
+}
+
 /** Delete a capture (a note) and the memories it produced. */
 export async function deleteCaptureById(id: string): Promise<void> {
   const accessToken = await getAccessTokenOrThrow();
@@ -555,15 +631,27 @@ export async function deleteCaptureById(id: string): Promise<void> {
 
 /** One capture with everything it produced — for the note-detail screen. */
 export async function fetchCaptureNote(id: string): Promise<CaptureNote | null> {
-  const accessToken = await getAccessTokenOrThrow();
+  try {
+    return await withOfflineCache(`captures:one:${id}`, async () => {
+      const accessToken = await getAccessTokenOrThrow();
 
-  const data = await apiFetch<{ capture?: CaptureNote }>(
-    `/captures/${encodeURIComponent(id)}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-    'Failed to load that note.'
-  );
+      const data = await apiFetch<{ capture?: CaptureNote }>(
+        `/captures/${encodeURIComponent(id)}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+        'Failed to load that note.'
+      );
 
-  return data.capture ?? null;
+      return data.capture ?? null;
+    }, isNetworkError);
+  } catch (error) {
+    // Offline and never opened before: it is usually inside a saved list.
+    if (!isNetworkError(error)) throw error;
+    const lists = await readAllCached<CaptureNote[]>('captures:list:');
+    const found = lists.flat().find((capture) => capture.id === id);
+    if (!found) throw error;
+    setOffline(true);
+    return found;
+  }
 }
 
 /** Dismiss a reminder server-side. The caller cancels its local notification. */

@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { clearOfflineCache } from './offlineCache';
 
 export async function signUp(email: string, password: string) {
   const { data, error } = await supabase.auth.signUp({
@@ -32,6 +33,8 @@ export async function signOut() {
   if (error) {
     throw error;
   }
+  // Nothing of this account stays on the phone for the next person.
+  await clearOfflineCache();
 }
 
 /** Send a password-reset email. Errors bubble up for authErrorMessage to map. */

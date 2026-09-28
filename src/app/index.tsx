@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AccountSheet } from '@/components/AccountSheet';
 import { EmptyState } from '@/components/EmptyState';
+import { OfflineNote } from '@/components/OfflineNote';
 import { NoteDetail } from '@/components/NoteDetail';
 import { Onboarding } from '@/components/Onboarding';
 import { Paywall } from '@/components/Paywall';
@@ -38,9 +39,10 @@ import { useOnboarding } from '@/hooks/useOnboarding';
 import { useSpeechEnabled } from '@/hooks/useSpeechEnabled';
 import { speakAnswer, stopSpeaking } from '@/services/speech';
 import { configurePurchases, identifyUser } from '@/services/purchases';
-import type {
-  InterpretResult,
-  InterpretationResponse,
+import {
+  takeNote,
+  type InterpretResult,
+  type InterpretationResponse,
 } from '@/services/interpretationService';
 import {
   colors,
@@ -52,6 +54,7 @@ import {
   withOpacity,
 } from '@/theme/theme';
 import { formatDueDate } from '@/utils/formatDueDate';
+import { timeAgo } from '@/utils/timeAgo';
 
 import AuthScreen from '../features/Auth/AuthScreen';
 import { useAuth } from '../features/Auth/useAuth';
@@ -133,6 +136,7 @@ const CHIP_ICONS: Record<ChipKind, ImageSourcePropType> = {
   time: require('@/assets/images/icons/chip-time.png'),
 };
 const MIC_ICON = require('@/assets/images/icons/mic.png');
+const CHECK_ICON = require('@/assets/images/icons/check.png');
 const CHIP_LIMIT = 6;
 const CHIP_TEXT_LIMIT = 48;
 
@@ -165,10 +169,13 @@ function KandooHome() {
   // (hiding the native bar leaves its strip untappable). Typing stays inline.
   const voiceListening = home.state === 'listening' && home.voiceActive;
   const immersive =
-    voiceListening || home.state === 'answered' || home.state === 'understanding';
-  const halo = haloStyles(
-    home.state === 'understanding' ? UNDERSTOOD_HALO : LISTENING_HALO
-  );
+    voiceListening ||
+    home.state === 'answered' ||
+    home.state === 'understanding' ||
+    home.state === 'remembered';
+  // Understood and Complete use Figma's smaller halo; listening the larger.
+  const compactHalo = home.state === 'understanding' || home.state === 'remembered';
+  const halo = haloStyles(compactHalo ? UNDERSTOOD_HALO : LISTENING_HALO);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.space5 }]}>
@@ -180,7 +187,7 @@ function KandooHome() {
         onRequestClose={
           voiceListening
             ? home.cancelListening
-            : home.state === 'answered'
+            : home.state === 'answered' || home.state === 'remembered'
               ? home.done
               : // Understood waits on Edit or Remember; back never drops a
                 // pending capture on the floor.
@@ -195,7 +202,9 @@ function KandooHome() {
                 insets.top +
                 (home.state === 'understanding'
                   ? spacing.space5
-                  : spacing.space6 + spacing.space2),
+                  : home.state === 'remembered'
+                    ? spacing.space7 + spacing.space2
+                    : spacing.space6 + spacing.space2),
               paddingBottom: insets.bottom,
             },
           ]}
@@ -232,6 +241,14 @@ function KandooHome() {
               busy={home.busy}
               onRemember={home.remember}
               onEdit={() => setSheetOpen(true)}
+            />
+          ) : null}
+
+          {home.state === 'remembered' && home.response ? (
+            <Remembered
+              response={home.response}
+              onDone={home.done}
+              onOpenNote={setNoteId}
             />
           ) : null}
 
@@ -293,6 +310,8 @@ function KandooHome() {
         contentContainerStyle={styles.bodyContent}
         keyboardShouldPersistTaps="handled"
       >
+        <OfflineNote />
+
         {home.state === 'idle' ? (
           <View style={styles.header}>
             <Text style={styles.greeting}>{greeting()}</Text>
@@ -321,14 +340,6 @@ function KandooHome() {
             busy={home.busy}
             onStop={home.stopListening}
             onCancel={home.cancelListening}
-          />
-        ) : null}
-
-        {home.state === 'remembered' && home.response ? (
-          <Remembered
-            response={home.response}
-            onDone={home.done}
-            onEdit={() => setSheetOpen(true)}
           />
         ) : null}
 
@@ -455,17 +466,6 @@ function greeting(): string {
   if (hour < 12) return 'Good morning.';
   if (hour < 17) return 'Good afternoon.';
   return 'Good evening.';
-}
-
-/** "Just now", "12 min ago", "2 hours ago", "Yesterday", "3 days ago". */
-function timeAgo(iso: string): string {
-  const minutes = Math.floor((Date.now() - Date.parse(iso)) / 60000);
-  if (!Number.isFinite(minutes) || minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
-  const days = Math.floor(hours / 24);
-  return days === 1 ? 'Yesterday' : `${days} days ago`;
 }
 
 function describeCounts(item: RecentItem): string {
@@ -772,29 +772,89 @@ function StaggerChip({ chip, index }: { chip: Chip; index: number }) {
 type RememberedProps = {
   response: InterpretationResponse;
   onDone: () => void;
-  onEdit: () => void;
+  /** Opens the capture's note (the same NoteDetail the Memory tab uses). */
+  onOpenNote: (captureId: string) => void;
 };
 
-function Remembered({ response, onDone, onEdit }: RememberedProps) {
+type NoteStatus = 'idle' | 'taking' | 'failed';
+
+/**
+ * Complete (Figma: kandoo-complete): a gold tick for everything that was kept,
+ * then Done. "Take note" asks Kandoo to write this capture up as a clean note;
+ * while it works a muted "Taking note…" line waits in the list, and when it
+ * lands it becomes one more tick — "Note taken · <title>" — that opens the note.
+ * A capture Kandoo already wrote up shows that tick from the start.
+ */
+function Remembered({ response, onDone, onOpenNote }: RememberedProps) {
   const ticks = useMemo(() => buildTicks(response.results), [response.results]);
+  const [note, setNote] = useState<{ title: string } | null>(response.note ?? null);
+  const [noteStatus, setNoteStatus] = useState<NoteStatus>('idle');
+
+  async function onTakeNote() {
+    if (noteStatus === 'taking') return;
+    setNoteStatus('taking');
+    try {
+      const saved = await takeNote(response.captureId);
+      setNote(saved);
+      setNoteStatus('idle');
+    } catch (caught) {
+      console.error('Take note failed:', caught);
+      setNoteStatus('failed');
+    }
+  }
 
   return (
     <>
-      <Text style={styles.eyebrow}>I’ve got it</Text>
-      <Text style={styles.task}>{response.summary ?? 'Saved what you said'}</Text>
+      <ScrollView style={styles.body} contentContainerStyle={styles.completeContent}>
+        <Text style={styles.completeLabel}>I’ve got it</Text>
 
-      <View style={styles.ticks}>
-        {ticks.map((tick, index) => (
-          <Text key={index} style={styles.tick}>
-            ✓ {tick}
-          </Text>
-        ))}
-      </View>
+        <View style={styles.ticks}>
+          {ticks.map((tick, index) => (
+            <View key={index} style={styles.tickRow}>
+              <View style={styles.tickIconWrap}>
+                <Image source={CHECK_ICON} style={styles.tickIcon} />
+              </View>
+              <Text style={styles.tickText}>{tick}</Text>
+            </View>
+          ))}
 
-      <View style={styles.actions}>
-        <Pressable style={styles.btn} onPress={onEdit}>
-          <Text style={styles.btnText}>Edit</Text>
-        </Pressable>
+          {note ? (
+            <Pressable
+              style={styles.tickRow}
+              onPress={() => onOpenNote(response.captureId)}
+              accessibilityRole="button"
+              accessibilityLabel="Open the note"
+            >
+              <View style={styles.tickIconWrap}>
+                <Image source={CHECK_ICON} style={styles.tickIcon} />
+              </View>
+              <Text style={styles.tickText}>
+                Note taken · <Text style={styles.tickLink}>{note.title}</Text>
+              </Text>
+            </Pressable>
+          ) : noteStatus === 'taking' ? (
+            <View style={styles.tickRow}>
+              <View style={styles.tickIconWrap} />
+              <Text style={[styles.tickText, styles.tickPending]}>Taking note…</Text>
+            </View>
+          ) : null}
+        </View>
+
+        {noteStatus === 'failed' ? (
+          <Text style={styles.error}>Couldn’t take a note just now. Try again.</Text>
+        ) : null}
+      </ScrollView>
+
+      <View style={styles.dockActions}>
+        {!note ? (
+          <Pressable
+            style={[styles.btn, noteStatus === 'taking' && styles.btnDisabled]}
+            onPress={onTakeNote}
+            disabled={noteStatus === 'taking'}
+          >
+            <Text style={styles.btnText}>Take note</Text>
+          </Pressable>
+        ) : null}
         <Pressable style={styles.btnPrimary} onPress={onDone}>
           <Text style={styles.btnPrimaryText}>Done</Text>
         </Pressable>
@@ -803,19 +863,24 @@ function Remembered({ response, onDone, onEdit }: RememberedProps) {
   );
 }
 
+/** Figma's Complete list: one line for the memories, one per reminder. */
 function buildTicks(results: InterpretResult[]): string[] {
   const ticks: string[] = [];
+  let memories = 0;
   for (const result of results) {
     if (result.status !== 'ok') continue;
     if (result.kind === 'reminder') {
-      const when = formatDueDate(result.reminder.due_at) ?? result.reminder.place_hint;
-      ticks.push(`Reminder created${when ? ` · ${when}` : ''}`);
+      const when =
+        formatDueDate(result.reminder.due_at) ?? result.reminder.place_hint;
+      ticks.push(`Reminder · ${result.reminder.task}${when ? ` · ${when}` : ''}`);
     } else if (result.kind === 'memory') {
-      const who = result.memory.person ?? result.memory.topics[0];
-      ticks.push(`Memory saved${who ? ` · ${who}` : ''}`);
+      memories++;
     } else {
       ticks.push('Answered');
     }
+  }
+  if (memories > 0) {
+    ticks.unshift(`${memories} memor${memories === 1 ? 'y' : 'ies'} saved`);
   }
   return ticks.length > 0 ? ticks : ['Saved what you said'];
 }
@@ -1291,14 +1356,50 @@ const styles = StyleSheet.create({
     color: colors.alarmText,
   },
 
-  ticks: {
-    alignSelf: 'stretch',
-    gap: spacing.space2,
-    marginTop: spacing.space3,
+  // Complete (Figma: kandoo-complete).
+  completeContent: {
+    paddingHorizontal: spacing.space5,
+    paddingTop: spacing.space6,
+    paddingBottom: spacing.space5,
   },
-  tick: {
-    ...text.caption,
-    color: colors.settled,
+  completeLabel: {
+    ...text.label,
+    letterSpacing: 0,
+    color: colors.markRing,
+    textAlign: 'center',
+    marginBottom: spacing.space5,
+  },
+  ticks: {
+    gap: 20,
+  },
+  tickRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.space3,
+  },
+  tickIconWrap: {
+    width: 18,
+    height: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tickIcon: {
+    width: 14,
+    height: 14,
+    tintColor: colors.markCore,
+  },
+  tickText: {
+    ...text.body,
+    flex: 1,
+    lineHeight: 21,
+    color: colors.ink,
+  },
+  tickLink: {
+    fontFamily: fontFamily.textSemiBold,
+    color: colors.markRing,
+  },
+  tickPending: {
+    color: colors.inkMuted,
   },
 
   error: {

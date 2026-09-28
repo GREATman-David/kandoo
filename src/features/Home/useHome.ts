@@ -9,12 +9,14 @@ import {
   confirmReminder,
   fetchCaptureNotes,
   interpretText,
+  isNetworkError,
   type CaptureNote,
   type CreatedReminder,
   type InterpretResult,
   type InterpretationResponse,
 } from '@/services/interpretationService';
 import { scheduleReminder } from '@/services/localNotifications';
+import { answerOffline, isLikelyQuestion } from '@/services/offlineRecall';
 
 /**
  * Home is one route with four states, not four screens. This hook owns the
@@ -203,6 +205,27 @@ export function useHome() {
       if (reachedPro) setPaywallVisible(true);
     } catch (caught) {
       console.error('Interpret failed:', caught);
+
+      // No connection, and it reads as a question: answer from what is saved
+      // on this phone rather than failing. Said plainly as an offline answer.
+      if (isNetworkError(caught) && isLikelyQuestion(text)) {
+        const answer = await answerOffline(text);
+        if (answer) {
+          setResponse({
+            success: true,
+            captureId: '',
+            summary: null,
+            confidence: 'low',
+            note: null,
+            results: [
+              { kind: 'recall', status: 'ok', answer, memories: [], proBoundaryHit: false },
+            ],
+          });
+          setState('answered');
+          return;
+        }
+      }
+
       setError(
         caught instanceof Error ? caught.message : 'Could not process that.'
       );

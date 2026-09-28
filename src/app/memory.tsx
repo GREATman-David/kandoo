@@ -2,6 +2,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,23 +20,35 @@ import { NoteDetail } from '@/components/NoteDetail';
 import { Paywall } from '@/components/Paywall';
 import { PersonDetail } from '@/components/PersonDetail';
 import { ReminderDetail } from '@/components/ReminderDetail';
+import { OfflineNote } from '@/components/OfflineNote';
 import { useEntitlement } from '@/hooks/useEntitlement';
+import { answerOffline } from '@/services/offlineRecall';
 import {
   deleteCaptureById,
   fetchCaptureNotes,
   fetchPeople,
   interpretText,
+  isNetworkError,
   type CaptureNote,
   type CaptureNoteMemory,
   type CaptureNoteReminder,
   type CreatedReminder,
   type PersonSummary,
 } from '@/services/interpretationService';
-import { colors, radius, spacing, text } from '@/theme/theme';
+import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
+import { timeAgo } from '@/utils/timeAgo';
 
 import { useAuth } from '../features/Auth/useAuth';
 
 const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000;
+
+const ICONS = {
+  search: require('@/assets/images/icons/search.png'),
+  note: require('@/assets/images/icons/note.png'),
+  // A head with a recall arrow: "something Kandoo remembers", not a person.
+  memory: require('@/assets/images/icons/memory-recall.png'),
+  plus: require('@/assets/images/icons/plus.png'),
+};
 const isOld = (iso: string) => Date.now() - Date.parse(iso) > TEN_DAYS_MS;
 
 /** A CaptureNoteReminder carries enough to open the shared ReminderDetail. */
@@ -57,8 +70,9 @@ function toReminder(r: CaptureNoteReminder): CreatedReminder {
 /**
  * Memory — everything you've told Kandoo, newest first. The ask field is a
  * second recall entry point (the same 10-day boundary and paywall as Home); the
- * list below carries notes and standalone memories. A note reads 📄, a memory
- * 👤, and a capture that made both opens a split view. Rows past the free window
+ * list below carries notes and standalone memories as cards (Figma:
+ * kandoo-memory). A note wears the page icon, a memory the recall icon, and a
+ * capture that made both opens a split view. Rows past the free window
  * lock; a row still waiting on review wears an amber dot. Long-press deletes.
  */
 export default function MemoryScreen() {
@@ -138,6 +152,12 @@ export default function MemoryScreen() {
       }
     } catch (caught) {
       console.error('Ask failed:', caught);
+      // Offline: answer from what is saved on this phone when anything matches.
+      const offlineAnswer = isNetworkError(caught) ? await answerOffline(q) : null;
+      if (offlineAnswer) {
+        setAnswer(offlineAnswer);
+        return;
+      }
       setAskError(caught instanceof Error ? caught.message : 'Could not answer that.');
     } finally {
       setAsking(false);
@@ -224,19 +244,28 @@ export default function MemoryScreen() {
   );
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + spacing.space4 }]}>
+    <View style={[styles.screen, { paddingTop: insets.top + spacing.space2 }]}>
       <Text style={styles.heading}>Memory</Text>
+      <OfflineNote />
 
       <View style={styles.askRow}>
         <TextInput
           style={styles.ask}
           value={query}
           onChangeText={setQuery}
-          placeholder="Ask what you know…"
+          placeholder="Ask about anything you've said…"
           placeholderTextColor={colors.inkFaint}
           returnKeyType="search"
           onSubmitEditing={ask}
         />
+        <Pressable
+          onPress={ask}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Ask"
+        >
+          <Image source={ICONS.search} style={styles.searchIcon} />
+        </Pressable>
       </View>
 
       {asking ? (
@@ -255,14 +284,10 @@ export default function MemoryScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.body,
-          { paddingBottom: insets.bottom + spacing.space8 },
+          { paddingBottom: spacing.space4 },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <Pressable style={styles.add} onPress={() => setManualOpen(true)}>
-          <Text style={styles.addText}>+ Add something new</Text>
-        </Pressable>
-
         {!isAuthenticated ? (
           <Text style={styles.empty}>Sign in to see your memory.</Text>
         ) : loading ? (
@@ -285,6 +310,7 @@ export default function MemoryScreen() {
               return (
                 <LockedRow
                   key={note.id}
+                  variant="card"
                   title={rowTitle}
                   onPress={() => setPaywall(true)}
                   onLongPress={() => confirmDelete(note)}
@@ -302,6 +328,22 @@ export default function MemoryScreen() {
           })
         )}
       </ScrollView>
+
+      {/* Docked above the tab bar, so it never scrolls away under a long list. */}
+      {isAuthenticated ? (
+        <View style={styles.addDock}>
+          <Pressable
+            style={styles.add}
+            onPress={() => setManualOpen(true)}
+            accessibilityRole="button"
+          >
+            <View style={styles.addIconWrap}>
+              <Image source={ICONS.plus} style={styles.addIcon} />
+            </View>
+            <Text style={styles.addText}>Add something new</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <ManualEntry
         visible={manualOpen}
@@ -367,64 +409,51 @@ type MemoryRowProps = {
 };
 
 /**
- * The type glyph, drawn with Views like every other mark in the app (the design
- * frames show 📄/👤 as shorthand, but the app never renders colour emoji — the
- * lock is LockGlyph, not 🔒). A note is a small page with ruled lines; a memory
- * is a person. A capture that is both shows the two side by side.
+ * One card in the feed (Figma: kandoo-memory). A note shows its title, the
+ * first fact it holds, and when; a standalone memory shows the fact itself.
+ * The type icons sit in the bottom-right corner: page for a note, recall head
+ * for a memory, both when a capture made both.
  */
-function TypeIcon({ hasNote, hasMemory }: { hasNote: boolean; hasMemory: boolean }) {
-  return (
-    <View style={styles.iconRow} pointerEvents="none">
-      {hasNote ? (
-        <View style={styles.noteGlyph}>
-          <View style={styles.noteLine} />
-          <View style={styles.noteLine} />
-          <View style={[styles.noteLine, styles.noteLineShort]} />
-        </View>
-      ) : null}
-      {hasMemory ? (
-        <View style={styles.personGlyph}>
-          <View style={styles.personHead} />
-          <View style={styles.personBody} />
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
 function MemoryRow({ note, onPress, onLongPress }: MemoryRowProps) {
   const hasNote = !!note.note;
   const hasMemory = note.memories.length > 0;
   const title = note.note?.title ?? note.memories[0]?.content ?? note.text;
+  const excerpt = hasNote ? (note.memories[0]?.content ?? note.note?.body ?? null) : null;
   const needsReview = note.reminders.some((r) => r.status === 'pending');
   const isManual = note.source === 'manual';
+  const items = note.memories.length + note.reminders.length;
 
   const meta: string[] = [];
-  if (note.memories.length) meta.push(`${note.memories.length} memor${note.memories.length === 1 ? 'y' : 'ies'}`);
-  if (note.reminders.length) meta.push(`${note.reminders.length} reminder${note.reminders.length === 1 ? '' : 's'}`);
   if (isManual) meta.push('Written by you');
+  meta.push(timeAgo(note.created_at));
+  if (hasNote ? items > 0 : items > 1) meta.push(`${items} item${items === 1 ? '' : 's'}`);
 
   return (
     <Pressable
-      style={styles.row}
+      style={styles.card}
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={350}
     >
-      <TypeIcon hasNote={hasNote} hasMemory={hasMemory} />
-      <View style={styles.rowMain}>
-        <Text style={styles.rowTitle} numberOfLines={2}>
-          {title}
+      <Text style={styles.cardTitle} numberOfLines={2}>
+        {title}
+      </Text>
+      {excerpt ? (
+        <Text style={styles.cardExcerpt} numberOfLines={1}>
+          {excerpt}
         </Text>
-        {meta.length > 0 ? (
-          <Text style={styles.rowMeta}>{meta.join(' · ')}</Text>
-        ) : null}
-        {needsReview ? (
-          <View style={styles.reviewLine}>
-            <View style={styles.reviewDot} />
-            <Text style={styles.reviewText}>Needs review</Text>
-          </View>
-        ) : null}
+      ) : null}
+      {needsReview ? (
+        <View style={styles.reviewLine}>
+          <View style={styles.reviewDot} />
+          <Text style={styles.reviewText}>Needs review</Text>
+        </View>
+      ) : null}
+      <Text style={styles.cardMeta}>{meta.join(' · ')}</Text>
+
+      <View style={styles.cardIcons} pointerEvents="none">
+        {hasNote ? <Image source={ICONS.note} style={styles.cardIcon} /> : null}
+        {hasMemory ? <Image source={ICONS.memory} style={styles.cardIcon} /> : null}
       </View>
     </Pressable>
   );
@@ -434,24 +463,35 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.base,
-    paddingHorizontal: spacing.space4,
+    paddingHorizontal: spacing.space5,
   },
   heading: {
-    ...text.displayXl,
+    ...text.displayL,
+    letterSpacing: 0,
     color: colors.ink,
-    marginBottom: spacing.space3,
+    marginBottom: spacing.space4,
   },
   askRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 48,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineStrong,
     borderRadius: radius.md,
     backgroundColor: colors.surface,
-    paddingHorizontal: spacing.space3,
+    paddingHorizontal: spacing.space4,
+    gap: spacing.space2,
   },
   ask: {
     ...text.body,
+    flex: 1,
     color: colors.ink,
     paddingVertical: spacing.space3,
+  },
+  searchIcon: {
+    width: 16,
+    height: 16,
+    tintColor: colors.markRing,
   },
   askMeta: {
     ...text.caption,
@@ -482,14 +522,7 @@ const styles = StyleSheet.create({
   },
   body: {
     paddingTop: spacing.space4,
-  },
-  add: {
-    paddingVertical: spacing.space3,
-    marginBottom: spacing.space2,
-  },
-  addText: {
-    ...text.bodyStrong,
-    color: colors.accent,
+    gap: spacing.space3,
   },
   empty: {
     ...text.body,
@@ -503,73 +536,49 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.space8,
   },
-  row: {
-    flexDirection: 'row',
-    gap: spacing.space3,
-    paddingVertical: spacing.space4,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-  },
-  iconRow: {
-    flexDirection: 'row',
-    gap: spacing.space1,
-    paddingTop: 3,
-    width: 30,
-  },
-  noteGlyph: {
-    width: 12,
-    height: 14,
-    borderRadius: 2,
+
+  card: {
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.inkMuted,
-    paddingHorizontal: 2,
-    paddingTop: 3,
-    gap: 2,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    padding: spacing.space4,
+    gap: spacing.space2,
   },
-  noteLine: {
-    height: 1,
-    borderRadius: radius.full,
-    backgroundColor: colors.inkMuted,
-  },
-  noteLineShort: {
-    width: 4,
-  },
-  personGlyph: {
-    width: 12,
-    height: 14,
-    alignItems: 'center',
-  },
-  personHead: {
-    width: 6,
-    height: 6,
-    borderRadius: radius.full,
-    backgroundColor: colors.inkMuted,
-  },
-  personBody: {
-    width: 11,
-    height: 6,
-    borderTopLeftRadius: radius.full,
-    borderTopRightRadius: radius.full,
-    backgroundColor: colors.inkMuted,
-    marginTop: 1,
-  },
-  rowMain: {
-    flex: 1,
-  },
-  rowTitle: {
-    ...text.body,
+  cardTitle: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 17,
+    lineHeight: 22,
     color: colors.ink,
   },
-  rowMeta: {
+  cardExcerpt: {
     ...text.caption,
     color: colors.inkMuted,
-    marginTop: 2,
+  },
+  // Clear of the corner icons.
+  cardMeta: {
+    fontFamily: fontFamily.textRegular,
+    fontSize: 12,
+    lineHeight: 16,
+    color: colors.inkMuted,
+    paddingRight: 44,
+  },
+  cardIcons: {
+    position: 'absolute',
+    right: 11,
+    bottom: 11,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  cardIcon: {
+    width: 16,
+    height: 16,
+    tintColor: colors.markRing,
   },
   reviewLine: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.space1,
-    marginTop: spacing.space2,
   },
   reviewDot: {
     width: 7,
@@ -580,5 +589,39 @@ const styles = StyleSheet.create({
   reviewText: {
     ...text.caption,
     color: colors.accent,
+  },
+
+  addDock: {
+    paddingTop: spacing.space3,
+    paddingBottom: spacing.space3,
+  },
+  add: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minHeight: 52,
+    paddingHorizontal: spacing.space4,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.accentWash,
+  },
+  addIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addIcon: {
+    width: 14,
+    height: 14,
+    tintColor: colors.markRing,
+  },
+  addText: {
+    ...text.bodyStrong,
+    flex: 1,
+    color: colors.ink,
   },
 });

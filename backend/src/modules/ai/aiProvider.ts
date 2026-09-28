@@ -1,4 +1,4 @@
-import type { KandooInterpretation } from './interpretationSchema';
+import type { KandooInterpretation, KandooNote } from './interpretationSchema';
 
 /**
  * A hit from recall. Despite the name it may be a saved memory OR a scheduled
@@ -43,6 +43,12 @@ export interface AIProvider {
     question: string,
     memories: RecallMemory[]
   ): Promise<string>;
+
+  /**
+   * A written note for one capture, on the user's request ("Take note"). Text
+   * only — the caller validates nothing else and persists it itself.
+   */
+  writeNote(text: string): Promise<KandooNote>;
 
   /**
    * Returns one vector per input string, in the same order.

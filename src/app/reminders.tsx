@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/EmptyState';
+import { OfflineNote } from '@/components/OfflineNote';
 import { ManualReminder } from '@/components/ManualReminder';
 import { NoteDetail } from '@/components/NoteDetail';
 import { ReminderDetail } from '@/components/ReminderDetail';
@@ -155,6 +156,7 @@ export default function RemindersScreen() {
           <Text style={styles.addText}>＋</Text>
         </Pressable>
       </View>
+      <OfflineNote />
 
       <ScrollView
         contentContainerStyle={[

@@ -1,12 +1,14 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, spacing, text } from '@/theme/theme';
+import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 
 export type LockedRowProps = {
   title: string;
   onPress: () => void;
   /** Long-press to delete the item, same as any unlocked row. */
   onLongPress?: () => void;
+  /** `card` sits in the Memory feed beside MemoryRow cards; `row` elsewhere. */
+  variant?: 'row' | 'card';
 };
 
 /**
@@ -14,15 +16,21 @@ export type LockedRowProps = {
  * in ink-faint with a small lock and "Part of Kandoo Pro" where the date would
  * sit. Tapping opens the paywall. Reused by People detail and the Memory list.
  */
-export function LockedRow({ title, onPress, onLongPress }: LockedRowProps) {
+export function LockedRow({
+  title,
+  onPress,
+  onLongPress,
+  variant = 'row',
+}: LockedRowProps) {
+  const card = variant === 'card';
   return (
     <Pressable
-      style={styles.row}
+      style={card ? styles.card : styles.row}
       onPress={onPress}
       onLongPress={onLongPress}
       accessibilityRole="button"
     >
-      <Text style={styles.title} numberOfLines={1}>
+      <Text style={card ? styles.cardTitle : styles.title} numberOfLines={card ? 2 : 1}>
         {title}
       </Text>
       <View style={styles.right}>
@@ -50,6 +58,20 @@ const styles = StyleSheet.create({
   },
   title: {
     ...text.body,
+    color: colors.inkFaint,
+  },
+  card: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    padding: spacing.space4,
+    gap: spacing.space2,
+  },
+  cardTitle: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 17,
+    lineHeight: 22,
     color: colors.inkFaint,
   },
   right: {

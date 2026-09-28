@@ -385,6 +385,33 @@ router.post('/captures/manual', authenticateRequest, async (req, res) => {
   }
 });
 
+/**
+ * "Take note": write a clean note for one capture on the user's request. The
+ * model only writes the text; this route loads the user's own capture and
+ * persists the result. A capture that already has a note returns it as-is, so
+ * a double tap never spends a second model call or overwrites an edited note.
+ */
+router.post('/captures/:id/note', authenticateRequest, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).user.id;
+  const captureId = String(req.params.id);
+  try {
+    const capture = await getCaptureNote(userId, captureId);
+    if (!capture) {
+      return res.status(404).json({ error: 'That capture could not be found.' });
+    }
+    if (capture.note) {
+      return res.json({ success: true, note: capture.note });
+    }
+
+    const note = await aiProvider.writeNote(capture.text);
+    await updateCaptureNote(userId, captureId, note);
+    return res.json({ success: true, note });
+  } catch (error) {
+    console.error('Take note failed:', error);
+    return res.status(500).json({ error: 'Kandoo could not take a note just now.' });
+  }
+});
+
 /** Edit a capture's note (title + body only; memories are left untouched). */
 router.patch('/captures/:id/note', authenticateRequest, async (req, res) => {
   const userId = (req as AuthenticatedRequest).user.id;
