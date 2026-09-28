@@ -31,7 +31,7 @@ const PAGE = `<!doctype html>
 <title>Kandoo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;1,9..144,600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
@@ -44,7 +44,8 @@ const PAGE = `<!doctype html>
     width: 100%; max-width: 400px; text-align: center; background: #FFFFFF;
     border: 1px solid #E8D8C4; border-radius: 20px; padding: 40px 28px 36px;
   }
-  .mark { width: 56px; height: 56px; display: block; margin: 0 auto 28px; }
+  .mark { width: 56px; height: 56px; display: block; margin: 0 auto 10px; }
+  .motto { font-family: Fraunces, Georgia, serif; font-style: italic; font-weight: 600; font-size: 17px; color: #8A6A00; margin: 0 0 28px; }
   .status { width: 64px; height: 64px; display: block; margin: 0 auto 20px; }
   h1 { font-family: Fraunces, Georgia, serif; font-weight: 600; font-size: 26px; line-height: 1.25; margin: 0 0 10px; }
   p { font-size: 16px; line-height: 1.5; color: #7A6758; margin: 0; }
@@ -56,6 +57,7 @@ const PAGE = `<!doctype html>
 <body>
   <main class="card">
     <img class="mark" src="/brand/kandoo-mark@2x.png" alt="Kandoo">
+    <p class="motto">Yes You Kan</p>
     <div class="ok">
       <svg class="status" viewBox="0 0 64 64" aria-hidden="true">
         <circle cx="32" cy="32" r="32" fill="#897800"/>
