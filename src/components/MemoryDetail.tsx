@@ -14,6 +14,7 @@ import {
   deleteMemoryById,
   updateMemory,
   userMessage,
+  logFailure,
 } from '@/services/interpretationService';
 import { colors, radius, spacing, text } from '@/theme/theme';
 
@@ -82,7 +83,7 @@ export function MemoryDetail({
       setEditing(false);
       onChanged();
     } catch (caught) {
-      console.error('Editing memory failed:', caught);
+      logFailure('Editing memory failed:', caught);
       setError(userMessage(caught, 'Could not save that edit.'));
     } finally {
       setBusy(false);
@@ -102,7 +103,7 @@ export function MemoryDetail({
             onChanged();
             onClose();
           } catch (caught) {
-            console.error('Deleting memory failed:', caught);
+            logFailure('Deleting memory failed:', caught);
             setError('Could not delete that memory.');
           }
         },

@@ -11,6 +11,7 @@ import {
 import {
   createManualReminder,
   userMessage,
+  logFailure,
 } from '@/services/interpretationService';
 import { scheduleReminder } from '@/services/localNotifications';
 import { colors, radius, spacing, text } from '@/theme/theme';
@@ -58,7 +59,7 @@ export function ManualReminder({ visible, onClose, onCreated }: ManualReminderPr
       onCreated();
       onClose();
     } catch (caught) {
-      console.error('Manual reminder failed:', caught);
+      logFailure('Manual reminder failed:', caught);
       setError(
         userMessage(caught, 'Could not create that.')
       );

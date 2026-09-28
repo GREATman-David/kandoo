@@ -19,6 +19,7 @@ import {
   mergePeople,
   type PersonSummary,
   userMessage,
+  logFailure,
 } from '@/services/interpretationService';
 import { colors, radius, spacing, text } from '@/theme/theme';
 
@@ -43,7 +44,7 @@ export default function PeopleScreen() {
     try {
       setPeople(await fetchPeople());
     } catch (caught) {
-      console.error('Loading people failed:', caught);
+      logFailure('Loading people failed:', caught);
       setError(userMessage(caught, 'Could not load people.'));
     } finally {
       setLoading(false);
@@ -107,7 +108,7 @@ export default function PeopleScreen() {
               cancelMerge();
               await load();
             } catch (caught) {
-              console.error('Merge failed:', caught);
+              logFailure('Merge failed:', caught);
               Alert.alert('Couldn’t merge', 'Please try again.');
             }
           },
@@ -130,7 +131,7 @@ export default function PeopleScreen() {
               await deletePerson(person.id);
               await load();
             } catch (caught) {
-              console.error('Delete person failed:', caught);
+              logFailure('Delete person failed:', caught);
               Alert.alert('Couldn’t delete', 'Please try again.');
             }
           },

@@ -16,6 +16,7 @@ import {
   type CaptureNoteMemory,
   type CaptureNoteReminder,
   userMessage,
+  logFailure,
 } from '@/services/interpretationService';
 import { colors, radius, spacing, text } from '@/theme/theme';
 import { formatDueDate } from '@/utils/formatDueDate';
@@ -82,7 +83,7 @@ export function NoteDetail({
         if (active) setCapture(c);
       })
       .catch((caught) => {
-        console.error('Loading note failed:', caught);
+        logFailure('Loading note failed:', caught);
         if (active) setError('Could not load that note.');
       })
       .finally(() => {
@@ -134,7 +135,7 @@ export function NoteDetail({
       setEditing(false);
       onChanged?.();
     } catch (caught) {
-      console.error('Editing note failed:', caught);
+      logFailure('Editing note failed:', caught);
       setSaveError(
         userMessage(caught, 'Could not save that edit.')
       );

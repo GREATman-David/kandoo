@@ -12,6 +12,7 @@ import {
 import {
   createManualCapture,
   userMessage,
+  logFailure,
 } from '@/services/interpretationService';
 import { colors, radius, spacing, text } from '@/theme/theme';
 
@@ -71,7 +72,7 @@ export function ManualEntry({ visible, onClose, onCreated }: ManualEntryProps) {
       onCreated();
       onClose();
     } catch (caught) {
-      console.error('Manual entry failed:', caught);
+      logFailure('Manual entry failed:', caught);
       setError(userMessage(caught, 'Could not save that.'));
     } finally {
       setBusy(false);

@@ -35,6 +35,7 @@ import {
   type CreatedReminder,
   type PersonSummary,
   userMessage,
+  logFailure,
 } from '@/services/interpretationService';
 import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 import { timeAgo } from '@/utils/timeAgo';
@@ -113,7 +114,7 @@ export default function MemoryScreen() {
       setHasMore(captures.length === PAGE);
       setPeople(peopleList);
     } catch (caught) {
-      console.error('Loading memory failed:', caught);
+      logFailure('Loading memory failed:', caught);
       setError(userMessage(caught, 'Could not load your memory.'));
     } finally {
       setLoading(false);
@@ -148,7 +149,7 @@ export default function MemoryScreen() {
       });
       setHasMore(older.length === PAGE);
     } catch (caught) {
-      console.error('Loading older memory failed:', caught);
+      logFailure('Loading older memory failed:', caught);
       Alert.alert('Couldn’t load more', userMessage(caught, 'Please try again.'));
     } finally {
       setLoadingMore(false);
@@ -181,7 +182,7 @@ export default function MemoryScreen() {
         await load();
       }
     } catch (caught) {
-      console.error('Ask failed:', caught);
+      logFailure('Ask failed:', caught);
       // Offline: answer from what is saved on this phone when anything matches.
       const offlineAnswer = isNetworkError(caught) ? await answerOffline(q) : null;
       if (offlineAnswer) {
@@ -228,7 +229,7 @@ export default function MemoryScreen() {
               try {
                 await deleteCaptureById(note.id);
               } catch (caught) {
-                console.error('Delete failed:', caught);
+                logFailure('Delete failed:', caught);
                 setNotes(previous);
                 Alert.alert('Could not delete that. Please try again.');
               }

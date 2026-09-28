@@ -15,6 +15,7 @@ import {
   type InterpretResult,
   type InterpretationResponse,
   userMessage,
+  logFailure,
 } from '@/services/interpretationService';
 import { scheduleReminder } from '@/services/localNotifications';
 import { answerOffline, isLikelyQuestion } from '@/services/offlineRecall';
@@ -212,7 +213,7 @@ export function useHome() {
       );
       if (reachedPro) setPaywallVisible(true);
     } catch (caught) {
-      console.error('Interpret failed:', caught);
+      logFailure('Interpret failed:', caught);
 
       // No connection, and it reads as a question: answer from what is saved
       // on this phone rather than failing. Said plainly as an offline answer.

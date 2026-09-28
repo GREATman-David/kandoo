@@ -13,6 +13,7 @@ import {
   type CreatedReminder,
   type PersonDetail as PersonDetailData,
   type PersonReminder,
+  logFailure,
 } from '@/services/interpretationService';
 import { useEntitlement } from '@/hooks/useEntitlement';
 import { colors, radius, spacing, text } from '@/theme/theme';
@@ -77,7 +78,7 @@ export function PersonDetail({
     fetchPerson(personId)
       .then(setPerson)
       .catch((caught) => {
-        console.error('Loading person failed:', caught);
+        logFailure('Loading person failed:', caught);
         setError('Could not load that person.');
       })
       .finally(() => setLoading(false));

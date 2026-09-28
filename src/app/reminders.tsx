@@ -22,6 +22,7 @@ import {
   type CreatedReminder,
   type GroupedReminders,
   userMessage,
+  logFailure,
 } from '@/services/interpretationService';
 import { cancelReminder, scheduleReminder } from '@/services/localNotifications';
 import { colors, radius, spacing, text } from '@/theme/theme';
@@ -68,7 +69,7 @@ export default function RemindersScreen() {
     try {
       setGroups(await fetchGroupedReminders());
     } catch (caught) {
-      console.error('Loading reminders failed:', caught);
+      logFailure('Loading reminders failed:', caught);
       setError(userMessage(caught, 'Could not load reminders.'));
     } finally {
       setLoading(false);
@@ -112,7 +113,7 @@ export default function RemindersScreen() {
       if (undoTimer.current) clearTimeout(undoTimer.current);
       undoTimer.current = setTimeout(() => setUndo(null), 5000);
     } catch (caught) {
-      console.error('Mark done failed:', caught);
+      logFailure('Mark done failed:', caught);
       Alert.alert('Couldn’t complete that', 'Please try again.');
     }
   };
@@ -127,7 +128,7 @@ export default function RemindersScreen() {
       await scheduleReminder(restored);
       await load();
     } catch (caught) {
-      console.error('Undo failed:', caught);
+      logFailure('Undo failed:', caught);
     }
   };
 
@@ -143,7 +144,7 @@ export default function RemindersScreen() {
             await cancelReminder(reminder.id);
             await load();
           } catch (caught) {
-            console.error('Delete reminder failed:', caught);
+            logFailure('Delete reminder failed:', caught);
             Alert.alert('Couldn’t delete that', 'Please try again.');
           }
         },

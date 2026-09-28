@@ -5,6 +5,7 @@ import {
   type AuthenticatedRequest,
 } from '../middleware/authenticateRequest';
 import { MAX_CAPTURE_CHARS, aiRateLimit } from '../middleware/rateLimit';
+import { resolveTimezone } from '../utils/timezone';
 
 import { aiProvider } from '../modules/ai';
 import {
@@ -79,10 +80,7 @@ router.post('/interpret', authenticateRequest, aiRateLimit, async (req, res) => 
       ? req.body.clientTime
       : new Date().toISOString();
 
-  const timezone =
-    typeof req.body?.timezone === 'string' && req.body.timezone
-      ? req.body.timezone
-      : 'UTC';
+  const timezone = resolveTimezone(req.body?.timezone);
 
   const source = req.body?.source === 'voice' ? 'voice' : 'text';
 
@@ -410,8 +408,7 @@ router.post('/captures/manual', authenticateRequest, aiRateLimit, async (req, re
     typeof req.body?.clientTime === 'string' && !Number.isNaN(Date.parse(req.body.clientTime))
       ? req.body.clientTime
       : new Date().toISOString();
-  const timezone =
-    typeof req.body?.timezone === 'string' && req.body.timezone ? req.body.timezone : 'UTC';
+  const timezone = resolveTimezone(req.body?.timezone);
 
   try {
     // The capture's verbatim text is whatever the user typed — the note body, or

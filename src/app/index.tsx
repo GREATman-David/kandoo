@@ -43,6 +43,7 @@ import {
   takeNote,
   type InterpretResult,
   type InterpretationResponse,
+  logFailure,
 } from '@/services/interpretationService';
 import {
   colors,
@@ -807,7 +808,7 @@ function Remembered({ response, onDone, onOpenNote }: RememberedProps) {
       setNote(saved);
       setNoteStatus('idle');
     } catch (caught) {
-      console.error('Take note failed:', caught);
+      logFailure('Take note failed:', caught);
       setNoteStatus('failed');
     }
   }

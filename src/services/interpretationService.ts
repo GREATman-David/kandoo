@@ -73,6 +73,16 @@ export class ApiError extends Error {
 }
 
 /**
+ * Log a failed backend call at the right level. Being offline or timing out is
+ * an expected state the UI already handles (saved copies, a friendly line), so
+ * it is a warning; anything else is a real error worth the red dev overlay.
+ */
+export function logFailure(label: string, error: unknown): void {
+  if (error instanceof NetworkError) console.warn(label, error.message);
+  else console.error(label, error);
+}
+
+/**
  * The only way a caught error becomes on-screen text. Messages written for the
  * user — the backend's, offline/timeout, session ended — pass through; anything
  * else (a JS bug, a library error) shows the screen's own fallback line, and the
