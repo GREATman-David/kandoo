@@ -1,7 +1,22 @@
-import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Image,
+  Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, radius, spacing, text } from '@/theme/theme';
+import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
+import { nextOccurrence, normalizeDays, repeatShort } from '@/utils/repeat';
+
+import { RepeatSelection } from './RepeatSelection';
 
 export type TimeEntryProps = {
   visible: boolean;
@@ -9,86 +24,113 @@ export type TimeEntryProps = {
    *  for a fresh pick), rolling to tomorrow if it would otherwise be in the past. */
   initialISO?: string | null;
   saveLabel?: string;
+  /** Show the Repeat row. Its days come back as the second argument of onSave. */
+  allowRepeat?: boolean;
+  /** Weekdays the reminder already repeats on (0 = Sunday … 6 = Saturday). */
+  repeatDays?: number[] | null;
   onClose: () => void;
-  onSave: (iso: string) => void;
+  /** The chosen time; for a repeating choice, its next occurrence. */
+  onSave: (iso: string, repeatDays: number[] | null) => void;
 };
 
 type AmPm = 'AM' | 'PM';
 
-function fromISO(iso?: string | null): { buf: string; ampm: AmPm } {
+const CLOSE_ICON = require('@/assets/images/icons/x-circle.png');
+const OPEN_ICON = require('@/assets/images/icons/chevron-right.png');
+
+const HOURS = Array.from({ length: 12 }, (_, i) => i + 1);
+const MINUTES = Array.from({ length: 60 }, (_, i) => i);
+
+/** One row of a wheel, and how many rows show at once (the middle is chosen). */
+const ROW = 48;
+const VISIBLE_ROWS = 5;
+
+function fromISO(iso?: string | null): { hour: number; minute: number; ampm: AmPm } {
   const d = iso ? new Date(iso) : new Date();
   const base = Number.isNaN(d.getTime()) ? new Date() : d;
   const h = base.getHours();
-  const m = base.getMinutes();
-  const ampm: AmPm = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
   return {
-    buf: String(h12).padStart(2, '0') + String(m).padStart(2, '0'),
-    ampm,
+    hour: h % 12 === 0 ? 12 : h % 12,
+    minute: base.getMinutes(),
+    ampm: h >= 12 ? 'PM' : 'AM',
   };
 }
 
+const pad = (n: number) => String(n).padStart(2, '0');
+
 /**
- * Time entry — digital only, no clock dial. Digits flow in left-to-right and the
- * display right-justifies into HH:MM (type "7 0 0" → 07:00). Reached from the
- * review sheet's time chip, a reminder's detail, and manual creation.
+ * Time entry (Figma: kandoo-time-entry). Scroll the hour and minute wheels to
+ * the time you want — the big display follows as you scroll — then AM or PM.
+ * The keypad it replaces asked people to type digits that right-justified into
+ * HH:MM, which was easy to get wrong. Reached from a reminder's detail and
+ * manual creation.
  */
 export function TimeEntry({
   visible,
   initialISO,
   saveLabel = 'Save',
+  allowRepeat = false,
+  repeatDays = null,
   onClose,
   onSave,
 }: TimeEntryProps) {
-  const [buf, setBuf] = useState('');
+  const insets = useSafeAreaInsets();
+  const [hour, setHour] = useState(12);
+  const [minute, setMinute] = useState(0);
   const [ampm, setAmpm] = useState<AmPm>('AM');
+  // Bumped on each open so the wheels remount at the starting time.
+  const [openKey, setOpenKey] = useState(0);
+  const [days, setDays] = useState<number[] | null>(null);
+  const [repeatOpen, setRepeatOpen] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
     const start = fromISO(initialISO);
-    setBuf(start.buf);
+    setHour(start.hour);
+    setMinute(start.minute);
     setAmpm(start.ampm);
-  }, [visible, initialISO]);
-
-  const padded = buf.padStart(4, '0');
-  const hh = parseInt(padded.slice(0, 2), 10);
-  const mm = parseInt(padded.slice(2, 4), 10);
-  const valid = hh >= 1 && hh <= 12 && mm >= 0 && mm <= 59;
-
-  const press = (d: string) => setBuf((b) => (b + d).slice(-4));
-  const back = () => setBuf((b) => b.slice(0, -1));
+    setDays(normalizeDays(repeatDays));
+    setOpenKey((k) => k + 1);
+  }, [visible, initialISO, repeatDays]);
 
   const save = () => {
-    if (!valid) return;
-    const h24 = (hh % 12) + (ampm === 'PM' ? 12 : 0);
+    const h24 = (hour % 12) + (ampm === 'PM' ? 12 : 0);
     const base =
       initialISO && !Number.isNaN(Date.parse(initialISO))
         ? new Date(initialISO)
         : new Date();
-    base.setHours(h24, mm, 0, 0);
+    base.setHours(h24, minute, 0, 0);
+    const chosenDays = allowRepeat ? normalizeDays(days) : null;
+    if (chosenDays) {
+      // Repeating: the reminder's time is its next chosen day at this time.
+      onSave(nextOccurrence(base.toISOString(), chosenDays).toISOString(), chosenDays);
+      return;
+    }
     if (base.getTime() <= Date.now()) base.setDate(base.getDate() + 1);
-    onSave(base.toISOString());
+    onSave(base.toISOString(), null);
   };
-
-  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.screen}>
-        <View style={styles.bar}>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <Text style={styles.close}>✕</Text>
+        <View style={[styles.bar, { marginTop: insets.top + spacing.space4 }]}>
+          <Pressable
+            style={styles.closeBtn}
+            onPress={onClose}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          >
+            <Image source={CLOSE_ICON} style={styles.closeIcon} />
           </Pressable>
-          <Pressable onPress={save} hitSlop={12} disabled={!valid}>
-            <Text style={[styles.save, !valid && styles.saveDisabled]}>
-              {saveLabel}
-            </Text>
+          <Pressable onPress={save} hitSlop={12} accessibilityRole="button">
+            <Text style={styles.save}>{saveLabel}</Text>
           </Pressable>
         </View>
 
         <View style={styles.display}>
-          <Text style={styles.time}>
-            {padded.slice(0, 2)}:{padded.slice(2, 4)}
+          <Text style={styles.time} accessibilityLiveRegion="polite">
+            {pad(hour)}:{pad(minute)}
           </Text>
           <View style={styles.ampmRow}>
             {(['AM', 'PM'] as AmPm[]).map((v) => (
@@ -96,112 +138,227 @@ export function TimeEntry({
                 key={v}
                 style={[styles.ampm, ampm === v && styles.ampmOn]}
                 onPress={() => setAmpm(v)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: ampm === v }}
               >
-                <Text style={[styles.ampmText, ampm === v && styles.ampmTextOn]}>
-                  {v}
-                </Text>
+                <Text style={[styles.ampmText, ampm === v && styles.ampmTextOn]}>{v}</Text>
               </Pressable>
             ))}
           </View>
         </View>
 
-        <View style={styles.keypad}>
-          {keys.map((k, i) =>
-            k === '' ? (
-              <View key={i} style={styles.key} />
-            ) : (
-              <Pressable
-                key={i}
-                style={styles.key}
-                onPress={() => (k === '⌫' ? back() : press(k))}
-              >
-                <Text style={styles.keyText}>{k}</Text>
-              </Pressable>
-            )
-          )}
+        <View style={styles.wheels}>
+          {/* The band that marks the chosen row, behind both wheels. */}
+          <View style={styles.band} pointerEvents="none" />
+          <Wheel
+            key={`h${openKey}`}
+            values={HOURS}
+            value={hour}
+            format={pad}
+            onChange={setHour}
+            label="Hour"
+          />
+          <Text style={styles.colon}>:</Text>
+          <Wheel
+            key={`m${openKey}`}
+            values={MINUTES}
+            value={minute}
+            format={pad}
+            onChange={setMinute}
+            label="Minute"
+          />
         </View>
+
+        {allowRepeat ? (
+          <Pressable
+            style={styles.repeatRow}
+            onPress={() => setRepeatOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Repeat: ${repeatShort(days)}`}
+          >
+            <Text style={styles.repeatLabel}>Repeat</Text>
+            <View style={styles.repeatValueWrap}>
+              <Text style={styles.repeatValue} numberOfLines={1}>
+                {repeatShort(days)}
+              </Text>
+              <Image source={OPEN_ICON} style={styles.repeatIcon} />
+            </View>
+          </Pressable>
+        ) : null}
       </View>
+
+      <RepeatSelection
+        visible={repeatOpen}
+        days={days}
+        onClose={() => setRepeatOpen(false)}
+        onSave={(chosen) => {
+          setDays(chosen);
+          setRepeatOpen(false);
+        }}
+      />
     </Modal>
   );
 }
 
+type WheelProps = {
+  values: number[];
+  value: number;
+  format: (n: number) => string;
+  onChange: (n: number) => void;
+  label: string;
+};
+
+/**
+ * A snapping scroll wheel. The row in the middle is the choice; it updates as
+ * the wheel moves (with a light tick), and a tap on any row scrolls it there.
+ * Built on ScrollView so it needs no new native module.
+ */
+function Wheel({ values, value, format, onChange, label }: WheelProps) {
+  const ref = useRef<ScrollView>(null);
+  // Fixed at mount: the wheel remounts on each open, and a start that followed
+  // `value` would re-apply the offset and fight the user's scroll.
+  const [startIndex] = useState(() => Math.max(0, values.indexOf(value)));
+  const current = useRef(startIndex);
+  const placed = useRef(false);
+  const [selected, setSelected] = useState(startIndex);
+
+  const indexAt = (y: number) =>
+    Math.min(values.length - 1, Math.max(0, Math.round(y / ROW)));
+
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const index = indexAt(e.nativeEvent.contentOffset.y);
+    if (index === current.current) return;
+    current.current = index;
+    setSelected(index);
+    onChange(values[index]);
+    void Haptics.selectionAsync().catch(() => {
+      // Haptics are a nicety; a device without them still picks the time.
+    });
+  };
+
+  return (
+    <ScrollView
+      ref={ref}
+      style={styles.wheel}
+      contentContainerStyle={{ paddingVertical: ROW * Math.floor(VISIBLE_ROWS / 2) }}
+      contentOffset={{ x: 0, y: startIndex * ROW }}
+      onLayout={() => {
+        if (placed.current) return;
+        placed.current = true;
+        ref.current?.scrollTo({ y: startIndex * ROW, animated: false });
+      }}
+      snapToInterval={ROW}
+      decelerationRate="fast"
+      showsVerticalScrollIndicator={false}
+      onScroll={onScroll}
+      scrollEventThrottle={16}
+      nestedScrollEnabled
+      accessibilityLabel={label}
+      accessibilityValue={{ text: format(values[selected]) }}
+    >
+      {values.map((v, i) => (
+        <Pressable
+          key={v}
+          style={styles.row}
+          onPress={() => ref.current?.scrollTo({ y: i * ROW, animated: true })}
+        >
+          <Text style={[styles.rowText, i === selected && styles.rowTextOn]}>{format(v)}</Text>
+        </Pressable>
+      ))}
+    </ScrollView>
+  );
+}
+
 const styles = StyleSheet.create({
+  // Figma: kandoo-time-entry.
   screen: {
     flex: 1,
     backgroundColor: colors.base,
-    paddingHorizontal: spacing.space4,
+    paddingHorizontal: spacing.space5,
   },
   bar: {
+    height: 44,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: spacing.space7,
-    paddingBottom: spacing.space4,
   },
-  close: {
-    ...text.displayL,
-    color: colors.inkMuted,
-  },
-  save: {
-    ...text.bodyStrong,
-    color: colors.accent,
-  },
-  saveDisabled: {
-    color: colors.inkFaint,
-  },
+  closeBtn: { width: 40, height: 40, justifyContent: 'center' },
+  closeIcon: { width: 20, height: 20, tintColor: colors.ink },
+  save: { ...text.bodyStrong, color: colors.markRing },
   display: {
     alignItems: 'center',
+    gap: spacing.space4,
     marginTop: spacing.space6,
-    marginBottom: spacing.space7,
+    marginBottom: spacing.space6,
   },
   time: {
-    fontFamily: text.displayXl.fontFamily,
-    fontSize: 72,
-    lineHeight: 80,
+    fontFamily: fontFamily.textSemiBold,
+    fontSize: 64,
+    lineHeight: 76,
     color: colors.ink,
+    fontVariant: ['tabular-nums'],
   },
-  ampmRow: {
-    flexDirection: 'row',
-    gap: spacing.space2,
-    marginTop: spacing.space4,
-  },
+  ampmRow: { flexDirection: 'row', gap: spacing.space2 },
   ampm: {
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: radius.sm,
-    paddingVertical: spacing.space2,
-    paddingHorizontal: spacing.space4,
-  },
-  ampmOn: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
-  },
-  ampmText: {
-    ...text.bodyStrong,
-    color: colors.inkMuted,
-  },
-  ampmTextOn: {
-    color: colors.base,
-  },
-  keypad: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: spacing.space3,
-  },
-  key: {
-    width: '30%',
-    height: 64,
+    width: 44,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.lineStrong,
     backgroundColor: colors.surface,
+  },
+  ampmOn: { backgroundColor: colors.markCore, borderColor: colors.markCore },
+  ampmText: { ...text.caption, color: colors.inkMuted },
+  ampmTextOn: { fontFamily: fontFamily.textSemiBold, color: colors.ink },
+  wheels: {
+    height: ROW * VISIBLE_ROWS,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  band: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: ROW * Math.floor(VISIBLE_ROWS / 2),
+    height: ROW,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.line,
+    backgroundColor: colors.surface,
   },
-  keyText: {
-    fontFamily: text.displayL.fontFamily,
-    fontSize: 26,
+  wheel: { width: 96, height: ROW * VISIBLE_ROWS, flexGrow: 0 },
+  colon: {
+    fontFamily: fontFamily.textSemiBold,
+    fontSize: 24,
     color: colors.ink,
+    marginHorizontal: spacing.space3,
   },
+  row: { height: ROW, alignItems: 'center', justifyContent: 'center' },
+  repeatRow: {
+    marginTop: spacing.space6,
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.space3,
+    paddingHorizontal: spacing.space4,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+  },
+  repeatLabel: { ...text.bodyStrong, color: colors.ink },
+  repeatValueWrap: { flexDirection: 'row', alignItems: 'center', gap: spacing.space1, flexShrink: 1 },
+  repeatValue: { ...text.body, color: colors.inkMuted, flexShrink: 1 },
+  repeatIcon: { width: 16, height: 16, tintColor: colors.inkMuted },
+  rowText: {
+    fontFamily: fontFamily.textRegular,
+    fontSize: 22,
+    color: colors.inkFaint,
+    fontVariant: ['tabular-nums'],
+  },
+  rowTextOn: { fontFamily: fontFamily.textSemiBold, fontSize: 24, color: colors.ink },
 });

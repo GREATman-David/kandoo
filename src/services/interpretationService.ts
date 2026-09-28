@@ -280,6 +280,8 @@ export type CreatedReminder = {
   created_at: string;
   /** Present on the reminders-tab list; used to open the parent note. */
   capture_id?: string | null;
+  /** Weekdays it repeats on (0 = Sunday … 6 = Saturday); null = once. */
+  repeat_days?: number[] | null;
 };
 
 export type CreatedMemory = {
@@ -479,6 +481,7 @@ export async function createManualReminder(input: {
   task: string;
   dueAt: string;
   person: string | null;
+  repeatDays?: number[] | null;
 }): Promise<CreatedReminder> {
   const accessToken = await getAccessTokenOrThrow();
 
@@ -507,6 +510,8 @@ export async function updateReminder(
     dueAt?: string | null;
     person?: string | null;
     status?: ReminderStatus;
+    /** Weekdays to repeat on; null stops repeating. Omit to leave as is. */
+    repeatDays?: number[] | null;
   }
 ): Promise<CreatedReminder> {
   const accessToken = await getAccessTokenOrThrow();

@@ -28,6 +28,8 @@ export type CreatedReminder = {
   created_at: string;
   /** Present on the reminders-tab list; used to open the parent note. */
   capture_id?: string | null;
+  /** Weekdays it repeats on (0 = Sunday … 6 = Saturday); null = once. */
+  repeat_days?: number[] | null;
 };
 
 /**
@@ -102,7 +104,7 @@ export async function createReminder(
       embedding,
     })
     .select(
-      'id, task, person, due_at, place_hint, place_id, insistent, status, created_at'
+      'id, task, person, due_at, place_hint, place_id, insistent, status, created_at, repeat_days'
     )
     .single();
 
@@ -189,7 +191,7 @@ export async function confirmReminder(
     .eq('id', reminderId)
     .eq('user_id', userId)
     .select(
-      'id, task, person, due_at, place_hint, place_id, insistent, status, created_at'
+      'id, task, person, due_at, place_hint, place_id, insistent, status, created_at, repeat_days'
     )
     .single();
 
@@ -219,7 +221,7 @@ export async function setReminderStatus(
 }
 
 const REMINDER_COLUMNS =
-  'id, task, person, due_at, place_hint, place_id, insistent, status, created_at, capture_id';
+  'id, task, person, due_at, place_hint, place_id, insistent, status, created_at, capture_id, repeat_days';
 
 /**
  * The Reminders tab. Returns three lists; the DEVICE splits `active` into Today
@@ -270,7 +272,12 @@ export async function listGroupedReminders(userId: string): Promise<{
  */
 export async function createManualReminder(
   userId: string,
-  input: { task: string; dueAt: string | null; person: string | null }
+  input: {
+    task: string;
+    dueAt: string | null;
+    person: string | null;
+    repeatDays?: number[] | null;
+  }
 ): Promise<CreatedReminder> {
   const task = input.task.trim();
   if (!task) throw new Error('Reminder task cannot be empty.');
@@ -298,6 +305,8 @@ export async function createManualReminder(
       insistent: false,
       status: 'confirmed',
       embedding,
+      // Only sent when set, so a plain reminder never depends on the column.
+      ...(input.repeatDays?.length ? { repeat_days: input.repeatDays } : {}),
     })
     .select(REMINDER_COLUMNS)
     .single();
@@ -335,6 +344,7 @@ export async function updateReminder(
     dueAt?: string | null;
     person?: string | null;
     status?: ReminderStatus;
+    repeatDays?: number[] | null;
   }
 ): Promise<CreatedReminder> {
   const update: Record<string, unknown> = {};
@@ -356,6 +366,9 @@ export async function updateReminder(
   }
   if (patch.person !== undefined) update.person = patch.person?.trim() || null;
   if (patch.status !== undefined) update.status = patch.status;
+  if (patch.repeatDays !== undefined) {
+    update.repeat_days = patch.repeatDays?.length ? patch.repeatDays : null;
+  }
 
   if (Object.keys(update).length === 0) {
     throw new Error('Nothing to update.');
@@ -402,7 +415,7 @@ export async function listActiveReminders(userId: string) {
   const { data, error } = await supabase
     .from('reminders')
     .select(
-      'id, task, person, due_at, place_hint, place_id, insistent, status, created_at'
+      'id, task, person, due_at, place_hint, place_id, insistent, status, created_at, repeat_days'
     )
     .eq('user_id', userId)
     .in('status', ['pending', 'confirmed'])

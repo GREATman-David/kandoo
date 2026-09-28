@@ -35,10 +35,28 @@ const ICONS = {
   check: require('@/assets/images/icons/check.png'),
 };
 import { formatDueDate } from '@/utils/formatDueDate';
+import { isRepeating, nextOccurrence, repeatWhen } from '@/utils/repeat';
 
 import { useAuth } from '../features/Auth/useAuth';
 
 const EMPTY: GroupedReminders = { needsReview: [], active: [], history: [] };
+
+/**
+ * When a reminder next happens, for sorting it into Overdue / Today / Upcoming.
+ * A repeating reminder is never overdue: it is due at its next chosen day.
+ */
+function nextDue(r: CreatedReminder): number {
+  if (!r.due_at) return NaN;
+  return isRepeating(r.repeat_days)
+    ? nextOccurrence(r.due_at, r.repeat_days).getTime()
+    : Date.parse(r.due_at);
+}
+
+/** The time line under a reminder: "Every Mon, Wed · 7:00 AM" when it repeats. */
+function whenLine(r: CreatedReminder): string | null {
+  if (r.due_at && isRepeating(r.repeat_days)) return repeatWhen(r.due_at, r.repeat_days);
+  return formatDueDate(r.due_at);
+}
 
 function endOfToday(): number {
   const d = new Date();
@@ -186,17 +204,12 @@ export default function RemindersScreen() {
   // own heading — a reminder from last week is not "Today".
   const cutoff = endOfToday();
   const todayStart = startOfToday();
-  const overdue = groups.active.filter(
-    (r) => r.due_at && Date.parse(r.due_at) < todayStart
-  );
+  const overdue = groups.active.filter((r) => r.due_at && nextDue(r) < todayStart);
   const today = groups.active.filter(
-    (r) =>
-      r.due_at &&
-      Date.parse(r.due_at) >= todayStart &&
-      Date.parse(r.due_at) <= cutoff
+    (r) => r.due_at && nextDue(r) >= todayStart && nextDue(r) <= cutoff
   );
   const upcoming = groups.active.filter(
-    (r) => !r.due_at || Date.parse(r.due_at) > cutoff
+    (r) => !r.due_at || nextDue(r) > cutoff
   );
   const nothing =
     groups.needsReview.length === 0 &&
@@ -393,7 +406,7 @@ type RowProps = {
  * awaiting review keeps its amber highlight and no circle — it isn't set yet.
  */
 function Row({ reminder, needsReview, onOpen, onDone, onDelete }: RowProps) {
-  const when = formatDueDate(reminder.due_at) ?? reminder.place_hint ?? '';
+  const when = whenLine(reminder) ?? reminder.place_hint ?? '';
   // The circle fills for a beat before the row leaves, so the tap registers.
   const [ticked, setTicked] = useState(false);
   const complete = () => {

@@ -16,6 +16,7 @@ import {
 import { scheduleReminder } from '@/services/localNotifications';
 import { colors, radius, spacing, text } from '@/theme/theme';
 import { formatDueDate } from '@/utils/formatDueDate';
+import { repeatWhen } from '@/utils/repeat';
 
 import { TimeEntry } from './TimeEntry';
 
@@ -30,6 +31,7 @@ export function ManualReminder({ visible, onClose, onCreated }: ManualReminderPr
   const [task, setTask] = useState('');
   const [person, setPerson] = useState('');
   const [dueAt, setDueAt] = useState<string | null>(null);
+  const [repeatDays, setRepeatDays] = useState<number[] | null>(null);
   const [timeOpen, setTimeOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +41,7 @@ export function ManualReminder({ visible, onClose, onCreated }: ManualReminderPr
       setTask('');
       setPerson('');
       setDueAt(null);
+      setRepeatDays(null);
       setError(null);
     }
   }, [visible]);
@@ -54,6 +57,8 @@ export function ManualReminder({ visible, onClose, onCreated }: ManualReminderPr
         task: task.trim(),
         dueAt,
         person: person.trim() || null,
+        // Only sent when set, so a one-off reminder is exactly as before.
+        ...(repeatDays ? { repeatDays } : {}),
       });
       await scheduleReminder(reminder);
       onCreated();
@@ -95,7 +100,11 @@ export function ManualReminder({ visible, onClose, onCreated }: ManualReminderPr
 
         <Pressable style={styles.timePill} onPress={() => setTimeOpen(true)}>
           <Text style={dueAt ? styles.timeSet : styles.timePlaceholder}>
-            {dueAt ? formatDueDate(dueAt) : 'Set a time'}
+            {dueAt
+              ? repeatDays
+                ? repeatWhen(dueAt, repeatDays)
+                : formatDueDate(dueAt)
+              : 'Set a time'}
           </Text>
         </Pressable>
 
@@ -114,9 +123,12 @@ export function ManualReminder({ visible, onClose, onCreated }: ManualReminderPr
         visible={timeOpen}
         initialISO={dueAt}
         saveLabel="Set"
+        allowRepeat
+        repeatDays={repeatDays}
         onClose={() => setTimeOpen(false)}
-        onSave={(iso) => {
+        onSave={(iso, days) => {
           setDueAt(iso);
+          setRepeatDays(days);
           setTimeOpen(false);
         }}
       />

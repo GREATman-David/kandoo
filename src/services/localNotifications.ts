@@ -1,9 +1,12 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+import { isRepeating, normalizeDays } from '@/utils/repeat';
+
 import type { CreatedReminder } from './interpretationService';
 import {
   clearTriggers,
+  entryIds,
   getAllTriggers,
   getTrigger,
   removeTrigger,
@@ -104,26 +107,60 @@ export async function scheduleReminder(
   if (!reminder.due_at) return null;
 
   const due = new Date(reminder.due_at);
-  if (Number.isNaN(due.getTime()) || due.getTime() <= Date.now()) return null;
+  if (Number.isNaN(due.getTime())) return null;
+
+  const content = {
+    title: reminder.task,
+    body: reminder.person ? `With ${reminder.person}` : 'Kandoo reminder',
+    sound: true,
+    // Lets a tap open this reminder (NotificationRouter).
+    data: { reminderId: reminder.id },
+  };
+  const channelId = channelFor(reminder);
+
+  // Repeating: one weekly notification per chosen day, at due_at's time of
+  // day. The OS repeats them, so they keep firing with the app closed.
+  const days = normalizeDays(reminder.repeat_days);
+  if (days) {
+    const ids: string[] = [];
+    for (const day of days) {
+      ids.push(
+        await Notifications.scheduleNotificationAsync({
+          content,
+          trigger: {
+            type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+            weekday: day + 1, // expo counts 1 = Sunday; we count 0 = Sunday
+            hour: due.getHours(),
+            minute: due.getMinutes(),
+            channelId,
+          },
+        })
+      );
+    }
+    await setTrigger(reminder.id, {
+      notificationId: ids[0],
+      notificationIds: ids,
+      dueAt: reminder.due_at,
+      repeat: days.join(','),
+    });
+    return ids[0];
+  }
+
+  if (due.getTime() <= Date.now()) return null;
 
   const notificationId = await Notifications.scheduleNotificationAsync({
-    content: {
-      title: reminder.task,
-      body: reminder.person ? `With ${reminder.person}` : 'Kandoo reminder',
-      sound: true,
-      // Lets a tap open this reminder (NotificationRouter).
-      data: { reminderId: reminder.id },
-    },
+    content,
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,
       date: due,
-      channelId: channelFor(reminder),
+      channelId,
     },
   });
 
   await setTrigger(reminder.id, {
     notificationId,
     dueAt: reminder.due_at,
+    repeat: '',
   });
 
   return notificationId;
@@ -133,10 +170,12 @@ export async function scheduleReminder(
 export async function cancelReminder(reminderId: string): Promise<void> {
   const entry = await getTrigger(reminderId);
   if (entry) {
-    try {
-      await Notifications.cancelScheduledNotificationAsync(entry.notificationId);
-    } catch (error) {
-      console.warn('Cancel scheduled notification failed:', error);
+    for (const id of entryIds(entry)) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(id);
+      } catch (error) {
+        console.warn('Cancel scheduled notification failed:', error);
+      }
     }
     await removeTrigger(reminderId);
   }
@@ -165,11 +204,12 @@ export async function reconcileReminders(
   await ensureChannels();
 
   const now = Date.now();
+  // A repeating reminder stays wanted after its first time has passed.
   const desired = reminders.filter(
     (r) =>
       r.status === 'confirmed' &&
       !!r.due_at &&
-      new Date(r.due_at).getTime() > now
+      (isRepeating(r.repeat_days) || new Date(r.due_at).getTime() > now)
   );
   const desiredIds = new Set(desired.map((r) => r.id));
 
@@ -186,15 +226,16 @@ export async function reconcileReminders(
   //    the stored due time no longer matches the server's.
   for (const reminder of desired) {
     const entry = await getTrigger(reminder.id);
-    if (entry && entry.dueAt === reminder.due_at) continue;
+    const repeat = normalizeDays(reminder.repeat_days)?.join(',') ?? '';
+    if (entry && entry.dueAt === reminder.due_at && (entry.repeat ?? '') === repeat) {
+      continue;
+    }
     await scheduleReminder(reminder);
   }
 
   // 3. Sweep OS-scheduled notifications the registry no longer references
   //    (e.g. registry was cleared but notifications survived a reinstall).
-  const known = new Set(
-    Object.values(await getAllTriggers()).map((e) => e.notificationId)
-  );
+  const known = new Set(Object.values(await getAllTriggers()).flatMap(entryIds));
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const request of scheduled) {
     if (!known.has(request.identifier)) {

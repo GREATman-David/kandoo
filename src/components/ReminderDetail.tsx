@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -8,8 +9,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  fetchCaptureNote,
   updateReminder,
   type CreatedReminder,
   userMessage,
@@ -22,6 +25,8 @@ import {
 } from '@/services/localNotifications';
 import { colors, radius, spacing, text } from '@/theme/theme';
 import { formatDueDate } from '@/utils/formatDueDate';
+import { isRepeating, repeatWhen } from '@/utils/repeat';
+import { timeAgo } from '@/utils/timeAgo';
 
 import { TimeEntry } from './TimeEntry';
 
@@ -32,6 +37,13 @@ export type ReminderDetailProps = {
   /** Refetch the list after any change. */
   onChanged: () => void;
   onOpenNote: (captureId: string) => void;
+};
+
+const ICONS = {
+  back: require('@/assets/images/icons/chevron-left.png'),
+  edit: require('@/assets/images/icons/pencil.png'),
+  person: require('@/assets/images/icons/chip-person.png'),
+  open: require('@/assets/images/icons/chevron-right.png'),
 };
 
 const SNOOZE = [
@@ -54,6 +66,7 @@ export function ReminderDetail({
   onChanged,
   onOpenNote,
 }: ReminderDetailProps) {
+  const insets = useSafeAreaInsets();
   const [current, setCurrent] = useState<CreatedReminder | null>(reminder);
   const [editing, setEditing] = useState(false);
   const [taskDraft, setTaskDraft] = useState('');
@@ -63,6 +76,10 @@ export function ReminderDetail({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The note the reminder came from, for the "From <note> · <when>" line.
+  // Best-effort: without it the line reads "From what you said".
+  const [sourceTitle, setSourceTitle] = useState<string | null>(null);
+
   useEffect(() => {
     if (visible) {
       setCurrent(reminder);
@@ -70,6 +87,21 @@ export function ReminderDetail({
       setError(null);
     }
   }, [visible, reminder]);
+
+  useEffect(() => {
+    setSourceTitle(null);
+    const captureId = reminder?.capture_id;
+    if (!visible || !captureId) return;
+    let active = true;
+    fetchCaptureNote(captureId)
+      .then((capture) => {
+        if (active) setSourceTitle(capture?.note?.title ?? null);
+      })
+      .catch((caught) => logFailure('Loading reminder source failed:', caught));
+    return () => {
+      active = false;
+    };
+  }, [visible, reminder?.capture_id]);
 
   if (!current) return null;
   const r = current;
@@ -121,9 +153,15 @@ export function ReminderDetail({
     await apply({ dueAt: iso, status: 'confirmed' }, (u) => rescheduleReminder(u));
   };
 
-  const setTime = async (iso: string) => {
+  const setTime = async (iso: string, days: number[] | null) => {
     setTimeOpen(false);
-    await apply({ dueAt: iso }, (u) => rescheduleReminder(u));
+    // Send repeat only when it is set or being cleared, so editing the time of
+    // a one-off reminder sends exactly what it always did.
+    const repeatChanged = isRepeating(r.repeat_days) || !!days;
+    await apply(
+      repeatChanged ? { dueAt: iso, repeatDays: days } : { dueAt: iso },
+      (u) => rescheduleReminder(u)
+    );
   };
 
   const startEdit = () => {
@@ -140,66 +178,110 @@ export function ReminderDetail({
     if (done) setEditing(false);
   };
 
-  const when = formatDueDate(r.due_at) ?? r.place_hint ?? 'No time set';
+  const when =
+    r.due_at && isRepeating(r.repeat_days)
+      ? repeatWhen(r.due_at, r.repeat_days)
+      : (formatDueDate(r.due_at) ?? r.place_hint ?? 'No time set');
+  const sourceLine = r.capture_id
+    ? ['From ' + (sourceTitle ?? 'what you said'), timeAgo(r.created_at)].join(' · ')
+    : ['Added by you', timeAgo(r.created_at)].join(' · ');
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.screen}>
-        <View style={styles.bar}>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <Text style={styles.back}>‹ Back</Text>
+        <View style={[styles.bar, { marginTop: insets.top + spacing.space4 }]}>
+          <Pressable
+            style={styles.barBtn}
+            onPress={onClose}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+          >
+            <Image source={ICONS.back} style={styles.barIcon} />
           </Pressable>
           {!editing ? (
-            <Pressable onPress={startEdit} hitSlop={12}>
-              <Text style={styles.edit}>Edit</Text>
+            <Pressable
+              style={[styles.barBtn, styles.barBtnEnd]}
+              onPress={startEdit}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Edit reminder"
+            >
+              <Image source={ICONS.edit} style={styles.barIcon} />
             </Pressable>
           ) : (
             <Pressable onPress={saveEdit} hitSlop={12} disabled={busy}>
-              <Text style={styles.edit}>{busy ? 'Saving…' : 'Save'}</Text>
+              <Text style={styles.save}>{busy ? 'Saving…' : 'Save'}</Text>
             </Pressable>
           )}
         </View>
 
-        <ScrollView contentContainerStyle={styles.body}>
-          {editing ? (
-            <TextInput
-              style={styles.taskInput}
-              value={taskDraft}
-              onChangeText={setTaskDraft}
-              placeholder="What to do"
-              placeholderTextColor={colors.inkFaint}
-              multiline
-            />
-          ) : (
-            <Text style={styles.task}>{r.task}</Text>
-          )}
+        <ScrollView
+          contentContainerStyle={styles.body}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.card}>
+            {editing ? (
+              <TextInput
+                style={styles.taskInput}
+                value={taskDraft}
+                onChangeText={setTaskDraft}
+                placeholder="What to do"
+                placeholderTextColor={colors.inkFaint}
+                underlineColorAndroid="transparent"
+                multiline
+              />
+            ) : (
+              <Text style={styles.task}>{r.task}</Text>
+            )}
 
-          <Pressable style={styles.timePill} onPress={() => setTimeOpen(true)}>
-            <Text style={styles.timeText}>{when}</Text>
-          </Pressable>
-
-          {editing ? (
-            <TextInput
-              style={styles.personInput}
-              value={personDraft}
-              onChangeText={setPersonDraft}
-              placeholder="Person (optional)"
-              placeholderTextColor={colors.inkFaint}
-            />
-          ) : r.person ? (
-            <View style={styles.chip}>
-              <Text style={styles.chipText}>{r.person}</Text>
-            </View>
-          ) : null}
-
-          {!editing && r.capture_id ? (
+            {/* Tap the time to change it (Time entry). */}
             <Pressable
-              style={styles.source}
-              onPress={() => onOpenNote(r.capture_id as string)}
+              onPress={() => setTimeOpen(true)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityHint="Change the time"
             >
-              <Text style={styles.sourceText}>Open the note it came from ›</Text>
+              <Text style={styles.when}>{when}</Text>
             </Pressable>
-          ) : null}
+
+            {editing ? (
+              <TextInput
+                style={styles.personInput}
+                value={personDraft}
+                onChangeText={setPersonDraft}
+                placeholder="Person (optional)"
+                placeholderTextColor={colors.inkFaint}
+                underlineColorAndroid="transparent"
+              />
+            ) : r.person ? (
+              <View style={styles.chip}>
+                <Image source={ICONS.person} style={styles.chipIcon} />
+                <Text style={styles.chipText} numberOfLines={1}>
+                  {r.person}
+                </Text>
+              </View>
+            ) : null}
+
+            {!editing ? (
+              <>
+                <View style={styles.divider} />
+                <Pressable
+                  style={styles.sourceRow}
+                  onPress={() => r.capture_id && onOpenNote(r.capture_id)}
+                  disabled={!r.capture_id}
+                  hitSlop={6}
+                  accessibilityRole={r.capture_id ? 'link' : undefined}
+                >
+                  <Text style={styles.sourceText} numberOfLines={1}>
+                    {sourceLine}
+                  </Text>
+                  {r.capture_id ? <Image source={ICONS.open} style={styles.openIcon} /> : null}
+                </Pressable>
+              </>
+            ) : null}
+          </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
         </ScrollView>
@@ -221,13 +303,17 @@ export function ReminderDetail({
               </>
             ) : (
               <>
-                <Pressable
-                  style={styles.btn}
-                  onPress={() => setSnoozeOpen(true)}
-                  disabled={busy}
-                >
-                  <Text style={styles.btnText}>Snooze</Text>
-                </Pressable>
+                {/* Snooze moves due_at, which for a repeating reminder is the
+                    time of every repeat — so it is offered for one-offs only. */}
+                {isRepeating(r.repeat_days) ? null : (
+                  <Pressable
+                    style={styles.btn}
+                    onPress={() => setSnoozeOpen(true)}
+                    disabled={busy}
+                  >
+                    <Text style={styles.btnText}>Snooze</Text>
+                  </Pressable>
+                )}
                 <Pressable
                   style={[styles.btnPrimary, busy && styles.dim]}
                   onPress={markDone}
@@ -244,6 +330,8 @@ export function ReminderDetail({
       <TimeEntry
         visible={timeOpen}
         initialISO={r.due_at}
+        allowRepeat
+        repeatDays={r.repeat_days ?? null}
         onClose={() => setTimeOpen(false)}
         onSave={setTime}
       />
@@ -269,37 +357,37 @@ export function ReminderDetail({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.base, paddingHorizontal: spacing.space4 },
+  // Reminder detail (Figma: kandoo-reminder-detail).
+  screen: { flex: 1, backgroundColor: colors.base, paddingHorizontal: spacing.space5 },
   bar: {
+    height: 44,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: spacing.space7,
-    paddingBottom: spacing.space2,
   },
-  back: { ...text.body, color: colors.inkMuted },
-  edit: { ...text.bodyStrong, color: colors.accent },
-  body: { paddingTop: spacing.space4, paddingBottom: spacing.space6 },
-  task: { ...text.displayL, color: colors.ink, marginBottom: spacing.space4 },
+  barBtn: { width: 40, height: 40, justifyContent: 'center' },
+  barBtnEnd: { alignItems: 'flex-end' },
+  barIcon: { width: 20, height: 20, tintColor: colors.ink },
+  save: { ...text.bodyStrong, color: colors.markRing },
+  body: { paddingTop: spacing.space5, paddingBottom: spacing.space6 },
+  card: {
+    gap: 20,
+    padding: 20,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+  },
+  task: { ...text.displayL, letterSpacing: 0, color: colors.ink },
   taskInput: {
     ...text.displayL,
+    letterSpacing: 0,
     color: colors.ink,
-    marginBottom: spacing.space4,
     borderBottomWidth: 1,
     borderBottomColor: colors.line,
     paddingBottom: spacing.space2,
   },
-  timePill: {
-    alignSelf: 'flex-start',
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
-    paddingVertical: spacing.space2,
-    paddingHorizontal: spacing.space3,
-    marginBottom: spacing.space4,
-  },
-  timeText: { ...text.bodyStrong, color: colors.ink },
+  when: { ...text.body, fontSize: 14, color: colors.inkMuted },
   personInput: {
     ...text.body,
     color: colors.ink,
@@ -308,26 +396,31 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     paddingHorizontal: spacing.space3,
     paddingVertical: spacing.space2,
-    marginBottom: spacing.space4,
   },
   chip: {
     alignSelf: 'flex-start',
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
     borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    marginBottom: spacing.space4,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.accentWash,
   },
-  chipText: { ...text.caption, color: colors.inkMuted },
-  source: {
-    marginTop: spacing.space4,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-    paddingTop: spacing.space4,
+  chipIcon: { width: 12, height: 12, tintColor: colors.markRing },
+  chipText: { ...text.caption, flexShrink: 1, color: colors.markRing },
+  divider: { height: 1, backgroundColor: colors.line },
+  sourceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.space2,
   },
-  sourceText: { ...text.body, color: colors.inkMuted },
+  sourceText: { ...text.caption, color: colors.inkMuted, flex: 1 },
+  openIcon: { width: 16, height: 16, tintColor: colors.inkMuted },
   error: { ...text.caption, color: colors.alarmText, marginTop: spacing.space4 },
   actions: {
     flexDirection: 'row',
@@ -339,13 +432,14 @@ const styles = StyleSheet.create({
     minHeight: 48,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   btnText: { ...text.bodyStrong, color: colors.inkMuted },
   btnPrimary: {
-    flex: 2,
+    flex: 1,
     minHeight: 48,
     borderRadius: radius.md,
     backgroundColor: colors.markCore,

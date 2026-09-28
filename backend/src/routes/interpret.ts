@@ -265,6 +265,20 @@ router.get('/reminders', authenticateRequest, async (req, res) => {
   }
 });
 
+/**
+ * `repeatDays` from a request body: undefined when absent (leave as is), null to
+ * stop repeating, else the unique weekdays 0 (Sunday) … 6 (Saturday), sorted.
+ * Anything else is 'invalid'.
+ */
+function parseRepeatDays(value: unknown): number[] | null | undefined | 'invalid' {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!Array.isArray(value)) return 'invalid';
+  if (!value.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) return 'invalid';
+  const days = [...new Set(value as number[])].sort((a, b) => a - b);
+  return days.length ? days : null;
+}
+
 /** Manual reminder from the + button. Confirmed at once; the device schedules it. */
 router.post('/reminders', authenticateRequest, async (req, res) => {
   const userId = (req as AuthenticatedRequest).user.id;
@@ -274,12 +288,14 @@ router.post('/reminders', authenticateRequest, async (req, res) => {
       ? req.body.dueAt
       : null;
   const person = typeof req.body?.person === 'string' ? req.body.person : null;
+  const repeatDays = parseRepeatDays(req.body?.repeatDays);
 
   if (!task.trim()) return res.status(400).json({ error: 'A task is required.' });
   if (!dueAt) return res.status(400).json({ error: 'A time is required.' });
+  if (repeatDays === 'invalid') return res.status(400).json({ error: 'Invalid repeat days.' });
 
   try {
-    const reminder = await createManualReminder(userId, { task, dueAt, person });
+    const reminder = await createManualReminder(userId, { task, dueAt, person, repeatDays });
     return res.json({ success: true, reminder });
   } catch (error) {
     console.error('Create manual reminder failed:', error);
@@ -295,6 +311,7 @@ router.patch('/reminders/:id', authenticateRequest, async (req, res) => {
     dueAt?: string | null;
     person?: string | null;
     status?: 'pending' | 'confirmed' | 'fired' | 'dismissed' | 'cancelled';
+    repeatDays?: number[] | null;
   } = {};
   if (typeof req.body?.task === 'string') patch.task = req.body.task;
   if (req.body?.dueAt === null || typeof req.body?.dueAt === 'string') {
@@ -307,6 +324,9 @@ router.patch('/reminders/:id', authenticateRequest, async (req, res) => {
   if (typeof req.body?.status === 'string' && STATUSES.includes(req.body.status)) {
     patch.status = req.body.status;
   }
+  const repeatDays = parseRepeatDays(req.body?.repeatDays);
+  if (repeatDays === 'invalid') return res.status(400).json({ error: 'Invalid repeat days.' });
+  if (repeatDays !== undefined) patch.repeatDays = repeatDays;
 
   try {
     const reminder = await updateReminder(userId, String(req.params.id), patch);

@@ -14,9 +14,19 @@ const KEY = 'kandoo.trigger.registry.v1';
 
 export type TriggerEntry = {
   notificationId: string;
+  /** Every OS notification for this reminder — one per weekday when it
+   *  repeats. Absent on entries written before repeat existed. */
+  notificationIds?: string[];
   /** The reminder's due_at at schedule time, ISO. Detects a moved time. */
   dueAt: string;
+  /** Its repeat days at schedule time ("1,3,5"; "" = once). Detects a change. */
+  repeat?: string;
 };
+
+/** All OS notification ids an entry owns. */
+export function entryIds(entry: TriggerEntry): string[] {
+  return entry.notificationIds?.length ? entry.notificationIds : [entry.notificationId];
+}
 
 type Registry = Record<string, TriggerEntry>;
 
