@@ -2,6 +2,7 @@ import cors from 'cors';
 import 'dotenv/config';
 import express from 'express';
 
+import authPagesRouter from './routes/authPages';
 import interpretRouter from './routes/interpret';
 
 const app = express();
@@ -32,6 +33,9 @@ app.get('/', (_req, res) => {
 app.get('/health', (_req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
+
+// /auth/confirmed (where the sign-up email lands) and /brand/* (its logo).
+app.use('/', authPagesRouter);
 
 // /interpret, /reminders/:id/confirm, /reminders/:id/dismiss, /reminders/active
 app.use('/', interpretRouter);

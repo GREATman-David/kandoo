@@ -35,6 +35,7 @@ import {
 } from '@/features/Home/useHome';
 import { useReminderSync } from '@/features/reminders/useReminderSync';
 import { useEntitlement } from '@/hooks/useEntitlement';
+import { useKeyboardLift } from '@/hooks/useKeyboardLift';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useSpeechEnabled } from '@/hooks/useSpeechEnabled';
 import { speakAnswer, stopSpeaking } from '@/services/speech';
@@ -106,6 +107,8 @@ export default function HomeScreen() {
 }
 
 const SYMBOL_SIZE = 120;
+/** While the keyboard is up the mark steps back so the typed words stay in view. */
+const TYPING_SYMBOL_SIZE = 56;
 /** Full-screen moments show the Figma 72px mark inside a soft halo. */
 const HALO_SYMBOL_SIZE = 72;
 /** Figma halos: a pale-amber disc of `radius`, blurred by `blur` (listening / understood). */
@@ -152,6 +155,9 @@ function KandooHome() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [noteId, setNoteId] = useState<string | null>(null);
+  // Typing: lift the docked field above the keyboard, and shrink the mark so
+  // what is being typed stays in view. Voice is full-screen and unaffected.
+  const keyboard = useKeyboardLift();
 
   // Set up notification channels/permissions and rebuild the local schedule
   // from the server's active reminders. Replaces the retired server-push path.
@@ -180,7 +186,13 @@ function KandooHome() {
   const halo = haloStyles(compactHalo ? UNDERSTOOD_HALO : LISTENING_HALO);
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top + spacing.space5 }]}>
+    <View
+      ref={keyboard.ref}
+      style={[
+        styles.screen,
+        { paddingTop: insets.top + spacing.space5, paddingBottom: keyboard.lift },
+      ]}
+    >
       <Modal
         visible={immersive}
         animationType="fade"
@@ -280,7 +292,7 @@ function KandooHome() {
         </Pressable>
       </View>
 
-      <View style={styles.symbol}>
+      <View style={[styles.symbol, keyboard.keyboardOpen && styles.symbolTyping]}>
         <Pressable
           onPress={
             home.state === 'idle'
@@ -303,7 +315,10 @@ function KandooHome() {
           }
           hitSlop={12}
         >
-          <KandooSymbol state={symbolFor(home.state)} size={SYMBOL_SIZE} />
+          <KandooSymbol
+            state={symbolFor(home.state)}
+            size={keyboard.keyboardOpen ? TYPING_SYMBOL_SIZE : SYMBOL_SIZE}
+          />
         </Pressable>
       </View>
 
@@ -361,6 +376,7 @@ function KandooHome() {
               style={styles.field}
               placeholder="Tell Kandoo anything…"
               placeholderTextColor={colors.inkFaint}
+              underlineColorAndroid="transparent"
               value={home.transcript}
               onChangeText={home.updateTranscript}
               multiline
@@ -445,7 +461,7 @@ function Idle({ recent, loaded, onSelect }: IdleProps) {
     return (
       <EmptyState
         line="Nothing yet."
-        help="Tell Kandoo about your day and it’ll remember."
+        help="Tell about your day. Kandoo will remember."
         showMark={false}
       />
     );
@@ -1117,6 +1133,9 @@ const styles = StyleSheet.create({
   symbol: {
     alignItems: 'center',
     marginBottom: spacing.space5,
+  },
+  symbolTyping: {
+    marginBottom: spacing.space2,
   },
   body: {
     flex: 1,

@@ -32,6 +32,7 @@ const ICONS = {
   // Figma puts a clock where "new reminder" lives.
   add: require('@/assets/images/icons/chip-time.png'),
   expand: require('@/assets/images/icons/chevron-down.png'),
+  check: require('@/assets/images/icons/check.png'),
 };
 import { formatDueDate } from '@/utils/formatDueDate';
 
@@ -70,6 +71,8 @@ export default function RemindersScreen() {
 
   const [undo, setUndo] = useState<CreatedReminder | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The in-flight "done" write, so an Undo can never land before it.
+  const doneRequest = useRef<Promise<unknown> | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -109,18 +112,30 @@ export default function RemindersScreen() {
     router.setParams({ open: undefined });
   }, [open, loading, groups, router]);
 
-  // Tap the time pill to complete: fired on the server, notification cancelled,
-  // and an Undo offered for five seconds before it settles into History.
+  // Tap the circle to complete. The reminder leaves the list at once and moves
+  // to History; the server and the notification catch up behind, and a
+  // Completed · Undo bar stays for five seconds in case it was a mistake.
   const markDone = async (reminder: CreatedReminder) => {
-    try {
+    setGroups((g) => ({
+      ...g,
+      active: g.active.filter((r) => r.id !== reminder.id),
+      history: [{ ...reminder, status: 'fired' }, ...g.history],
+    }));
+    setUndo(reminder);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = setTimeout(() => setUndo(null), 5000);
+
+    const request = (async () => {
       await updateReminder(reminder.id, { status: 'fired' });
       await cancelReminder(reminder.id);
-      await load();
-      setUndo(reminder);
-      if (undoTimer.current) clearTimeout(undoTimer.current);
-      undoTimer.current = setTimeout(() => setUndo(null), 5000);
+    })();
+    doneRequest.current = request;
+    try {
+      await request;
     } catch (caught) {
       logFailure('Mark done failed:', caught);
+      setUndo((current) => (current?.id === reminder.id ? null : current));
+      await load();
       Alert.alert('Couldn’t complete that', 'Please try again.');
     }
   };
@@ -130,13 +145,21 @@ export default function RemindersScreen() {
     const reminder = undo;
     setUndo(null);
     if (undoTimer.current) clearTimeout(undoTimer.current);
+    // Back into the list straight away, where it was.
+    setGroups((g) => ({
+      ...g,
+      active: [...g.active, reminder],
+      history: g.history.filter((r) => r.id !== reminder.id),
+    }));
     try {
+      await doneRequest.current?.catch(() => {});
       const restored = await updateReminder(reminder.id, { status: 'confirmed' });
       await scheduleReminder(restored);
-      await load();
     } catch (caught) {
       logFailure('Undo failed:', caught);
+      Alert.alert('Couldn’t undo that', 'Please try again.');
     }
+    await load();
   };
 
   const confirmDelete = (reminder: CreatedReminder) => {
@@ -313,8 +336,8 @@ export default function RemindersScreen() {
 
       {undo ? (
         <View style={[styles.undoBar, { bottom: insets.bottom + spacing.space5 }]}>
-          <Text style={styles.undoText}>Marked done</Text>
-          <Pressable onPress={undoDone} hitSlop={10}>
+          <Text style={styles.undoText}>Completed</Text>
+          <Pressable onPress={undoDone} hitSlop={10} accessibilityRole="button">
             <Text style={styles.undoAction}>Undo</Text>
           </Pressable>
         </View>
@@ -365,11 +388,19 @@ type RowProps = {
 
 /**
  * One reminder as a Figma card: the task in serif, its time beneath, the person
- * as a chip on the right. Tap opens the reminder (Done and Snooze live there);
- * long-press offers Mark done or Delete. A reminder awaiting review keeps its amber highlight.
+ * as a chip on the right. The circle on the left completes it in one tap; tap
+ * the card to open it; long-press offers Mark done or Delete. A reminder
+ * awaiting review keeps its amber highlight and no circle — it isn't set yet.
  */
 function Row({ reminder, needsReview, onOpen, onDone, onDelete }: RowProps) {
   const when = formatDueDate(reminder.due_at) ?? reminder.place_hint ?? '';
+  // The circle fills for a beat before the row leaves, so the tap registers.
+  const [ticked, setTicked] = useState(false);
+  const complete = () => {
+    if (ticked) return;
+    setTicked(true);
+    setTimeout(() => onDone(reminder), 250);
+  };
 
   // Long-press keeps both quick actions the old time pill and long-press gave:
   // complete (with its Undo) for a scheduled reminder, and delete.
@@ -392,6 +423,18 @@ function Row({ reminder, needsReview, onOpen, onDone, onDelete }: RowProps) {
       accessibilityRole="button"
       accessibilityHint="Long-press to mark done or delete"
     >
+      {needsReview ? null : (
+        <Pressable
+          style={[styles.doneCircle, ticked && styles.doneCircleTicked]}
+          onPress={complete}
+          hitSlop={10}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: ticked }}
+          accessibilityLabel={`Mark ${reminder.task} done`}
+        >
+          {ticked ? <Image source={ICONS.check} style={styles.doneCheck} /> : null}
+        </Pressable>
+      )}
       <View style={styles.rowMain}>
         <View style={styles.rowTop}>
           {needsReview ? <View style={styles.dot} /> : null}
@@ -454,6 +497,20 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.lineStrong,
   },
   rowMain: { flex: 1, gap: spacing.space1 },
+  doneCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: radius.full,
+    borderWidth: 1.5,
+    borderColor: colors.lineStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  doneCircleTicked: {
+    backgroundColor: colors.settledFill,
+    borderColor: colors.settledFill,
+  },
+  doneCheck: { width: 12, height: 12, tintColor: colors.surface },
   rowTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.space2 },
   dot: { width: 7, height: 7, borderRadius: radius.full, backgroundColor: colors.accent },
   rowTask: {
@@ -516,5 +573,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.space4,
   },
   undoText: { ...text.body, color: colors.ink },
-  undoAction: { ...text.bodyStrong, color: colors.accent },
+  undoAction: { ...text.bodyStrong, color: colors.markRing },
 });

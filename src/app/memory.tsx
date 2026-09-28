@@ -301,6 +301,10 @@ export default function MemoryScreen() {
           onChangeText={setQuery}
           placeholder="Search or ask anything you've said…"
           placeholderTextColor={colors.inkFaint}
+          // Some Android skins (Samsung) draw their own underline and spacing
+          // under a text field; the bordered bar is the only frame it needs.
+          underlineColorAndroid="transparent"
+          numberOfLines={1}
           returnKeyType="search"
           onSubmitEditing={ask}
         />

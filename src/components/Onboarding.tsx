@@ -20,7 +20,7 @@ type Card = { headline: string; body: string };
 /** Three cards: what Kandoo does · how you talk to it · how it remembers. */
 const CARDS: Card[] = [
   {
-    headline: 'Tell it once.',
+    headline: 'Tell Kandoo once.',
     body: "Kandoo keeps what matters and brings it back at the moment it's useful — not a notes app you dig through.",
   },
   {
