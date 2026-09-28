@@ -14,6 +14,7 @@ import {
   type CreatedReminder,
   type InterpretResult,
   type InterpretationResponse,
+  userMessage,
 } from '@/services/interpretationService';
 import { scheduleReminder } from '@/services/localNotifications';
 import { answerOffline, isLikelyQuestion } from '@/services/offlineRecall';
@@ -234,7 +235,7 @@ export function useHome() {
       }
 
       setError(
-        caught instanceof Error ? caught.message : 'Could not process that.'
+        userMessage(caught, 'Could not process that.')
       );
       // Back to listening with the words intact, so nothing is lost.
       setState('listening');

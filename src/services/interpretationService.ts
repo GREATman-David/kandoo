@@ -61,6 +61,34 @@ export class TimeoutError extends NetworkError {
 export const isNetworkError = (error: unknown): boolean =>
   error instanceof NetworkError;
 
+/**
+ * A message the backend chose to show (its errors are sanitised — AGENTS §10).
+ * Distinct from a plain Error so the UI can tell it apart from a JS bug.
+ */
+export class ApiError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+/**
+ * The only way a caught error becomes on-screen text. Messages written for the
+ * user — the backend's, offline/timeout, session ended — pass through; anything
+ * else (a JS bug, a library error) shows the screen's own fallback line, and the
+ * caller has already logged the real cause.
+ */
+export function userMessage(error: unknown, fallback: string): string {
+  if (
+    error instanceof ApiError ||
+    error instanceof NetworkError ||
+    error instanceof SessionExpiredError
+  ) {
+    return error.message;
+  }
+  return fallback;
+}
+
 /** Reads and simple writes. Long enough for a slow network, short enough to notice. */
 const DEFAULT_TIMEOUT_MS = 20_000;
 /**
@@ -189,7 +217,7 @@ async function apiFetch<T>(
 
   if (!response.ok) {
     const message = (data as { error?: unknown } | null)?.error;
-    throw new Error(typeof message === 'string' ? message : fallbackMessage);
+    throw new ApiError(typeof message === 'string' ? message : fallbackMessage);
   }
 
   return data as T;

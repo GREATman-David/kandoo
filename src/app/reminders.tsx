@@ -21,6 +21,7 @@ import {
   updateReminder,
   type CreatedReminder,
   type GroupedReminders,
+  userMessage,
 } from '@/services/interpretationService';
 import { cancelReminder, scheduleReminder } from '@/services/localNotifications';
 import { colors, radius, spacing, text } from '@/theme/theme';
@@ -68,7 +69,7 @@ export default function RemindersScreen() {
       setGroups(await fetchGroupedReminders());
     } catch (caught) {
       console.error('Loading reminders failed:', caught);
-      setError(caught instanceof Error ? caught.message : 'Could not load reminders.');
+      setError(userMessage(caught, 'Could not load reminders.'));
     } finally {
       setLoading(false);
     }

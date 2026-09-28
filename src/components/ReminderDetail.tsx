@@ -12,6 +12,7 @@ import {
 import {
   updateReminder,
   type CreatedReminder,
+  userMessage,
 } from '@/services/interpretationService';
 import {
   cancelReminder,
@@ -91,7 +92,7 @@ export function ReminderDetail({
     } catch (caught) {
       console.error('Reminder update failed:', caught);
       setError(
-        caught instanceof Error ? caught.message : 'Could not update that.'
+        userMessage(caught, 'Could not update that.')
       );
       return null;
     } finally {

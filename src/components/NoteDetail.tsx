@@ -15,6 +15,7 @@ import {
   type CaptureNote,
   type CaptureNoteMemory,
   type CaptureNoteReminder,
+  userMessage,
 } from '@/services/interpretationService';
 import { colors, radius, spacing, text } from '@/theme/theme';
 import { formatDueDate } from '@/utils/formatDueDate';
@@ -135,7 +136,7 @@ export function NoteDetail({
     } catch (caught) {
       console.error('Editing note failed:', caught);
       setSaveError(
-        caught instanceof Error ? caught.message : 'Could not save that edit.'
+        userMessage(caught, 'Could not save that edit.')
       );
     } finally {
       setSaving(false);

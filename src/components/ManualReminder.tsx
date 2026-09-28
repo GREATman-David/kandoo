@@ -8,7 +8,10 @@ import {
   View,
 } from 'react-native';
 
-import { createManualReminder } from '@/services/interpretationService';
+import {
+  createManualReminder,
+  userMessage,
+} from '@/services/interpretationService';
 import { scheduleReminder } from '@/services/localNotifications';
 import { colors, radius, spacing, text } from '@/theme/theme';
 import { formatDueDate } from '@/utils/formatDueDate';
@@ -57,7 +60,7 @@ export function ManualReminder({ visible, onClose, onCreated }: ManualReminderPr
     } catch (caught) {
       console.error('Manual reminder failed:', caught);
       setError(
-        caught instanceof Error ? caught.message : 'Could not create that.'
+        userMessage(caught, 'Could not create that.')
       );
     } finally {
       setBusy(false);

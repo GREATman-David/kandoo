@@ -26,6 +26,7 @@ export type PaywallProps = {
 };
 
 type Plan = 'annual' | 'monthly';
+type LoadState = 'loading' | 'ready' | 'failed';
 
 /** Per-month price for the annual plan, derived from its total. The currency
  *  symbol is lifted off the localized string so it matches the store's format
@@ -61,6 +62,10 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
   const [selected, setSelected] = useState<Plan>('annual');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "Loading plans…" used to be permanent when the offering never arrived
+  // (offline, store unavailable); now it fails into a line with a Retry.
+  const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [attempt, setAttempt] = useState(0);
 
   // Load the `default` offering each time the sheet opens. RevenueCat maps the
   // reserved `$rc_annual` / `$rc_monthly` identifiers to these accessors.
@@ -68,12 +73,14 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
     if (!visible) return;
     let active = true;
     setError(null);
+    setLoadState('loading');
     getDefaultOffering().then((offering) => {
       if (!active) return;
       const a = offering?.annual ?? null;
       const m = offering?.monthly ?? null;
       setAnnual(a);
       setMonthly(m);
+      setLoadState(a || m ? 'ready' : 'failed');
       // Pre-select whichever plan is genuinely the better per-month deal. Never
       // assume annual wins — with the store's prices inverted it would default
       // the user to the more expensive plan and call it "Best value".
@@ -82,13 +89,13 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
     return () => {
       active = false;
     };
-  }, [visible]);
+  }, [visible, attempt]);
 
   const selectedPackage = selected === 'annual' ? annual : monthly;
   // The badge is a claim about value; only show it when it's actually true.
   const annualIsBetter = isAnnualBetter(annual, monthly);
 
-  async function complete(run: () => Promise<boolean>) {
+  async function complete(run: () => Promise<boolean>, kind: 'purchase' | 'restore') {
     if (busy) return;
     setBusy(true);
     setError(null);
@@ -98,13 +105,21 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
         onPurchased();
         onClose();
       } else {
-        setError('That didn’t unlock Pro. Please try again.');
+        setError(
+          kind === 'restore'
+            ? 'No earlier Kandoo Pro purchase was found for this account.'
+            : 'That didn’t unlock Pro. Please try again.'
+        );
       }
     } catch (caught) {
       // A cancel is a quiet no-op, never an error message.
       if (!isUserCancelled(caught)) {
         console.error('Purchase failed:', caught);
-        setError('Couldn’t complete that purchase. Please try again.');
+        setError(
+          kind === 'restore'
+            ? 'Couldn’t restore purchases just now. Please try again.'
+            : 'Couldn’t complete that purchase. Please try again.'
+        );
       }
     } finally {
       setBusy(false);
@@ -150,8 +165,23 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
               />
             ) : null}
 
-            {!annual && !monthly ? (
+            {loadState === 'loading' ? (
               <Text style={styles.loading}>Loading plans…</Text>
+            ) : null}
+
+            {loadState === 'failed' ? (
+              <View style={styles.failed}>
+                <Text style={styles.loading}>
+                  Plans couldn’t load. Check your connection and try again.
+                </Text>
+                <Pressable
+                  onPress={() => setAttempt((n) => n + 1)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.retry}>Try again</Text>
+                </Pressable>
+              </View>
             ) : null}
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -164,7 +194,7 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
               disabled={busy || !selectedPackage}
               onPress={() =>
                 selectedPackage &&
-                complete(() => purchasePackage(selectedPackage))
+                complete(() => purchasePackage(selectedPackage), 'purchase')
               }
             >
               <Text style={styles.ctaText}>
@@ -172,9 +202,16 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
               </Text>
             </Pressable>
 
+            {loadState === 'ready' ? (
+              <Text style={styles.terms}>
+                Subscriptions renew automatically until cancelled. Cancel anytime
+                in your store account settings.
+              </Text>
+            ) : null}
+
             <View style={styles.footer}>
               <Pressable
-                onPress={() => complete(restorePurchases)}
+                onPress={() => complete(restorePurchases, 'restore')}
                 disabled={busy}
                 hitSlop={8}
               >
@@ -323,6 +360,20 @@ const styles = StyleSheet.create({
   ctaText: {
     ...text.bodyStrong,
     color: colors.ink,
+  },
+  failed: {
+    alignItems: 'center',
+    paddingBottom: spacing.space3,
+  },
+  retry: {
+    ...text.bodyStrong,
+    color: colors.markRing,
+  },
+  terms: {
+    ...text.caption,
+    color: colors.inkMuted,
+    textAlign: 'center',
+    marginTop: spacing.space3,
   },
   footer: {
     flexDirection: 'row',

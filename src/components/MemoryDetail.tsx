@@ -13,6 +13,7 @@ import {
 import {
   deleteMemoryById,
   updateMemory,
+  userMessage,
 } from '@/services/interpretationService';
 import { colors, radius, spacing, text } from '@/theme/theme';
 
@@ -82,7 +83,7 @@ export function MemoryDetail({
       onChanged();
     } catch (caught) {
       console.error('Editing memory failed:', caught);
-      setError(caught instanceof Error ? caught.message : 'Could not save that edit.');
+      setError(userMessage(caught, 'Could not save that edit.'));
     } finally {
       setBusy(false);
     }

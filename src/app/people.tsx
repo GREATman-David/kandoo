@@ -18,6 +18,7 @@ import {
   fetchPeople,
   mergePeople,
   type PersonSummary,
+  userMessage,
 } from '@/services/interpretationService';
 import { colors, radius, spacing, text } from '@/theme/theme';
 
@@ -43,7 +44,7 @@ export default function PeopleScreen() {
       setPeople(await fetchPeople());
     } catch (caught) {
       console.error('Loading people failed:', caught);
-      setError(caught instanceof Error ? caught.message : 'Could not load people.');
+      setError(userMessage(caught, 'Could not load people.'));
     } finally {
       setLoading(false);
     }

@@ -9,7 +9,10 @@ import {
   View,
 } from 'react-native';
 
-import { createManualCapture } from '@/services/interpretationService';
+import {
+  createManualCapture,
+  userMessage,
+} from '@/services/interpretationService';
 import { colors, radius, spacing, text } from '@/theme/theme';
 
 type Mode = 'note' | 'memory' | 'both';
@@ -69,7 +72,7 @@ export function ManualEntry({ visible, onClose, onCreated }: ManualEntryProps) {
       onClose();
     } catch (caught) {
       console.error('Manual entry failed:', caught);
-      setError(caught instanceof Error ? caught.message : 'Could not save that.');
+      setError(userMessage(caught, 'Could not save that.'));
     } finally {
       setBusy(false);
     }

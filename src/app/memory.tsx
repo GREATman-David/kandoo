@@ -34,6 +34,7 @@ import {
   type CaptureNoteReminder,
   type CreatedReminder,
   type PersonSummary,
+  userMessage,
 } from '@/services/interpretationService';
 import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 import { timeAgo } from '@/utils/timeAgo';
@@ -108,7 +109,7 @@ export default function MemoryScreen() {
       setPeople(peopleList);
     } catch (caught) {
       console.error('Loading memory failed:', caught);
-      setError(caught instanceof Error ? caught.message : 'Could not load your memory.');
+      setError(userMessage(caught, 'Could not load your memory.'));
     } finally {
       setLoading(false);
     }
@@ -158,7 +159,7 @@ export default function MemoryScreen() {
         setAnswer(offlineAnswer);
         return;
       }
-      setAskError(caught instanceof Error ? caught.message : 'Could not answer that.');
+      setAskError(userMessage(caught, 'Could not answer that.'));
     } finally {
       setAsking(false);
     }
