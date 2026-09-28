@@ -208,33 +208,60 @@ type WheelProps = {
   label: string;
 };
 
+/** Rows in a wheel's scroll: its values repeated so the ends are never in reach. */
+const LOOP_ROWS = 300;
+
 /**
- * A snapping scroll wheel. The row in the middle is the choice; it updates as
- * the wheel moves (with a light tick), and a tap on any row scrolls it there.
- * Built on ScrollView so it needs no new native module.
+ * A snapping scroll wheel that goes round: after 59 comes 00, before 1 comes
+ * 12. The values repeat down a long list and the wheel starts in the middle;
+ * whenever it comes to rest it is moved, invisibly, back to the same value in
+ * the middle copy, so the user can keep scrolling either way for ever. The row
+ * in the middle is the choice; it updates as the wheel moves (with a light
+ * tick), and a tap on any row scrolls it there. Built on ScrollView so it needs
+ * no new native module.
  */
 function Wheel({ values, value, format, onChange, label }: WheelProps) {
   const ref = useRef<ScrollView>(null);
+  const count = values.length;
+  // An odd number of copies, so there is a true middle one.
+  const copies = Math.max(3, Math.ceil(LOOP_ROWS / count) | 1);
+  const middle = Math.floor(copies / 2) * count;
+
   // Fixed at mount: the wheel remounts on each open, and a start that followed
   // `value` would re-apply the offset and fight the user's scroll.
-  const [startIndex] = useState(() => Math.max(0, values.indexOf(value)));
+  const [startIndex] = useState(() => middle + Math.max(0, values.indexOf(value)));
   const current = useRef(startIndex);
   const placed = useRef(false);
   const [selected, setSelected] = useState(startIndex);
 
   const indexAt = (y: number) =>
-    Math.min(values.length - 1, Math.max(0, Math.round(y / ROW)));
+    Math.min(count * copies - 1, Math.max(0, Math.round(y / ROW)));
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const index = indexAt(e.nativeEvent.contentOffset.y);
     if (index === current.current) return;
+    const changed = index % count !== current.current % count;
     current.current = index;
     setSelected(index);
-    onChange(values[index]);
+    if (!changed) return;
+    onChange(values[index % count]);
     void Haptics.selectionAsync().catch(() => {
       // Haptics are a nicety; a device without them still picks the time.
     });
   };
+
+  // At rest: hop back to the same value in the middle copy. Same value, same
+  // look, so the jump can't be seen — and the wheel never runs out.
+  const recenter = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const index = indexAt(e.nativeEvent.contentOffset.y);
+    const centred = middle + (index % count);
+    if (centred === index) return;
+    current.current = centred;
+    setSelected(centred);
+    ref.current?.scrollTo({ y: centred * ROW, animated: false });
+  };
+
+  const rows = Array.from({ length: count * copies }, (_, i) => values[i % count]);
 
   return (
     <ScrollView
@@ -251,14 +278,15 @@ function Wheel({ values, value, format, onChange, label }: WheelProps) {
       decelerationRate="fast"
       showsVerticalScrollIndicator={false}
       onScroll={onScroll}
+      onMomentumScrollEnd={recenter}
       scrollEventThrottle={16}
       nestedScrollEnabled
       accessibilityLabel={label}
-      accessibilityValue={{ text: format(values[selected]) }}
+      accessibilityValue={{ text: format(values[selected % count]) }}
     >
-      {values.map((v, i) => (
+      {rows.map((v, i) => (
         <Pressable
-          key={v}
+          key={i}
           style={styles.row}
           onPress={() => ref.current?.scrollTo({ y: i * ROW, animated: true })}
         >

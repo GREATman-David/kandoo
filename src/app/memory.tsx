@@ -17,6 +17,7 @@ import { LockedRow } from '@/components/LockedRow';
 import { ManualEntry } from '@/components/ManualEntry';
 import { MemoryDetail, type MemoryDetailTarget } from '@/components/MemoryDetail';
 import { NoteDetail } from '@/components/NoteDetail';
+import { NoteMemoryFork } from '@/components/NoteMemoryFork';
 import { Paywall } from '@/components/Paywall';
 import { PersonDetail } from '@/components/PersonDetail';
 import { ReminderDetail } from '@/components/ReminderDetail';
@@ -102,6 +103,7 @@ export default function MemoryScreen() {
   const [manualOpen, setManualOpen] = useState(false);
   const [noteId, setNoteId] = useState<string | null>(null);
   const [memoryTarget, setMemoryTarget] = useState<MemoryDetailTarget | null>(null);
+  const [fork, setFork] = useState<CaptureNote | null>(null);
   const [personId, setPersonId] = useState<string | null>(null);
   const [reminder, setReminder] = useState<CreatedReminder | null>(null);
   const [paywall, setPaywall] = useState(false);
@@ -210,10 +212,9 @@ export default function MemoryScreen() {
     }
   }, [query, asking, load]);
 
-  const openRow = useCallback((note: CaptureNote) => {
-    const hasNote = !!note.note;
-    if (hasNote || note.memories.length !== 1) {
-      // A note, or a memory-only capture with several facts, opens the split view.
+  const openMemoryOf = useCallback((note: CaptureNote) => {
+    if (note.memories.length !== 1) {
+      // Several facts read best together, in the note's split view.
       setNoteId(note.id);
       return;
     }
@@ -226,6 +227,22 @@ export default function MemoryScreen() {
       isManual: note.source === 'manual',
     });
   }, []);
+
+  const openRow = useCallback(
+    (note: CaptureNote) => {
+      // A note AND facts: "Two ways to see this" lets the user pick.
+      if (note.note && note.memories.length > 0) {
+        setFork(note);
+        return;
+      }
+      if (note.note) {
+        setNoteId(note.id);
+        return;
+      }
+      openMemoryOf(note);
+    },
+    [openMemoryOf]
+  );
 
   const confirmDelete = useCallback(
     (note: CaptureNote) => {
@@ -434,6 +451,20 @@ export default function MemoryScreen() {
         visible={manualOpen}
         onClose={() => setManualOpen(false)}
         onCreated={load}
+      />
+
+      <NoteMemoryFork
+        capture={fork}
+        visible={fork !== null}
+        onClose={() => setFork(null)}
+        onOpenNote={(capture) => {
+          setFork(null);
+          setNoteId(capture.id);
+        }}
+        onOpenMemory={(capture) => {
+          setFork(null);
+          openMemoryOf(capture);
+        }}
       />
 
       <NoteDetail
