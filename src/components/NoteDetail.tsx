@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -18,7 +19,9 @@ import {
   userMessage,
   logFailure,
 } from '@/services/interpretationService';
-import { colors, radius, spacing, text } from '@/theme/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 import { formatDueDate } from '@/utils/formatDueDate';
 
 export type NoteDetailProps = {
@@ -33,6 +36,14 @@ export type NoteDetailProps = {
   onOpenReminder?: (reminder: CaptureNoteReminder) => void;
   /** Tap a remembered fact → its memory detail. Absent → read-only. */
   onOpenMemory?: (memory: CaptureNoteMemory) => void;
+};
+
+const ICONS = {
+  back: require('@/assets/images/icons/chevron-left.png'),
+  edit: require('@/assets/images/icons/pencil.png'),
+  expand: require('@/assets/images/icons/chevron-down.png'),
+  person: require('@/assets/images/icons/chip-person.png'),
+  time: require('@/assets/images/icons/chip-time.png'),
 };
 
 /** "Captured 2 hours ago" — a coarse relative time, device-local. */
@@ -58,6 +69,7 @@ export function NoteDetail({
   onOpenReminder,
   onOpenMemory,
 }: NoteDetailProps) {
+  const insets = useSafeAreaInsets();
   const [capture, setCapture] = useState<CaptureNote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -147,9 +159,14 @@ export function NoteDetail({
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.screen}>
-        <View style={styles.bar}>
-          <Pressable onPress={onClose} hitSlop={12}>
-            <Text style={styles.back}>‹ Back</Text>
+        <View style={[styles.bar, { marginTop: insets.top + spacing.space4 }]}>
+          <Pressable
+            onPress={onClose}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+          >
+            <Image source={ICONS.back} style={styles.barIcon} />
           </Pressable>
           {capture?.note ? (
             editing ? (
@@ -159,8 +176,13 @@ export function NoteDetail({
                 </Text>
               </Pressable>
             ) : (
-              <Pressable onPress={startEdit} hitSlop={12}>
-                <Text style={styles.action}>Edit</Text>
+              <Pressable
+                onPress={startEdit}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel="Edit note"
+              >
+                <Image source={ICONS.edit} style={styles.barIcon} />
               </Pressable>
             )
           ) : null}
@@ -243,6 +265,7 @@ export function NoteDetail({
                         onPress={() => onOpenPerson?.(p)}
                         disabled={!onOpenPerson}
                       >
+                        <Image source={ICONS.person} style={styles.chipIcon} />
                         <Text style={styles.chipText}>{p}</Text>
                       </Pressable>
                     ))}
@@ -255,6 +278,7 @@ export function NoteDetail({
                           onPress={() => onOpenReminder?.(r)}
                           disabled={!onOpenReminder}
                         >
+                          <Image source={ICONS.time} style={styles.chipIcon} />
                           <Text style={styles.chipText}>
                             {r.task}
                             {when ? ` · ${when}` : ''}
@@ -272,10 +296,14 @@ export function NoteDetail({
                     style={styles.rawToggle}
                     onPress={() => setShowRaw((v) => !v)}
                     hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: showRaw }}
                   >
-                    <Text style={styles.rawToggleText}>
-                      {showRaw ? 'Hide what you said' : 'What you said'}
-                    </Text>
+                    <Text style={styles.rawToggleText}>What you said</Text>
+                    <Image
+                      source={ICONS.expand}
+                      style={[styles.expandIcon, showRaw && styles.expandIconOpen]}
+                    />
                   </Pressable>
                   {showRaw ? <Text style={styles.raw}>{capture.text}</Text> : null}
                 </>
@@ -289,26 +317,28 @@ export function NoteDetail({
 }
 
 const styles = StyleSheet.create({
+  // Note detail (Figma: kandoo-note-detail).
   screen: {
     flex: 1,
     backgroundColor: colors.base,
   },
   bar: {
+    height: 44,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: spacing.space7,
-    paddingHorizontal: spacing.space4,
-    paddingBottom: spacing.space2,
+    paddingHorizontal: spacing.space5,
   },
-  back: {
-    ...text.body,
-    color: colors.inkMuted,
+  barIcon: {
+    width: 20,
+    height: 20,
+    tintColor: colors.ink,
   },
-  action: { ...text.bodyStrong, color: colors.accent },
+  action: { ...text.bodyStrong, color: colors.markRing },
   dimAction: { color: colors.inkFaint },
   body: {
-    paddingHorizontal: spacing.space4,
+    paddingHorizontal: spacing.space5,
+    paddingTop: 20,
     paddingBottom: spacing.space8,
   },
   dim: {
@@ -322,35 +352,36 @@ const styles = StyleSheet.create({
     marginTop: spacing.space4,
   },
   title: {
-    ...text.displayL,
+    ...text.answer,
     color: colors.ink,
-    marginTop: spacing.space2,
   },
   titleInput: {
-    ...text.displayL,
+    ...text.answer,
     color: colors.ink,
-    marginTop: spacing.space2,
     borderBottomWidth: 1,
     borderBottomColor: colors.line,
     paddingBottom: spacing.space2,
   },
   captured: {
-    ...text.caption,
+    fontFamily: fontFamily.textRegular,
+    fontSize: 12,
+    lineHeight: 16,
     color: colors.inkMuted,
-    marginTop: spacing.space1,
-    marginBottom: spacing.space4,
+    marginTop: spacing.space2,
+    marginBottom: spacing.space5,
   },
   noteBody: {
-    ...text.answer,
+    ...text.memory,
     color: colors.ink,
   },
   bodyInput: {
-    ...text.answer,
+    ...text.memory,
     color: colors.ink,
     marginTop: spacing.space4,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineStrong,
     borderRadius: radius.md,
+    backgroundColor: colors.surface,
     padding: spacing.space3,
     minHeight: 160,
     textAlignVertical: 'top',
@@ -360,7 +391,8 @@ const styles = StyleSheet.create({
   },
   eyebrow: {
     ...text.label,
-    color: colors.inkMuted,
+    letterSpacing: 1.5,
+    color: colors.markRing,
     marginBottom: spacing.space3,
   },
   memoryRow: {
@@ -368,7 +400,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.line,
   },
-  memoryText: { ...text.body, color: colors.ink },
+  memoryText: { ...text.memory, color: colors.ink },
   chips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -376,26 +408,47 @@ const styles = StyleSheet.create({
   },
   chip: {
     maxWidth: '100%',
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.accentWash,
+  },
+  chipIcon: {
+    width: 12,
+    height: 12,
+    tintColor: colors.markRing,
   },
   chipText: {
     ...text.caption,
-    color: colors.inkMuted,
+    flexShrink: 1,
+    color: colors.ink,
   },
   rawToggle: {
     marginTop: spacing.space6,
     borderTopWidth: 1,
     borderTopColor: colors.line,
     paddingTop: spacing.space4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   rawToggleText: {
-    ...text.caption,
+    ...text.body,
     color: colors.inkMuted,
+  },
+  expandIcon: {
+    width: 16,
+    height: 16,
+    tintColor: colors.inkMuted,
+  },
+  expandIconOpen: {
+    transform: [{ rotate: '180deg' }],
   },
   raw: {
     ...text.body,
