@@ -111,6 +111,8 @@ export async function scheduleReminder(
       title: reminder.task,
       body: reminder.person ? `With ${reminder.person}` : 'Kandoo reminder',
       sound: true,
+      // Lets a tap open this reminder (NotificationRouter).
+      data: { reminderId: reminder.id },
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,

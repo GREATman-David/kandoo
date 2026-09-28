@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -36,6 +36,12 @@ function endOfToday(): number {
   return d.getTime();
 }
 
+function startOfToday(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 export default function RemindersScreen() {
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuth();
@@ -48,6 +54,10 @@ export default function RemindersScreen() {
   const [selected, setSelected] = useState<CreatedReminder | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [noteId, setNoteId] = useState<string | null>(null);
+
+  // ?open=<id> — set when a reminder notification is tapped (NotificationRouter).
+  const { open } = useLocalSearchParams<{ open?: string }>();
+  const router = useRouter();
 
   const [undo, setUndo] = useState<CreatedReminder | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -79,6 +89,16 @@ export default function RemindersScreen() {
     },
     []
   );
+
+  // Open the tapped notification's reminder once the list has it, then drop the
+  // param so returning to this tab later doesn't reopen it.
+  useEffect(() => {
+    if (!open || loading) return;
+    const all = [...groups.needsReview, ...groups.active, ...groups.history];
+    const target = all.find((r) => r.id === open);
+    if (target) setSelected(target);
+    router.setParams({ open: undefined });
+  }, [open, loading, groups, router]);
 
   // Tap the time pill to complete: fired on the server, notification cancelled,
   // and an Undo offered for five seconds before it settles into History.
@@ -130,9 +150,18 @@ export default function RemindersScreen() {
     ]);
   };
 
+  // Overdue stays in front of the user until they complete it, but under its
+  // own heading — a reminder from last week is not "Today".
   const cutoff = endOfToday();
+  const todayStart = startOfToday();
+  const overdue = groups.active.filter(
+    (r) => r.due_at && Date.parse(r.due_at) < todayStart
+  );
   const today = groups.active.filter(
-    (r) => r.due_at && Date.parse(r.due_at) <= cutoff
+    (r) =>
+      r.due_at &&
+      Date.parse(r.due_at) >= todayStart &&
+      Date.parse(r.due_at) <= cutoff
   );
   const upcoming = groups.active.filter(
     (r) => !r.due_at || Date.parse(r.due_at) > cutoff
@@ -185,6 +214,20 @@ export default function RemindersScreen() {
                     key={r.id}
                     reminder={r}
                     needsReview
+                    onOpen={setSelected}
+                    onDone={markDone}
+                    onDelete={confirmDelete}
+                  />
+                ))}
+              </Section>
+            ) : null}
+
+            {overdue.length > 0 ? (
+              <Section title="Overdue">
+                {overdue.map((r) => (
+                  <Row
+                    key={r.id}
+                    reminder={r}
                     onOpen={setSelected}
                     onDone={markDone}
                     onDelete={confirmDelete}

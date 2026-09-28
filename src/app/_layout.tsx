@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
+import { NotificationRouter } from '@/features/reminders/NotificationRouter';
 import { useKandooFonts } from '@/theme/useKandooFonts';
 
 SplashScreen.preventAutoHideAsync();
@@ -22,6 +23,7 @@ export default function TabLayout() {
       <StatusBar style="dark" />
       <AnimatedSplashOverlay />
       <AppTabs />
+      <NotificationRouter />
     </ThemeProvider>
   );
 }
