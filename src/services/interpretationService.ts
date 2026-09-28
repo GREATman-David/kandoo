@@ -574,12 +574,19 @@ export async function deleteReminderById(id: string): Promise<void> {
  * Recently passes `{ limit: 3, notedOnly: false }` to include one-line captures.
  */
 export async function fetchCaptureNotes(
-  opts: { limit?: number; notedOnly?: boolean; requireContent?: boolean } = {}
+  opts: {
+    limit?: number;
+    notedOnly?: boolean;
+    requireContent?: boolean;
+    /** Only captures that produced a note, memory or reminder (Home ▸ Recently). */
+    requireActions?: boolean;
+  } = {}
 ): Promise<CaptureNote[]> {
   const params = new URLSearchParams();
   if (opts.limit) params.set('limit', String(opts.limit));
   if (opts.notedOnly === false) params.set('noted', 'false');
   if (opts.requireContent) params.set('content', 'true');
+  if (opts.requireActions) params.set('actions', 'true');
   const query = params.toString();
 
   // Each list shape (Home's Recently, the Memory tab) is kept separately.

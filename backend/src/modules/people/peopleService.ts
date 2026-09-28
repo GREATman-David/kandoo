@@ -303,52 +303,71 @@ export async function mergePeople(
     throw new Error('Those people are not yours to merge.');
   }
 
+  // Every link must land on the survivor BEFORE the merged-away entities are
+  // deleted: that delete cascades to their links, so a move that failed
+  // silently would lose them for good (AGENTS §3.7). Supabase returns errors
+  // rather than throwing, so each result is checked and any failure aborts the
+  // merge with nothing deleted.
+  const fail = (step: string, error: unknown): never => {
+    console.error(`Merge ${step} failed:`, error);
+    throw new Error('Failed to merge people.');
+  };
+
   // Move memory links.
-  const { data: mLinks } = await supabase
+  const { data: mLinks, error: mLinksError } = await supabase
     .from('memory_entities')
     .select('memory_id')
     .in('entity_id', others);
+  if (mLinksError) fail('reading memory links', mLinksError);
   const memoryIds = Array.from(
     new Set(((mLinks ?? []) as { memory_id: string }[]).map((r) => r.memory_id))
   );
   if (memoryIds.length > 0) {
-    await supabase
+    const { error: linkError } = await supabase
       .from('memory_entities')
       .upsert(
         memoryIds.map((memory_id) => ({ memory_id, entity_id: survivorId })),
         { onConflict: 'memory_id,entity_id', ignoreDuplicates: true }
       );
-    await supabase
+    if (linkError) fail('moving memory links', linkError);
+
+    const { error: nameError } = await supabase
       .from('memories')
       .update({ person: survivorName })
       .eq('user_id', userId)
       .in('id', memoryIds);
+    if (nameError) fail('renaming on memories', nameError);
   }
 
-  // Move reminder links (skip quietly if the table isn't migrated).
-  try {
-    const { data: rLinks } = await supabase
-      .from('reminder_entities')
-      .select('reminder_id')
-      .in('entity_id', others);
+  // Move reminder links. Only a missing table (migration 004 not applied) is
+  // skipped; any other error aborts like the memory links above.
+  const { data: rLinks, error: rLinksError } = await supabase
+    .from('reminder_entities')
+    .select('reminder_id')
+    .in('entity_id', others);
+  if (rLinksError && rLinksError.code === '42P01') {
+    console.warn('Merge reminder links skipped (migration 004 not applied).');
+  } else {
+    if (rLinksError) fail('reading reminder links', rLinksError);
     const reminderIds = Array.from(
       new Set(((rLinks ?? []) as { reminder_id: string }[]).map((r) => r.reminder_id))
     );
     if (reminderIds.length > 0) {
-      await supabase
+      const { error: linkError } = await supabase
         .from('reminder_entities')
         .upsert(
           reminderIds.map((reminder_id) => ({ reminder_id, entity_id: survivorId })),
           { onConflict: 'reminder_id,entity_id', ignoreDuplicates: true }
         );
-      await supabase
+      if (linkError) fail('moving reminder links', linkError);
+
+      const { error: nameError } = await supabase
         .from('reminders')
         .update({ person: survivorName })
         .eq('user_id', userId)
         .in('id', reminderIds);
+      if (nameError) fail('renaming on reminders', nameError);
     }
-  } catch (error) {
-    console.warn('Merge reminder links skipped (migration 004?):', error);
   }
 
   // Delete the merged-away entities; cascade removes their old links.

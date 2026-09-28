@@ -113,9 +113,20 @@ export type CaptureNote = {
  */
 export async function listCaptureNotes(
   userId: string,
-  opts: { limit?: number; notedOnly?: boolean; requireContent?: boolean } = {}
+  opts: {
+    limit?: number;
+    notedOnly?: boolean;
+    requireContent?: boolean;
+    /** Home ▸ Recently: anything that produced a note, memory OR reminder. */
+    requireActions?: boolean;
+  } = {}
 ): Promise<CaptureNote[]> {
-  const { limit = 30, notedOnly = true, requireContent = false } = opts;
+  const {
+    limit = 30,
+    notedOnly = true,
+    requireContent = false,
+    requireActions = false,
+  } = opts;
   let query = supabase
     .from('captures')
     .select('id, text, note, source, created_at')
@@ -127,7 +138,8 @@ export async function listCaptureNotes(
   // The Memory screen wants everything with substance — a note OR memories —
   // but not bare recall queries. requireContent can't be a SQL filter (it
   // depends on the memory join below), so over-fetch and filter after.
-  const fetchLimit = requireContent ? Math.min(limit * 3, 150) : limit;
+  const filtered = requireContent || requireActions;
+  const fetchLimit = filtered ? Math.min(limit * 3, 150) : limit;
 
   const { data: captures, error } = await query
     .order('created_at', { ascending: false })
@@ -209,6 +221,16 @@ export async function listCaptureNotes(
   if (requireContent) {
     return mapped
       .filter((c) => c.note !== null || c.memories.length > 0)
+      .slice(0, limit);
+  }
+  // Recently: a question or an unparseable remark produced nothing to show, so
+  // it would only clutter the list as "Saved what you said". Reminder-only
+  // captures stay — unlike the Memory screen, Recently is about everything kept.
+  if (requireActions) {
+    return mapped
+      .filter(
+        (c) => c.note !== null || c.memories.length > 0 || c.reminders.length > 0
+      )
       .slice(0, limit);
   }
   return mapped;

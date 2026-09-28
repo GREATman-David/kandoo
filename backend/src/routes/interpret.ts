@@ -329,12 +329,17 @@ router.get('/captures', authenticateRequest, async (req, res) => {
   // Memory passes ?content=true to list everything with a note OR a memory
   // (dropping bare recall queries), regardless of the noted filter.
   const requireContent = req.query.content === 'true';
-  const notedOnly = requireContent ? false : req.query.noted !== 'false';
+  // Recently passes ?actions=true to drop captures that produced nothing
+  // (questions, unparseable remarks). Older app builds omit it and are unchanged.
+  const requireActions = req.query.actions === 'true';
+  const notedOnly =
+    requireContent || requireActions ? false : req.query.noted !== 'false';
   try {
     const captures = await listCaptureNotes(userId, {
       limit,
       notedOnly,
       requireContent,
+      requireActions,
     });
     return res.json({ success: true, captures });
   } catch (error) {

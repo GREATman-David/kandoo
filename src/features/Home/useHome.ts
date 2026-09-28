@@ -149,9 +149,11 @@ export function useHome() {
   // Home looked bare. Best-effort: a failure just leaves Recently empty.
   const loadRecent = useCallback(async () => {
     try {
+      // Only captures that kept something — a question is answered, not listed.
       const captures = await fetchCaptureNotes({
         limit: RECENT_LIMIT,
         notedOnly: false,
+        requireActions: true,
       });
       setRecent(captures.map(toRecentItem));
     } catch (caught) {
