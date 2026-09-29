@@ -1,8 +1,14 @@
 import type { AIProvider } from './aiProvider';
-import { FallbackAIProvider } from './fallbackProvider';
+import { type AiLink, FallbackAIProvider } from './fallbackProvider';
 import { GeminiProvider } from './geminiProvider';
 import { MockAIProvider } from './mockProvider';
 import { OpenAIProvider } from './openaiProvider';
+
+/**
+ * The lighter Gemini model tried when the main one fails. Verified on the
+ * acceptance test (B1: 2 memories + 2 reminders, correct times) in ~5 s.
+ */
+const DEFAULT_GEMINI_FALLBACK_MODEL = 'gemini-3.1-flash-lite';
 
 /**
  * Provider selection lives here now. The old `aiProviderFactory.ts` and
@@ -19,18 +25,21 @@ function createAIProvider(): AIProvider {
     case 'mock':
       return new MockAIProvider();
     case 'openai':
-      return new FallbackAIProvider(new OpenAIProvider(), null, {
-        primary: 'OpenAI',
-        backup: null,
-      });
+      return new FallbackAIProvider([{ name: 'OpenAI', provider: new OpenAIProvider() }]);
     case 'gemini': {
-      // OpenAI backs Gemini up for understanding and answers (never for
-      // embeddings) when both its key and model are configured.
-      const hasBackup = !!process.env.OPENAI_API_KEY && !!process.env.OPENAI_MODEL;
-      return new FallbackAIProvider(new GeminiProvider(), hasBackup ? new OpenAIProvider() : null, {
-        primary: 'Gemini',
-        backup: hasBackup ? 'OpenAI' : null,
-      });
+      // The chain: the main Gemini model, then a lighter Gemini model (its own
+      // quota and capacity — it kept answering through a 3.x Flash overload),
+      // then OpenAI when its key and model are configured. Set
+      // GEMINI_FALLBACK_MODEL=none to drop the lighter model.
+      const links: AiLink[] = [{ name: 'Gemini', provider: new GeminiProvider() }];
+      const lite = process.env.GEMINI_FALLBACK_MODEL ?? DEFAULT_GEMINI_FALLBACK_MODEL;
+      if (lite && lite !== 'none' && lite !== process.env.GEMINI_MODEL) {
+        links.push({ name: `Gemini (${lite})`, provider: new GeminiProvider(lite) });
+      }
+      if (process.env.OPENAI_API_KEY && process.env.OPENAI_MODEL) {
+        links.push({ name: 'OpenAI', provider: new OpenAIProvider() });
+      }
+      return new FallbackAIProvider(links);
     }
     default:
       throw new Error(

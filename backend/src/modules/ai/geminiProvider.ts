@@ -115,6 +115,27 @@ function isRetryable(error: unknown): boolean {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** A 5xx: the model is overloaded or failing, not refusing this key. */
+function isOverload(error: unknown): boolean {
+  const status = (error as { status?: unknown })?.status;
+  if (status === 500 || status === 503) return true;
+  const message = (error as { message?: unknown })?.message;
+  return (
+    typeof message === 'string' &&
+    (message.includes('503') || message.includes('UNAVAILABLE') || message.includes('INTERNAL'))
+  );
+}
+
+/** A 429 (rate or quota limit), as opposed to a 5xx overload. */
+function isRateLimit(error: unknown): boolean {
+  const status = (error as { status?: unknown })?.status;
+  const message = (error as { message?: unknown })?.message;
+  return (
+    status === 429 ||
+    (typeof message === 'string' && (message.includes('429') || message.includes('RESOURCE_EXHAUSTED')))
+  );
+}
+
 /**
  * A per-minute limit clears in under a minute; a per-day limit clears at
  * midnight Pacific. Retrying the latter only burns wall-clock time and makes
@@ -159,6 +180,11 @@ async function withBackoff<T>(
 
       lastError = error;
       if (attempt === attempts - 1) break;
+      // An overloaded model (503/500) is not retried on the same key: every
+      // attempt counts against the free daily quota (five retries across five
+      // keys spent a whole day's allowance in one outage), and a fresh attempt
+      // on the NEXT key lands on different capacity — see withKeyFailover.
+      if (!isRateLimit(error)) break;
 
       // Honour the server's stated wait when it gives one; otherwise 1s, 2s,
       // 4s... Jitter keeps parallel callers from retrying in lockstep.
@@ -191,20 +217,25 @@ async function withKeyFailover<T>(operation: () => Promise<T>): Promise<T> {
     try {
       return await withBackoff(operation);
     } catch (error) {
-      if (!isDailyQuota(error)) throw error;
+      // Per-day quota: this key is spent until midnight Pacific. Overload
+      // (5xx): the same request often succeeds on another key's capacity.
+      // Either way, move on to the next key; anything else is a real error.
+      if (!isDailyQuota(error) && !isOverload(error)) throw error;
       lastError = error;
       activeKeyIndex = (activeKeyIndex + 1) % total;
       if (process.env.NODE_ENV !== 'production') {
         console.debug(
           `Gemini key index ${activeKeyIndex} now active ` +
-            `(previous hit its per-day quota)`
+            `(previous ${isDailyQuota(error) ? 'hit its per-day quota' : 'was overloaded'})`
         );
       }
     }
   }
 
   throw new Error(
-    `All ${total} Gemini key(s) hit their per-day quota; resets midnight Pacific.`,
+    isDailyQuota(lastError)
+      ? `All ${total} Gemini key(s) hit their per-day quota; resets midnight Pacific.`
+      : `Gemini is overloaded on all ${total} key(s).`,
     { cause: lastError }
   );
 }
@@ -224,8 +255,11 @@ function normalise(vector: number[]): number[] {
 }
 
 export class GeminiProvider implements AIProvider {
+  /** `model` overrides GEMINI_MODEL — the lighter fallback model uses this. */
+  constructor(private readonly modelOverride?: string) {}
+
   private get model(): string {
-    return requiredEnv('GEMINI_MODEL');
+    return this.modelOverride ?? requiredEnv('GEMINI_MODEL');
   }
 
   async interpret(

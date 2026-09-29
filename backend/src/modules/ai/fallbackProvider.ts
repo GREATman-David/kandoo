@@ -39,49 +39,77 @@ export function withDeadline<T>(work: Promise<T>, ms: number, label: string): Pr
 /**
  * Time budgets. The app waits 45 s for an AI request (AI_TIMEOUT_MS on the
  * device), so the server must answer — with a result or a clear "busy" — well
- * inside that: primary + backup + the database work around them.
+ * inside that: every model in the chain, plus the database work around them.
+ * The first link gets a short leash (when it is healthy it answers in a few
+ * seconds; when it is overloaded, waiting longer only delays the fallback);
+ * the rest share what is left, capped per link.
  */
-const PRIMARY_MS_WITH_BACKUP = 15_000;
-const PRIMARY_MS_ALONE = 22_000;
-const BACKUP_MS = 18_000;
+const CHAIN_BUDGET_MS = 36_000;
+const FIRST_LINK_MS = 12_000;
+const LINK_CAP_MS = 22_000;
+/**
+ * A model that just failed is skipped for this long, so the next request goes
+ * straight to the one that is working instead of spending its budget
+ * rediscovering the outage. It is tried again afterwards, and it is never
+ * skipped when every model is cooling down.
+ */
+const COOL_DOWN_MS = 2 * 60_000;
 const EMBED_MS = 10_000;
 
+/** One model in the chain, with a name for the logs. */
+export type AiLink = { name: string; provider: AIProvider };
+
 /**
- * One AI in front of another. Gemini is the primary; when it fails — overload
+ * A chain of models, tried in order. Gemini is first; when it fails — overload
  * (503), quota (429 / per-day), a timeout, or a bad response — the same request
- * goes to the backup (OpenAI) with the same shared prompts, so behaviour is the
- * same whichever answers. With no backup configured it still enforces the time
- * budget and fails with AiUnavailableError instead of hanging.
+ * goes to the next link: a lighter Gemini model (its own quota and capacity),
+ * then OpenAI. Every link uses the same shared prompts and the same Zod
+ * contract, so behaviour is the same whichever answers. When every link fails
+ * it throws AiUnavailableError — never a hang.
  *
- * Embeddings are NEVER failed over. Vectors from different providers are not
+ * Embeddings are NEVER failed over. Vectors from different models are not
  * comparable (AGENTS §4); mixing them would quietly break recall. They stay on
- * the primary, and every embedding caller already copes with a failure.
+ * the first link, and every embedding caller already copes with a failure.
  *
- * The recall answer degrades one step further: with both models down it is
+ * The recall answer degrades one step further: with every model down it is
  * written from the matched memories directly, so a question is still answered.
  */
 export class FallbackAIProvider implements AIProvider {
-  constructor(
-    private readonly primary: AIProvider,
-    private readonly backup: AIProvider | null,
-    private readonly names: { primary: string; backup: string | null }
-  ) {}
+  private readonly failedAt = new Map<string, number>();
+
+  constructor(private readonly links: AiLink[]) {
+    if (links.length === 0) throw new Error('FallbackAIProvider needs at least one model.');
+  }
+
+  /** Time for the link at `position` in this request's order. */
+  private budgetFor(position: number, count: number): number {
+    if (count === 1) return LINK_CAP_MS;
+    if (position === 0) return FIRST_LINK_MS;
+    return Math.min(LINK_CAP_MS, Math.floor((CHAIN_BUDGET_MS - FIRST_LINK_MS) / (count - 1)));
+  }
+
+  private coolingDown(link: AiLink): boolean {
+    const at = this.failedAt.get(link.name);
+    return at !== undefined && Date.now() - at < COOL_DOWN_MS;
+  }
 
   private async run<T>(label: string, call: (provider: AIProvider) => Promise<T>): Promise<T> {
-    const primaryMs = this.backup ? PRIMARY_MS_WITH_BACKUP : PRIMARY_MS_ALONE;
-    try {
-      return await withDeadline(call(this.primary), primaryMs, `${this.names.primary} ${label}`);
-    } catch (primaryError) {
-      console.error(`${this.names.primary} ${label} failed:`, primaryError);
-      if (!this.backup) throw new AiUnavailableError();
-      console.warn(`Falling back to ${this.names.backup} for ${label}.`);
+    const ready = this.links.filter((link) => !this.coolingDown(link));
+    const order = ready.length > 0 ? ready : this.links;
+    for (const [index, link] of order.entries()) {
       try {
-        return await withDeadline(call(this.backup), BACKUP_MS, `${this.names.backup} ${label}`);
-      } catch (backupError) {
-        console.error(`${this.names.backup} ${label} failed too:`, backupError);
-        throw new AiUnavailableError();
+        const ms = this.budgetFor(index, order.length);
+        const result = await withDeadline(call(link.provider), ms, `${link.name} ${label}`);
+        this.failedAt.delete(link.name);
+        return result;
+      } catch (error) {
+        console.error(`${link.name} ${label} failed:`, error);
+        this.failedAt.set(link.name, Date.now());
+        const next = order[index + 1];
+        if (next) console.warn(`Falling back to ${next.name} for ${label}.`);
       }
     }
+    throw new AiUnavailableError();
   }
 
   interpret(text: string, context: InterpretContext): Promise<KandooInterpretation> {
@@ -107,7 +135,8 @@ export class FallbackAIProvider implements AIProvider {
    * vector" (backfilled later) or "lexical-only recall".
    */
   embed(texts: string[], taskType?: EmbedTaskType): Promise<number[][]> {
-    return withDeadline(this.primary.embed(texts, taskType), EMBED_MS, `${this.names.primary} embed`);
+    const first = this.links[0];
+    return withDeadline(first.provider.embed(texts, taskType), EMBED_MS, `${first.name} embed`);
   }
 }
 

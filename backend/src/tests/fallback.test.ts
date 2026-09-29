@@ -29,44 +29,57 @@ function stub(overrides: Partial<AIProvider>): AIProvider {
   };
 }
 
-const NAMES = { primary: 'Primary', backup: 'Backup' };
 
 describe('FallbackAIProvider', () => {
   it('uses the primary when it answers', async () => {
-    const provider = new FallbackAIProvider(
-      stub({ interpret: async () => ({ ...OK, summary: 'primary' }) }),
-      stub({ interpret: async () => ({ ...OK, summary: 'backup' }) }),
-      NAMES
-    );
+    const provider = new FallbackAIProvider([
+      { name: 'Primary', provider: stub({ interpret: async () => ({ ...OK, summary: 'primary' }) }) },
+      { name: 'Backup', provider: stub({ interpret: async () => ({ ...OK, summary: 'backup' }) }) },
+    ]);
     const result = await provider.interpret('hi', { clientTime: '', timezone: 'UTC' });
     assert.equal(result.summary, 'primary');
   });
 
   it('falls back to the backup when the primary fails', async () => {
-    const provider = new FallbackAIProvider(
-      stub({}),
-      stub({ interpret: async () => ({ ...OK, summary: 'backup' }) }),
-      NAMES
-    );
+    const provider = new FallbackAIProvider([
+      { name: 'Primary', provider: stub({}) },
+      { name: 'Backup', provider: stub({ interpret: async () => ({ ...OK, summary: 'backup' }) }) },
+    ]);
     const result = await provider.interpret('hi', { clientTime: '', timezone: 'UTC' });
     assert.equal(result.summary, 'backup');
   });
 
+  it('walks the whole chain: main model, lighter model, then OpenAI', async () => {
+    const provider = new FallbackAIProvider([
+      { name: 'Gemini', provider: stub({}) },
+      { name: 'Gemini lite', provider: stub({}) },
+      { name: 'OpenAI', provider: stub({ interpret: async () => ({ ...OK, summary: 'third' }) }) },
+    ]);
+    const result = await provider.interpret('hi', { clientTime: '', timezone: 'UTC' });
+    assert.equal(result.summary, 'third');
+  });
+
   it('reports AiUnavailableError when every provider fails', async () => {
-    const provider = new FallbackAIProvider(stub({}), stub({}), NAMES);
+    const provider = new FallbackAIProvider([
+      { name: 'Primary', provider: stub({}) },
+      { name: 'Backup', provider: stub({}) },
+    ]);
     await assert.rejects(
       provider.interpret('hi', { clientTime: '', timezone: 'UTC' }),
       AiUnavailableError
     );
   });
 
-  it('reports AiUnavailableError with no backup configured', async () => {
-    const provider = new FallbackAIProvider(stub({}), null, { primary: 'Primary', backup: null });
+  it('reports AiUnavailableError with a single model', async () => {
+    const provider = new FallbackAIProvider([{ name: 'Primary', provider: stub({}) }]);
     await assert.rejects(provider.writeNote('text'), AiUnavailableError);
   });
 
   it('still answers a recall question from the matches when every model is down', async () => {
-    const provider = new FallbackAIProvider(stub({}), stub({}), NAMES);
+    const provider = new FallbackAIProvider([
+      { name: 'Primary', provider: stub({}) },
+      { name: 'Backup', provider: stub({}) },
+    ]);
     const memories: RecallMemory[] = [
       { id: '1', source: 'memory', content: 'Ada’s pottery class moved to Saturday.', person: 'Ada', location: null, due_at: null, created_at: '' },
     ];
@@ -76,16 +89,18 @@ describe('FallbackAIProvider', () => {
 
   it('never fails embeddings over to the backup (vectors must not mix)', async () => {
     let backupEmbedded = false;
-    const provider = new FallbackAIProvider(
-      stub({}),
-      stub({
-        embed: async () => {
-          backupEmbedded = true;
-          return [[1]];
-        },
-      }),
-      NAMES
-    );
+    const provider = new FallbackAIProvider([
+      { name: 'Primary', provider: stub({}) },
+      {
+        name: 'Backup',
+        provider: stub({
+          embed: async () => {
+            backupEmbedded = true;
+            return [[1]];
+          },
+        }),
+      },
+    ]);
     await assert.rejects(provider.embed(['x'], 'document'));
     assert.equal(backupEmbedded, false);
   });
