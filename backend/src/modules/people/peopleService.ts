@@ -45,7 +45,7 @@ export type PersonDetail = {
   notes: { id: string; title: string | null; created_at: string }[];
 };
 
-async function memoriesForEntities(
+export async function memoriesForEntities(
   userId: string,
   entityIds: string[]
 ): Promise<Map<string, MemoryRow[]>> {

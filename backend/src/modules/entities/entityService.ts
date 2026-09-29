@@ -11,6 +11,8 @@ export type Entity = {
   lat: number | null;
   lng: number | null;
   radius_m: number | null;
+  /** Places only: the traced shape, [[lat, lng], ...] (migration 007). */
+  area?: [number, number][] | null;
   created_at: string;
 };
 
@@ -124,28 +126,5 @@ export async function linkReminderToEntities(
 
   if (error) {
     console.error('Reminder/entity link failed:', error);
-  }
-}
-
-/**
- * Attach coordinates to a place entity. Called once the device has geocoded a
- * placeHint, or when the user confirms "yes, this is the place I meant".
- */
-export async function setPlaceCoordinates(
-  userId: string,
-  entityId: string,
-  lat: number,
-  lng: number,
-  radiusMetres = 120
-): Promise<void> {
-  const { error } = await supabase
-    .from('entities')
-    .update({ lat, lng, radius_m: radiusMetres })
-    .eq('id', entityId)
-    .eq('user_id', userId)
-    .eq('kind', 'place');
-
-  if (error) {
-    console.error('Place coordinate update failed:', error);
   }
 }

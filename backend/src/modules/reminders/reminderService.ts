@@ -30,7 +30,24 @@ export type CreatedReminder = {
   capture_id?: string | null;
   /** Weekdays it repeats on (0 = Sunday … 6 = Saturday); null = once. */
   repeat_days?: number[] | null;
+  /** Place reminders: fire on arriving (default) or leaving. */
+  place_trigger?: PlaceTrigger;
+  /** Place reminders: an arrival before this instant does not fire it. */
+  not_before?: string | null;
 };
+
+export type PlaceTrigger = 'arrive' | 'leave';
+
+/** Every column a reminder is returned with (migration 007 adds the last two). */
+const REMINDER_BASE_COLUMNS =
+  'id, task, person, due_at, place_hint, place_id, insistent, status, created_at, repeat_days, not_before, place_trigger';
+
+/** A valid ISO instant, or null. Never lets a malformed value reach the DB. */
+function safeInstant(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
 
 /**
  * Reminders are created as `pending`. Nothing is scheduled until the device
@@ -99,12 +116,16 @@ export async function createReminder(
       reminder_time: dueAt,
       place_hint: action.placeHint,
       place_id: placeId,
+      // Only meaningful for a place reminder (no time of its own). A timed
+      // reminder that also names a place fires on its time, as before.
+      place_trigger: !dueAt && action.placeHint ? action.placeTrigger : 'arrive',
+      not_before: !dueAt && action.placeHint ? safeInstant(action.notBefore) : null,
       insistent: action.insistent,
       status: 'pending',
       embedding,
     })
     .select(
-      'id, task, person, due_at, place_hint, place_id, insistent, status, created_at, repeat_days'
+      REMINDER_BASE_COLUMNS
     )
     .single();
 
@@ -191,7 +212,7 @@ export async function confirmReminder(
     .eq('id', reminderId)
     .eq('user_id', userId)
     .select(
-      'id, task, person, due_at, place_hint, place_id, insistent, status, created_at, repeat_days'
+      REMINDER_BASE_COLUMNS
     )
     .single();
 
@@ -220,8 +241,7 @@ export async function setReminderStatus(
   }
 }
 
-const REMINDER_COLUMNS =
-  'id, task, person, due_at, place_hint, place_id, insistent, status, created_at, capture_id, repeat_days';
+const REMINDER_COLUMNS = `${REMINDER_BASE_COLUMNS}, capture_id`;
 
 /**
  * The Reminders tab. Returns three lists; the DEVICE splits `active` into Today
@@ -417,7 +437,7 @@ export async function listActiveReminders(userId: string) {
   const { data, error } = await supabase
     .from('reminders')
     .select(
-      'id, task, person, due_at, place_hint, place_id, insistent, status, created_at, repeat_days'
+      REMINDER_BASE_COLUMNS
     )
     .eq('user_id', userId)
     .in('status', ['pending', 'confirmed'])

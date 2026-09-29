@@ -4,6 +4,7 @@ import express from 'express';
 
 import authPagesRouter from './routes/authPages';
 import interpretRouter from './routes/interpret';
+import placesRouter from './routes/places';
 
 const app = express();
 
@@ -39,6 +40,9 @@ app.use('/', authPagesRouter);
 
 // /interpret, /reminders/:id/confirm, /reminders/:id/dismiss, /reminders/active
 app.use('/', interpretRouter);
+
+// /places — the areas the phone watches (it, not the server, does the watching).
+app.use('/', placesRouter);
 
 /**
  * The 30-second setInterval scheduler is gone.

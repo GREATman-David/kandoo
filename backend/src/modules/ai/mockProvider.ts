@@ -62,6 +62,8 @@ export class MockAIProvider implements AIProvider {
               .trim() || sentence,
             dueAt: this.guessTime(sentence, context),
             placeHint: null,
+            placeTrigger: 'arrive',
+            notBefore: null,
             people: [],
             insistent: /\b(alarm|wake me|urgent)\b/i.test(sentence),
           });

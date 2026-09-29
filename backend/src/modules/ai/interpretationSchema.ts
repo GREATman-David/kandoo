@@ -25,6 +25,16 @@ export const reminderActionSchema = z
     dueAt: isoDateTime.nullable(),
     /** Raw place phrase as spoken, e.g. "the engineering department". */
     placeHint: z.string().nullable(),
+    /**
+     * Place reminders only: fires on arriving at (default) or leaving the place.
+     * Optional so output from before places existed still validates.
+     */
+    placeTrigger: z.enum(['arrive', 'leave']).default('arrive'),
+    /**
+     * Place reminders only: the earliest instant it may fire, for "when I get
+     * to school TOMORROW" (start of that day, local). Null = any arrival.
+     */
+    notBefore: isoDateTime.nullable().default(null),
     people: z.array(z.string()).default([]),
     /** True only for alarms / wake-ups / explicit urgency. */
     insistent: z.boolean().default(false),
@@ -102,7 +112,8 @@ export const KANDOO_JSON_SHAPE = `{
   "note": { "title": string, "body": string } | null,
   "actions": [
     { "kind": "reminder", "task": string, "dueAt": string|null,
-      "placeHint": string|null, "people": string[], "insistent": boolean }
+      "placeHint": string|null, "placeTrigger": "arrive"|"leave",
+      "notBefore": string|null, "people": string[], "insistent": boolean }
     | { "kind": "memory", "content": string, "people": string[],
         "placeHint": string|null, "topics": string[] }
     | { "kind": "recall", "query": string,

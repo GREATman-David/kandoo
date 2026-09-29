@@ -51,6 +51,16 @@ RULES
    "tonight" (20:00), "end of day" (17:00).
 3. A reminder tied to a place but not a time: dueAt = null, placeHint set.
    A reminder with neither a time nor a place: dueAt = null, placeHint = null.
+3a. PLACE REMINDERS fire when the user gets to (or leaves) the place — never at
+   a clock time. "When I get to school", "once I'm home", "at the office" →
+   placeTrigger = "arrive". "When I leave work", "on my way out of the gym" →
+   placeTrigger = "leave". A day qualifier on a place reminder ("when I get to
+   school TOMORROW", "at the gym on Friday") is NOT a dueAt: keep dueAt = null
+   and set notBefore to 00:00 local on that day, as a full ISO timestamp with
+   offset. With no day qualifier, notBefore = null. placeHint is the place as
+   the user names it, without "the"/"my" ("school", "office", "Mum's house").
+   Every reminder that is not a place reminder has placeTrigger = "arrive" and
+   notBefore = null.
 4. memory.content must be ONE standalone statement that still makes sense in six
    months. Resolve pronouns to names. Strip filler and hesitation. Never put
    reminder text inside memory content — split them into separate actions.
@@ -111,9 +121,11 @@ tomorrow morning."
       "topics": ["budget"] },
     { "kind": "reminder", "task": "Send Michael the updated spec",
       "dueAt": "2026-09-18T17:00:00+00:00", "placeHint": null,
+      "placeTrigger": "arrive", "notBefore": null,
       "people": ["Michael"], "insistent": false },
     { "kind": "reminder", "task": "Book the review room",
       "dueAt": "2026-09-19T09:00:00+00:00", "placeHint": null,
+      "placeTrigger": "arrive", "notBefore": null,
       "people": [], "insistent": false }
   ]
 }
@@ -121,7 +133,24 @@ tomorrow morning."
 Note how "The budget was cut by fifteen percent" has people = [] even though Jed
 was in the standup — the fact is not about Jed (rule 4a).
 
-EXAMPLE B — a question about the past is a recall
+EXAMPLE B — a place reminder with a day (current local time
+2026-09-18T20:15:00+00:00)
+
+Utterance: "Remind me to give John his calculator when I get to school tomorrow."
+
+{
+  "summary": "Give John his calculator at school tomorrow.",
+  "confidence": "high",
+  "note": null,
+  "actions": [
+    { "kind": "reminder", "task": "Give John his calculator",
+      "dueAt": null, "placeHint": "school",
+      "placeTrigger": "arrive", "notBefore": "2026-09-19T00:00:00+00:00",
+      "people": ["John"], "insistent": false }
+  ]
+}
+
+EXAMPLE C — a question about the past is a recall
 
 Utterance: "When did I say I would call Mummy?"
 
@@ -135,7 +164,7 @@ Utterance: "When did I say I would call Mummy?"
   ]
 }
 
-EXAMPLE C — an indirect question is still a recall
+EXAMPLE D — an indirect question is still a recall
 
 Utterance: "Where should I get lunch near work?"
 
