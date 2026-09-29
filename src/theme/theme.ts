@@ -61,6 +61,17 @@ export const colors = {
   markCore: '#DA8F00',
   /** Pale gold — the light squares of the reminder alert's border and its badge. */
   markPale: '#FCE9A6',
+
+  // The Places map, recoloured from OpenFreeMap's light style so the map sits
+  // on the same cream as every other screen. Land is `base`.
+  /** Water — a cool-leaning sand, so it reads as water without going blue. */
+  mapWater: '#E3DACB',
+  /** Parks, woods and fields. */
+  mapGreen: '#E9E6D2',
+  /** Buildings, one step darker than land. */
+  mapBuilding: '#EDE3D5',
+  /** Map labels — muted ink, never competing with the user's own words. */
+  mapLabel: '#8C7B6D',
 } as const;
 
 export type ColorName = keyof typeof colors;

@@ -54,6 +54,14 @@ export default function AppTabs() {
         />
       </NativeTabs.Trigger>
 
+      <NativeTabs.Trigger name="places">
+        <NativeTabs.Trigger.Label>Places</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          src={require('@/assets/images/tabIcons/places.png')}
+          renderingMode="template"
+        />
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="reminders">
         <NativeTabs.Trigger.Label>Reminders</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon

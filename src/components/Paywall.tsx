@@ -141,6 +141,7 @@ export function Paywall({ visible, onClose, onPurchased }: PaywallProps) {
             <Text style={styles.blurb}>
               Free Kandoo remembers the last ten days. Pro holds your whole
               history — every memory you’ve ever given it, whenever it matters.
+              And with Places, it reminds you the moment you arrive.
             </Text>
 
             {annual ? (

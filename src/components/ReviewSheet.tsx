@@ -4,9 +4,13 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { MemoryCard, type MemoryCardChip } from '@/components/MemoryCard';
 import { MemoryDetail, type MemoryDetailTarget } from '@/components/MemoryDetail';
 import { ReminderDetail } from '@/components/ReminderDetail';
+import { router } from 'expo-router';
+
 import {
   confirmReminder,
   fetchCaptureNote,
+  fetchPlaces,
+  logFailure,
   type CaptureNote,
   type CreatedMemory,
   type CreatedReminder,
@@ -136,6 +140,31 @@ export function ReviewSheet({
   useEffect(() => {
     if (visible) setItems(results);
   }, [visible, results]);
+
+  // Place reminders whose place has never been drawn can't fire yet: offer to
+  // draw it right from the card ("Where is school?").
+  const [drawnPlaceIds, setDrawnPlaceIds] = useState<Set<string> | null>(null);
+  const hasPlaceReminder = results.some(
+    (r) => r.kind === 'reminder' && r.status === 'ok' && !r.reminder.due_at && !!r.reminder.place_id
+  );
+  useEffect(() => {
+    if (!visible || !hasPlaceReminder) return;
+    let active = true;
+    fetchPlaces()
+      .then((places) => {
+        if (active) setDrawnPlaceIds(new Set(places.filter((p) => p.center).map((p) => p.id)));
+      })
+      .catch((error) => logFailure('Loading places for review failed:', error));
+    return () => {
+      active = false;
+    };
+  }, [visible, hasPlaceReminder]);
+
+  const drawPlace = (name: string) => {
+    onClose();
+    // Cast: typed routes regenerate only when Metro runs.
+    router.navigate({ pathname: '/places' as never, params: { draw: name } });
+  };
 
   async function reload() {
     try {
@@ -267,13 +296,19 @@ export function ReviewSheet({
                       const isConfirmed =
                         confirmedIds.has(id) || item.reminder.status === 'confirmed';
                       const guessedTime = confidence === 'low' && !!item.reminder.due_at;
+                      const placeName =
+                        !item.reminder.due_at && item.reminder.place_id ? item.reminder.place_hint : null;
+                      const undrawn =
+                        !!placeName && drawnPlaceIds !== null && !drawnPlaceIds.has(item.reminder.place_id!);
                       return (
+                        <View key={id}>
                         <MemoryCard
-                          key={id}
                           state={isConfirmed ? 'confirmed' : 'pending'}
                           label={
                             isConfirmed
-                              ? 'Scheduled'
+                              ? placeName
+                                ? `Waiting at ${placeName}`
+                                : 'Scheduled'
                               : guessedTime
                                 ? 'Check the time'
                                 : 'Needs review'
@@ -291,6 +326,18 @@ export function ReviewSheet({
                                   setEditingReminder({ ...item.reminder, capture_id: null })
                           }
                         />
+                        {undrawn && placeName ? (
+                          <Pressable
+                            style={styles.placeLink}
+                            onPress={() => drawPlace(placeName)}
+                            accessibilityRole="button"
+                          >
+                            <Text style={styles.placeLinkText}>
+                              Where is {placeName}? <Text style={styles.placeLinkAction}>Draw it</Text>
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                        </View>
                       );
                     })}
                   </>
@@ -436,6 +483,13 @@ const styles = StyleSheet.create({
     ...text.memory,
     color: colors.ink,
   },
+  placeLink: {
+    marginTop: -spacing.space1,
+    marginBottom: spacing.space3,
+    paddingHorizontal: spacing.space2,
+  },
+  placeLinkText: { ...text.caption, color: colors.inkMuted },
+  placeLinkAction: { ...text.caption, fontFamily: text.bodyStrong.fontFamily, color: colors.accent },
   groupHeading: {
     ...text.label,
     color: colors.inkMuted,

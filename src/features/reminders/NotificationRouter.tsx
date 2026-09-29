@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
 import { AppState, Linking } from 'react-native';
@@ -101,6 +102,13 @@ export function NotificationRouter() {
 
     const next = alertFrom(response.notification);
     if (next) setAlert(next);
+
+    // A Kandoo Moment: open the place it is about.
+    const data = response.notification.request.content.data;
+    if (data?.kandooMoment === true && typeof data.placeId === 'string') {
+      // Cast: typed routes regenerate only when Metro runs.
+      router.navigate({ pathname: '/places' as never, params: { open: data.placeId } });
+    }
 
     Notifications.clearLastNotificationResponseAsync().catch((error: unknown) => {
       console.warn('Clearing the handled notification failed:', error);

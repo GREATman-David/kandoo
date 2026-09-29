@@ -1,0 +1,635 @@
+import {
+  Camera,
+  GeoJSONSource,
+  Layer,
+  // Never bind `Map` at module scope: it shadows the JS global that Babel's
+  // helpers use (the same trap as `Symbol` — see AGENTS.md appendix).
+  Map as MapView,
+  UserLocation,
+  type CameraRef,
+  type MapRef,
+} from '@maplibre/maplibre-react-native';
+import * as Location from 'expo-location';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  Image,
+  Keyboard,
+  Modal,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type GestureResponderEvent,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useKandooMapStyle } from '@/features/places/mapStyle';
+import { placeBounds, placeFeature } from '@/features/places/placeShapes';
+import { searchPlaces, type SearchResult } from '@/features/places/searchPlaces';
+import {
+  ApiError,
+  createPlace,
+  isProRequired,
+  logFailure,
+  updatePlace,
+  userMessage,
+  type PlaceDrawing,
+  type PlaceSummary,
+} from '@/services/interpretationService';
+import { requestMapPermission } from '@/services/places/placePermissions';
+import { requestPlaceResync } from '@/services/places/placeStore';
+import { colors, fontFamily, radius, spacing, text, withOpacity } from '@/theme/theme';
+import { placeGeometry, type LatLng, type PlaceGeometry } from '@/utils/geo';
+
+/**
+ * Drawing a place: find it, freeze the map, trace around it with a finger,
+ * name it. Any shape — the phone covers it with circles to watch (geo.ts).
+ * A tap instead of a trace drops a plain circle there.
+ *
+ *   browse → trace → review → name → saved
+ */
+
+const ICONS = {
+  back: require('@/assets/images/icons/chevron-left.png'),
+  search: require('@/assets/images/icons/search.png'),
+  clear: require('@/assets/images/icons/x.png'),
+};
+
+/** A trace shorter than this (px) was a tap: drop a circle there. */
+const TAP_PX = 24;
+/** Minimum spacing between trace points kept on screen (px). */
+const TRACE_STEP_PX = 3;
+/** Points sent for unprojection; plenty for any shape a finger draws. */
+const MAX_TRACE_POINTS = 150;
+/** Where the map opens with no location and nothing to show: Accra. */
+const FALLBACK_CENTER: [number, number] = [-0.187, 5.6037];
+
+type Step = 'browse' | 'trace' | 'review' | 'name';
+type Point = { x: number; y: number };
+
+export type PlaceDrawerProps = {
+  visible: boolean;
+  onClose: () => void;
+  onSaved: (place: PlaceSummary) => void;
+  /** Free user tried to save: open the paywall. */
+  onNeedPro: () => void;
+  /** Redrawing an existing place (keeps its name). */
+  place?: Pick<PlaceSummary, 'id' | 'name' | 'center' | 'radiusM' | 'area'> | null;
+  /** A name to start with — "school", from a reminder waiting on it. */
+  suggestedName?: string | null;
+  /** Places Kandoo has heard of but that aren't drawn yet: offered as names. */
+  knownNames?: string[];
+};
+
+export function PlaceDrawer({
+  visible,
+  onClose,
+  onSaved,
+  onNeedPro,
+  place,
+  suggestedName,
+  knownNames = [],
+}: PlaceDrawerProps) {
+  const insets = useSafeAreaInsets();
+  const mapStyle = useKandooMapStyle();
+  const mapRef = useRef<MapRef>(null);
+  const cameraRef = useRef<CameraRef>(null);
+
+  const [step, setStep] = useState<Step>('browse');
+  const [trace, setTrace] = useState<Point[]>([]);
+  const [drawn, setDrawn] = useState<PlaceGeometry | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [here, setHere] = useState<LatLng | null>(null);
+
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const existing: PlaceGeometry | null =
+    place?.center && place.radiusM ? { center: place.center, radiusM: place.radiusM, area: place.area } : null;
+
+  // Fresh every time it opens.
+  useEffect(() => {
+    if (!visible) return;
+    setStep('browse');
+    setTrace([]);
+    setDrawn(null);
+    setError(null);
+    setQuery('');
+    setResults([]);
+    setName(place?.name ?? suggestedName ?? '');
+    setSaving(false);
+
+    let active = true;
+    void (async () => {
+      // While-in-use is enough to show the dot and centre on it; declining
+      // still leaves search.
+      if (!(await requestMapPermission())) return;
+      const last = await Location.getLastKnownPositionAsync().catch(() => null);
+      const position = last ?? (await Location.getCurrentPositionAsync().catch(() => null));
+      if (!active || !position) return;
+      const at = { lat: position.coords.latitude, lng: position.coords.longitude };
+      setHere(at);
+      if (!existing) {
+        cameraRef.current?.flyTo({ center: [at.lng, at.lat], zoom: 16, duration: 800 });
+      }
+    })();
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  // ---- search -------------------------------------------------------------
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setResults([]);
+      return;
+    }
+    let active = true;
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const found = await searchPlaces(q, here);
+        if (active) setResults(found);
+      } catch (caught) {
+        logFailure('Place search failed:', caught);
+        if (active) setResults([]);
+      } finally {
+        if (active) setSearching(false);
+      }
+    }, 450);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [query, here]);
+
+  const goTo = (result: SearchResult) => {
+    Keyboard.dismiss();
+    setResults([]);
+    setQuery(result.name);
+    if (!name.trim() && !place) setName(result.name);
+    if (result.bounds) {
+      cameraRef.current?.fitBounds(result.bounds, {
+        padding: { top: 140, bottom: 200, left: 40, right: 40 },
+        duration: 900,
+      });
+    } else {
+      cameraRef.current?.flyTo({ center: [result.center.lng, result.center.lat], zoom: 17, duration: 900 });
+    }
+  };
+
+  const goHere = () => {
+    if (here) cameraRef.current?.flyTo({ center: [here.lng, here.lat], zoom: 17, duration: 700 });
+  };
+
+  // ---- tracing --------------------------------------------------------------
+
+  const traceRef = useRef<Point[]>([]);
+  const finishTrace = async (points: Point[]) => {
+    const map = mapRef.current;
+    if (!map || points.length === 0) return;
+
+    let length = 0;
+    for (let i = 1; i < points.length; i++) {
+      length += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    }
+
+    try {
+      let geometry: ReturnType<typeof placeGeometry>;
+      if (length < TAP_PX) {
+        const [lng, lat] = await map.unproject([points[0].x, points[0].y]);
+        geometry = placeGeometry({ center: { lat, lng } });
+      } else {
+        const step = Math.max(1, Math.ceil(points.length / MAX_TRACE_POINTS));
+        const sampled = points.filter((_, i) => i % step === 0);
+        const coords = await Promise.all(sampled.map((p) => map.unproject([p.x, p.y])));
+        geometry = placeGeometry({ area: coords.map(([lng, lat]) => ({ lat, lng })) });
+      }
+
+      if ('error' in geometry) {
+        setError(geometry.error);
+        setTrace([]);
+        return;
+      }
+      setDrawn(geometry);
+      setTrace([]);
+      setError(null);
+      setStep('review');
+    } catch (caught) {
+      logFailure('Reading the traced shape failed:', caught);
+      setError('That didn’t take. Try drawing it again.');
+      setTrace([]);
+    }
+  };
+
+  const responder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (e: GestureResponderEvent) => {
+          const p = { x: e.nativeEvent.locationX, y: e.nativeEvent.locationY };
+          traceRef.current = [p];
+          setTrace([p]);
+          setError(null);
+        },
+        onPanResponderMove: (e: GestureResponderEvent) => {
+          const p = { x: e.nativeEvent.locationX, y: e.nativeEvent.locationY };
+          const last = traceRef.current[traceRef.current.length - 1];
+          if (last && Math.hypot(p.x - last.x, p.y - last.y) < TRACE_STEP_PX) return;
+          traceRef.current = [...traceRef.current, p];
+          setTrace(traceRef.current);
+        },
+        onPanResponderRelease: () => {
+          void finishTrace(traceRef.current);
+        },
+        onPanResponderTerminate: () => {
+          traceRef.current = [];
+          setTrace([]);
+        },
+      }),
+    // finishTrace only reads refs and setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
+  // ---- saving ---------------------------------------------------------------
+
+  const save = async (replace = false) => {
+    const trimmed = name.trim();
+    if (!drawn || !trimmed || saving) return;
+    setSaving(true);
+    setError(null);
+    const drawing: PlaceDrawing = drawn.area
+      ? { area: drawn.area }
+      : { center: drawn.center, radiusM: drawn.radiusM };
+    try {
+      const saved = place
+        ? await updatePlace(place.id, { ...drawing, ...(trimmed !== place.name ? { name: trimmed } : {}) })
+        : await createPlace(trimmed, drawing, { replace });
+      // The phone starts watching it straight away (if Pro and permitted).
+      requestPlaceResync();
+      onSaved(saved);
+    } catch (caught) {
+      if (isProRequired(caught)) {
+        onNeedPro();
+      } else if (caught instanceof ApiError && caught.status === 409 && !place) {
+        Alert.alert(caught.message, 'Redraw it with this shape?', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Redraw', onPress: () => void save(true) },
+        ]);
+      } else {
+        logFailure('Saving place failed:', caught);
+        setError(userMessage(caught, 'Could not save that place. Please try again.'));
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ---- render ---------------------------------------------------------------
+
+  const frozen = step !== 'browse';
+  const shown = drawn ?? (step === 'browse' ? existing : null);
+  const initialBounds = existing ? placeBounds(existing) : null;
+  const unnamedSuggestions = knownNames.filter(
+    (n) => n.toLowerCase() !== name.trim().toLowerCase()
+  );
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <View style={styles.screen}>
+        <MapView
+          ref={mapRef}
+          style={StyleSheet.absoluteFill}
+          mapStyle={mapStyle}
+          dragPan={!frozen}
+          touchZoom={!frozen}
+          doubleTapZoom={!frozen}
+          doubleTapHoldZoom={!frozen}
+          touchRotate={false}
+          touchPitch={false}
+          compass={false}
+          logo={false}
+          attribution
+          attributionPosition={{ bottom: insets.bottom + 8, left: 8 }}
+          tintColor={colors.inkMuted}
+        >
+          <Camera
+            ref={cameraRef}
+            initialViewState={
+              initialBounds
+                ? { bounds: initialBounds, padding: { top: 160, bottom: 220, left: 48, right: 48 } }
+                : { center: FALLBACK_CENTER, zoom: 12 }
+            }
+          />
+          <UserLocation />
+          {shown ? (
+            <GeoJSONSource id="kandoo-place" data={placeFeature(shown)}>
+              <Layer
+                id="kandoo-place-fill"
+                type="fill"
+                style={{ fillColor: colors.settledFill, fillOpacity: 0.16 }}
+              />
+              <Layer
+                id="kandoo-place-edge"
+                type="line"
+                style={{ lineColor: colors.settledFill, lineWidth: 2.5 }}
+              />
+            </GeoJSONSource>
+          ) : null}
+        </MapView>
+
+        {/* The trace overlay: only while tracing, so the map moves freely otherwise. */}
+        {step === 'trace' ? (
+          <View style={StyleSheet.absoluteFill} {...responder.panHandlers}>
+            {trace.map((p, i) => (
+              <View key={i} pointerEvents="none" style={[styles.dot, { left: p.x - 2.5, top: p.y - 2.5 }]} />
+            ))}
+          </View>
+        ) : null}
+
+        {/* Top: back + search (browse), or the instruction (trace/review). */}
+        <View style={[styles.top, { paddingTop: insets.top + spacing.space2 }]} pointerEvents="box-none">
+          <View style={styles.topRow}>
+            <Pressable
+              onPress={step === 'browse' ? onClose : () => setStep(step === 'name' ? 'review' : 'browse')}
+              hitSlop={12}
+              style={styles.roundButton}
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+            >
+              <Image source={ICONS.back} style={styles.icon} />
+            </Pressable>
+
+            {step === 'browse' ? (
+              <View style={styles.searchBox}>
+                <Image source={ICONS.search} style={styles.searchIcon} />
+                <TextInput
+                  style={styles.searchInput}
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Find a place"
+                  placeholderTextColor={colors.inkFaint}
+                  returnKeyType="search"
+                  autoCorrect={false}
+                />
+                {query ? (
+                  <Pressable onPress={() => setQuery('')} hitSlop={10} accessibilityLabel="Clear search">
+                    <Image source={ICONS.clear} style={styles.searchIcon} />
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : (
+              <View style={styles.hint}>
+                <Text style={styles.hintText}>
+                  {step === 'trace'
+                    ? 'Trace around the place with your finger. Tap for a small circle.'
+                    : step === 'review'
+                      ? 'Kandoo will remind you when you’re inside this area.'
+                      : 'Name this place.'}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {step === 'browse' && (results.length > 0 || searching) ? (
+            <View style={styles.results}>
+              {searching && results.length === 0 ? (
+                <Text style={styles.resultDetail}>Searching…</Text>
+              ) : (
+                results.map((r) => (
+                  <Pressable key={r.id} style={styles.result} onPress={() => goTo(r)}>
+                    <Text style={styles.resultName} numberOfLines={1}>{r.name}</Text>
+                    {r.detail ? <Text style={styles.resultDetail} numberOfLines={1}>{r.detail}</Text> : null}
+                  </Pressable>
+                ))
+              )}
+            </View>
+          ) : null}
+        </View>
+
+        {/* Bottom: the one action for this step. */}
+        <View style={[styles.bottom, { paddingBottom: insets.bottom + spacing.space6 }]} pointerEvents="box-none">
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+
+          {step === 'browse' ? (
+            <View style={styles.row}>
+              {here ? (
+                <Pressable style={styles.secondary} onPress={goHere} accessibilityRole="button">
+                  <Text style={styles.secondaryText}>Where I am</Text>
+                </Pressable>
+              ) : null}
+              <Pressable style={[styles.cta, styles.flex]} onPress={() => setStep('trace')} accessibilityRole="button">
+                <Text style={styles.ctaText}>{place ? 'Freeze and redraw' : 'Freeze and draw'}</Text>
+              </Pressable>
+            </View>
+          ) : step === 'trace' ? (
+            <Pressable style={styles.secondaryWide} onPress={() => setStep('browse')} accessibilityRole="button">
+              <Text style={styles.secondaryText}>Move the map</Text>
+            </Pressable>
+          ) : step === 'review' ? (
+            <View style={styles.row}>
+              <Pressable
+                style={styles.secondary}
+                onPress={() => {
+                  setDrawn(null);
+                  setStep('trace');
+                }}
+                accessibilityRole="button"
+              >
+                <Text style={styles.secondaryText}>Draw again</Text>
+              </Pressable>
+              <Pressable style={[styles.cta, styles.flex]} onPress={() => setStep('name')} accessibilityRole="button">
+                <Text style={styles.ctaText}>Use this area</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.nameCard}>
+              <TextInput
+                style={styles.nameInput}
+                value={name}
+                onChangeText={setName}
+                placeholder="Home, school, Mum’s…"
+                placeholderTextColor={colors.inkFaint}
+                autoFocus
+                maxLength={60}
+                returnKeyType="done"
+                onSubmitEditing={() => void save()}
+              />
+              {!place && unnamedSuggestions.length > 0 ? (
+                <View style={styles.chips}>
+                  <Text style={styles.chipsLabel}>You’ve mentioned</Text>
+                  <View style={styles.chipRow}>
+                    {unnamedSuggestions.slice(0, 6).map((n) => (
+                      <Pressable key={n} style={styles.chip} onPress={() => setName(n)}>
+                        <Text style={styles.chipText}>{n}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+              <Pressable
+                style={[styles.cta, (!name.trim() || saving) && styles.ctaDisabled]}
+                onPress={() => void save()}
+                disabled={!name.trim() || saving}
+                accessibilityRole="button"
+              >
+                <Text style={styles.ctaText}>{saving ? 'Saving…' : 'Save place'}</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.base },
+  flex: { flex: 1 },
+
+  top: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: spacing.space4, gap: spacing.space2 },
+  topRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.space2 },
+  roundButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  icon: { width: 20, height: 20, tintColor: colors.ink },
+  searchBox: {
+    flex: 1,
+    height: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.space2,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.space3,
+  },
+  searchIcon: { width: 16, height: 16, tintColor: colors.inkMuted },
+  searchInput: { ...text.body, flex: 1, color: colors.ink, paddingVertical: 0 },
+  hint: {
+    flex: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.space3,
+    paddingVertical: spacing.space2,
+  },
+  hintText: { ...text.caption, color: colors.ink },
+  results: {
+    marginLeft: 44 + spacing.space2,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    paddingVertical: spacing.space1,
+    paddingHorizontal: spacing.space3,
+  },
+  result: { paddingVertical: spacing.space2, borderBottomWidth: 1, borderBottomColor: colors.line },
+  resultName: { fontFamily: fontFamily.textSemiBold, fontSize: 15, lineHeight: 20, color: colors.ink },
+  resultDetail: { ...text.caption, color: colors.inkMuted, paddingVertical: 2 },
+
+  dot: {
+    position: 'absolute',
+    width: 5,
+    height: 5,
+    borderRadius: radius.full,
+    backgroundColor: colors.markRing,
+  },
+
+  bottom: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: spacing.space4, gap: spacing.space2 },
+  row: { flexDirection: 'row', gap: spacing.space2 },
+  cta: {
+    minHeight: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.markCore,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.space4,
+  },
+  ctaDisabled: { opacity: 0.6 },
+  ctaText: { ...text.bodyStrong, color: colors.ink },
+  secondary: {
+    minHeight: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.space4,
+  },
+  secondaryWide: {
+    minHeight: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryText: { ...text.bodyStrong, color: colors.ink },
+  error: {
+    ...text.caption,
+    color: colors.alarmText,
+    backgroundColor: colors.surface,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+    paddingHorizontal: spacing.space3,
+    paddingVertical: spacing.space2,
+  },
+
+  nameCard: {
+    backgroundColor: colors.base,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: spacing.space4,
+    gap: spacing.space3,
+    shadowColor: colors.ink,
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  // The user's own words: Fraunces (AGENTS §7).
+  nameInput: {
+    ...text.answer,
+    color: colors.ink,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+    paddingBottom: spacing.space2,
+  },
+  chips: { gap: spacing.space2 },
+  chipsLabel: { ...text.label, color: colors.markRing },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.space2 },
+  chip: {
+    borderRadius: radius.full,
+    backgroundColor: withOpacity(colors.markCore, 0.14),
+    paddingHorizontal: spacing.space3,
+    paddingVertical: 6,
+  },
+  chipText: { fontFamily: fontFamily.displayRegular, fontSize: 15, lineHeight: 20, color: colors.ink },
+});
