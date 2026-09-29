@@ -4,7 +4,7 @@ import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 import { useKeyboardLift } from '@/hooks/useKeyboardLift';
 
 import { logFailure } from '@/services/interpretationService';
-import { saveManual } from '@/services/outbox';
+import { saveAddedMemory, saveManual, saveNoteEdit } from '@/services/outbox';
 import { colors, radius, spacing, text } from '@/theme/theme';
 
 type Mode = 'note' | 'memory' | 'both';
@@ -13,6 +13,11 @@ export type ManualEntryProps = {
   visible: boolean;
   onClose: () => void;
   onCreated: () => void;
+  /**
+   * Add a note or a memory to something already captured (the long-press
+   * "Add a note" / "Add a memory"). Only that one field is shown.
+   */
+  attach?: { captureId: string; kind: 'note' | 'memory'; label: string } | null;
 };
 
 /**
@@ -22,7 +27,7 @@ export type ManualEntryProps = {
  * "Written by you" mark downstream, and a manual note has no Connections because
  * nothing was inferred from it.
  */
-export function ManualEntry({ visible, onClose, onCreated }: ManualEntryProps) {
+export function ManualEntry({ visible, onClose, onCreated, attach = null }: ManualEntryProps) {
   // While typing, the form ends at the top of the keyboard and the writing box
   // takes all the room there is (see styles.form / styles.fill).
   const keyboard = useKeyboardLift({ inModal: true });
@@ -36,7 +41,7 @@ export function ManualEntry({ visible, onClose, onCreated }: ManualEntryProps) {
 
   useEffect(() => {
     if (visible) {
-      setMode('note');
+      setMode(attach?.kind ?? 'note');
       setTitle('');
       setBodyText('');
       setMemory('');
@@ -62,10 +67,16 @@ export function ManualEntry({ visible, onClose, onCreated }: ManualEntryProps) {
     try {
       // Saved on this phone first — no connection needed. The outbox sends it
       // to the server in the background (src/services/outbox.ts).
-      await saveManual({
-        note: wantsNote ? { title: title.trim(), body: bodyText.trim() } : undefined,
-        memory: wantsMemory ? { content: memory.trim() } : undefined,
-      });
+      if (attach?.kind === 'note') {
+        await saveNoteEdit(attach.captureId, { title: title.trim(), body: bodyText.trim() });
+      } else if (attach?.kind === 'memory') {
+        await saveAddedMemory(attach.captureId, memory.trim());
+      } else {
+        await saveManual({
+          note: wantsNote ? { title: title.trim(), body: bodyText.trim() } : undefined,
+          memory: wantsMemory ? { content: memory.trim() } : undefined,
+        });
+      }
       onCreated();
       onClose();
     } catch (caught) {
@@ -84,7 +95,12 @@ export function ManualEntry({ visible, onClose, onCreated }: ManualEntryProps) {
           <Pressable onPress={onClose} hitSlop={12}>
             <Text style={styles.cancel}>Cancel</Text>
           </Pressable>
-          <Text style={styles.heading}>Add something</Text>
+          {/* Takes the middle of the bar rather than sizing to its words: a title
+              that changes while open ("Add a note" → "Add a memory") would
+              otherwise keep its old width on Android and wrap. */}
+          <Text style={styles.heading} numberOfLines={1}>
+            {attach ? (attach.kind === 'note' ? 'Add a note' : 'Add a memory') : 'Add something'}
+          </Text>
           <Pressable onPress={save} hitSlop={12} disabled={!canSave}>
             <Text style={[styles.save, !canSave && styles.dim]}>{busy ? 'Saving…' : 'Save'}</Text>
           </Pressable>
@@ -92,7 +108,12 @@ export function ManualEntry({ visible, onClose, onCreated }: ManualEntryProps) {
 
         {/* The Note / Memory / Both switch and the field labels step aside while
             the keyboard is up, so the words being typed get the room. */}
-        {typing ? null : (
+        {attach && !typing ? (
+          <Text style={styles.attachLine} numberOfLines={2}>
+            Adding to “{attach.label}”
+          </Text>
+        ) : null}
+        {typing || attach ? null : (
           <View style={styles.segment}>
             {(['note', 'memory', 'both'] as Mode[]).map((m) => (
               <Pressable
@@ -172,7 +193,13 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.space5,
   },
   cancel: { ...text.body, color: colors.inkMuted },
-  heading: { ...text.bodyStrong, color: colors.ink },
+  heading: {
+    ...text.bodyStrong,
+    color: colors.ink,
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: spacing.space3,
+  },
   save: { ...text.bodyStrong, color: colors.accent },
   dim: { color: colors.inkFaint },
   segment: {
@@ -191,6 +218,7 @@ const styles = StyleSheet.create({
   segmentActive: { backgroundColor: colors.surface },
   segmentText: { ...text.caption, color: colors.inkMuted },
   segmentTextActive: { color: colors.ink },
+  attachLine: { ...text.caption, color: colors.inkMuted, marginBottom: spacing.space4 },
   form: { flex: 1, paddingBottom: spacing.space4 },
   fill: { flex: 1, minHeight: 0 },
   memoryBelowNote: { height: 110, minHeight: 0 },

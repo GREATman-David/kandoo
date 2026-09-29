@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 import { formatDueDate } from '@/utils/formatDueDate';
+import { shareNote } from '@/utils/share';
 
 export type NoteDetailProps = {
   captureId: string | null;
@@ -41,6 +42,7 @@ export type NoteDetailProps = {
 const ICONS = {
   back: require('@/assets/images/icons/chevron-left.png'),
   edit: require('@/assets/images/icons/pencil.png'),
+  share: require('@/assets/images/icons/share.png'),
   expand: require('@/assets/images/icons/chevron-down.png'),
   person: require('@/assets/images/icons/chip-person.png'),
   time: require('@/assets/images/icons/chip-time.png'),
@@ -176,23 +178,38 @@ export function NoteDetail({
           >
             <Image source={ICONS.back} style={styles.barIcon} />
           </Pressable>
-          {capture?.note ? (
-            editing ? (
-              <Pressable onPress={save} hitSlop={12} disabled={!canSave}>
-                <Text style={[styles.action, !canSave && styles.dimAction]}>
-                  {saving ? 'Saving…' : 'Save'}
-                </Text>
-              </Pressable>
-            ) : (
+          {capture && editing ? (
+            <Pressable onPress={save} hitSlop={12} disabled={!canSave}>
+              <Text style={[styles.action, !canSave && styles.dimAction]}>
+                {saving ? 'Saving…' : 'Save'}
+              </Text>
+            </Pressable>
+          ) : capture ? (
+            <View style={styles.barActions}>
               <Pressable
-                onPress={startEdit}
+                onPress={() =>
+                  void shareNote({
+                    title: capture.note?.title ?? 'What I said',
+                    body: capture.note?.body ?? capture.text,
+                  })
+                }
                 hitSlop={12}
                 accessibilityRole="button"
-                accessibilityLabel="Edit note"
+                accessibilityLabel="Share note"
               >
-                <Image source={ICONS.edit} style={styles.barIcon} />
+                <Image source={ICONS.share} style={styles.barIcon} />
               </Pressable>
-            )
+              {capture.note ? (
+                <Pressable
+                  onPress={startEdit}
+                  hitSlop={12}
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit note"
+                >
+                  <Image source={ICONS.edit} style={styles.barIcon} />
+                </Pressable>
+              ) : null}
+            </View>
           ) : null}
         </View>
 
@@ -237,13 +254,17 @@ export function NoteDetail({
               <Text style={styles.dim}>This note is no longer here.</Text>
             ) : (
               <>
-                <Text style={styles.title}>{capture.note?.title ?? 'What you said'}</Text>
+                <Text style={styles.title} selectable>
+                  {capture.note?.title ?? 'What you said'}
+                </Text>
                 <Text style={styles.captured}>
                   Captured {capturedAgo(capture.created_at).toLowerCase()}
                   {isManual ? ' · Written by you' : ''}
                 </Text>
 
-                <Text style={styles.noteBody}>{capture.note?.body ?? capture.text}</Text>
+                <Text style={styles.noteBody} selectable>
+                  {capture.note?.body ?? capture.text}
+                </Text>
 
                 {capture.memories.length > 0 ? (
                   <View style={styles.section}>
@@ -316,7 +337,11 @@ export function NoteDetail({
                         style={[styles.expandIcon, showRaw && styles.expandIconOpen]}
                       />
                     </Pressable>
-                    {showRaw ? <Text style={styles.raw}>{capture.text}</Text> : null}
+                    {showRaw ? (
+                      <Text style={styles.raw} selectable>
+                        {capture.text}
+                      </Text>
+                    ) : null}
                   </>
                 ) : null}
               </>
@@ -334,6 +359,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.base,
   },
+  barActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.space5 },
   bar: {
     height: 44,
     flexDirection: 'row',

@@ -321,13 +321,25 @@ router.post('/reminders', authenticateRequest, async (req, res) => {
       : null;
   const person = typeof req.body?.person === 'string' ? req.body.person : null;
   const repeatDays = parseRepeatDays(req.body?.repeatDays);
+  const captureId = typeof req.body?.captureId === 'string' ? req.body.captureId : null;
 
   if (!task.trim()) return res.status(400).json({ error: 'A task is required.' });
   if (!dueAt) return res.status(400).json({ error: 'A time is required.' });
   if (repeatDays === 'invalid') return res.status(400).json({ error: 'Invalid repeat days.' });
 
   try {
-    const reminder = await createManualReminder(userId, { task, dueAt, person, repeatDays });
+    // "Add a reminder" to something already captured: link it, but only to a
+    // capture this user owns.
+    if (captureId && !(await getCaptureNote(userId, captureId))) {
+      return res.status(404).json({ error: 'That capture could not be found.' });
+    }
+    const reminder = await createManualReminder(userId, {
+      task,
+      dueAt,
+      person,
+      repeatDays,
+      captureId,
+    });
     return res.json({ success: true, reminder });
   } catch (error) {
     console.error('Create manual reminder failed:', error);
@@ -529,6 +541,31 @@ router.post('/captures/:id/note', authenticateRequest, aiRateLimit, async (req, 
       });
     }
     return res.status(500).json({ error: 'Kandoo could not take a note just now.' });
+  }
+});
+
+/**
+ * "Add a memory" to something already captured (long-press on a capture that
+ * has none). Typed by the user, so no extraction; embedded like any memory so
+ * recall finds it. Only on a capture this user owns.
+ */
+router.post('/captures/:id/memories', authenticateRequest, aiRateLimit, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).user.id;
+  const captureId = String(req.params.id);
+  const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
+  if (!content) return res.status(400).json({ error: 'Write the memory first.' });
+  if (content.length > MAX_CAPTURE_CHARS) {
+    return res.status(400).json({ error: 'That’s too long for one memory.' });
+  }
+  try {
+    if (!(await getCaptureNote(userId, captureId))) {
+      return res.status(404).json({ error: 'That capture could not be found.' });
+    }
+    const memory = await createManualMemory(userId, captureId, content);
+    return res.json({ success: true, memory });
+  } catch (error) {
+    console.error('Add memory to capture failed:', error);
+    return res.status(500).json({ error: 'Could not save that memory just now.' });
   }
 });
 

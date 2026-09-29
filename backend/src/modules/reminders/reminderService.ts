@@ -277,6 +277,8 @@ export async function createManualReminder(
     dueAt: string | null;
     person: string | null;
     repeatDays?: number[] | null;
+    /** Link to an existing capture ("Add a reminder" on a long-press). */
+    captureId?: string | null;
   }
 ): Promise<CreatedReminder> {
   const task = input.task.trim();
@@ -295,7 +297,7 @@ export async function createManualReminder(
     .from('reminders')
     .insert({
       user_id: userId,
-      capture_id: null,
+      capture_id: input.captureId ?? null,
       task,
       person: input.person?.trim() || null,
       due_at: input.dueAt,

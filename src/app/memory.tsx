@@ -12,9 +12,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ActionSheet, type SheetAction } from '@/components/ActionSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { LockedRow } from '@/components/LockedRow';
-import { ManualEntry } from '@/components/ManualEntry';
+import { ManualEntry, type ManualEntryProps } from '@/components/ManualEntry';
+import { ManualReminder } from '@/components/ManualReminder';
 import { MemoryDetail, type MemoryDetailTarget } from '@/components/MemoryDetail';
 import { NoteDetail } from '@/components/NoteDetail';
 import { NoteMemoryFork } from '@/components/NoteMemoryFork';
@@ -110,6 +112,10 @@ export default function MemoryScreen() {
   const [askError, setAskError] = useState<string | null>(null);
 
   const [manualOpen, setManualOpen] = useState(false);
+  // Long-press menu, and what an "Add a …" from it attaches to.
+  const [menuFor, setMenuFor] = useState<CaptureNote | null>(null);
+  const [attach, setAttach] = useState<ManualEntryProps['attach']>(null);
+  const [reminderFor, setReminderFor] = useState<string | null>(null);
   const [noteId, setNoteId] = useState<string | null>(null);
   const [memoryTarget, setMemoryTarget] = useState<MemoryDetailTarget | null>(null);
   const [fork, setFork] = useState<CaptureNote | null>(null);
@@ -237,6 +243,40 @@ export default function MemoryScreen() {
     }
   }, [query, asking, load]);
 
+  /**
+   * Long-press: add what this capture doesn't have yet — a note, a memory or a
+   * reminder, typed by hand and attached to it — or delete it.
+   */
+  const menuActions = (note: CaptureNote): SheetAction[] => {
+    const label = captureLabel(note);
+    const actions: SheetAction[] = [];
+    if (!note.note) {
+      actions.push({
+        label: 'Add a note',
+        onPress: () => {
+          setAttach({ captureId: note.id, kind: 'note', label });
+          setManualOpen(true);
+        },
+      });
+    }
+    if (note.memories.length === 0) {
+      actions.push({
+        label: 'Add a memory',
+        onPress: () => {
+          setAttach({ captureId: note.id, kind: 'memory', label });
+          setManualOpen(true);
+        },
+      });
+    }
+    // A reminder is created on the server and scheduled at once, so it can
+    // only link to an entry that has already synced.
+    if (note.reminders.length === 0 && !isLocalId(note.id)) {
+      actions.push({ label: 'Add a reminder', onPress: () => setReminderFor(note.id) });
+    }
+    actions.push({ label: 'Delete', destructive: true, onPress: () => confirmDelete(note) });
+    return actions;
+  };
+
   const openMemoryOf = useCallback((note: CaptureNote) => {
     if (note.memories.length !== 1) {
       // Several facts read best together, in the note's split view.
@@ -343,7 +383,7 @@ export default function MemoryScreen() {
           style={styles.ask}
           value={query}
           onChangeText={setQuery}
-          placeholder="Search or ask anything you've said…"
+          placeholder="Search or ask anything"
           placeholderTextColor={colors.inkFaint}
           // Some Android skins (Samsung) draw their own underline and spacing
           // under a text field; the bordered bar is the only frame it needs.
@@ -368,7 +408,9 @@ export default function MemoryScreen() {
         <Text style={styles.askError}>{askError}</Text>
       ) : answer ? (
         <View style={styles.answerCard}>
-          <Text style={styles.answer}>{answer}</Text>
+          <Text style={styles.answer} selectable>
+            {answer}
+          </Text>
           <Pressable onPress={() => setAnswer(null)} hitSlop={8}>
             <Text style={styles.answerDismiss}>Clear</Text>
           </Pressable>
@@ -429,7 +471,7 @@ export default function MemoryScreen() {
                   variant="card"
                   title={rowTitle}
                   onPress={() => setPaywall(true)}
-                  onLongPress={() => confirmDelete(note)}
+                  onLongPress={() => setMenuFor(note)}
                 />
               );
             }
@@ -438,7 +480,7 @@ export default function MemoryScreen() {
                 key={note.id}
                 note={note}
                 onPress={() => openRow(note)}
-                onLongPress={() => confirmDelete(note)}
+                onLongPress={() => setMenuFor(note)}
               />
             );
           })
@@ -463,7 +505,10 @@ export default function MemoryScreen() {
         <View style={styles.addDock}>
           <Pressable
             style={styles.add}
-            onPress={() => setManualOpen(true)}
+            onPress={() => {
+              setAttach(null);
+              setManualOpen(true);
+            }}
             accessibilityRole="button"
           >
             <View style={styles.addIconWrap}>
@@ -476,8 +521,26 @@ export default function MemoryScreen() {
 
       <ManualEntry
         visible={manualOpen}
-        onClose={() => setManualOpen(false)}
+        attach={attach}
+        onClose={() => {
+          setManualOpen(false);
+          setAttach(null);
+        }}
         onCreated={load}
+      />
+
+      <ManualReminder
+        visible={reminderFor !== null}
+        captureId={reminderFor}
+        onClose={() => setReminderFor(null)}
+        onCreated={load}
+      />
+
+      <ActionSheet
+        visible={menuFor !== null}
+        title={menuFor ? captureLabel(menuFor) : undefined}
+        actions={menuFor ? menuActions(menuFor) : []}
+        onClose={() => setMenuFor(null)}
       />
 
       <NoteMemoryFork
@@ -561,6 +624,12 @@ type MemoryRowProps = {
  * The type icons sit in the bottom-right corner: page for a note, recall head
  * for a memory, both when a capture made both.
  */
+/** How a capture is named in the long-press menu and the "Adding to" line. */
+function captureLabel(note: CaptureNote): string {
+  const raw = note.note?.title ?? note.memories[0]?.content ?? note.text;
+  return raw.length > 60 ? `${raw.slice(0, 57).trimEnd()}…` : raw;
+}
+
 function MemoryRow({ note, onPress, onLongPress }: MemoryRowProps) {
   const hasNote = !!note.note;
   const hasMemory = note.memories.length > 0;
@@ -572,9 +641,9 @@ function MemoryRow({ note, onPress, onLongPress }: MemoryRowProps) {
 
   const meta: string[] = [];
   if (isManual) meta.push('Written by you');
+  // (An entry still syncing from this phone looks like any other: the outbox
+  // sends it in the background and the user never has to think about it.)
   meta.push(timeAgo(note.created_at));
-  // Safe on the phone; the outbox sends it when there is a connection.
-  if (note.pending) meta.push('Saved on this phone');
   if (hasNote ? items > 0 : items > 1) meta.push(`${items} item${items === 1 ? '' : 's'}`);
 
   return (

@@ -513,6 +513,8 @@ export async function createManualReminder(input: {
   dueAt: string;
   person: string | null;
   repeatDays?: number[] | null;
+  /** Link it to something already captured ("Add a reminder"). */
+  captureId?: string | null;
 }): Promise<CreatedReminder> {
   const accessToken = await getAccessTokenOrThrow();
 
@@ -741,6 +743,24 @@ export async function createManualCapture(
   );
 
   return data.capture ?? null;
+}
+
+/** Add a typed memory to an existing capture ("Add a memory" on a long-press). */
+export async function addMemoryToCapture(captureId: string, content: string): Promise<void> {
+  const accessToken = await getAccessTokenOrThrow();
+  await apiFetch<unknown>(
+    `/captures/${encodeURIComponent(captureId)}/memories`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ content }),
+    },
+    'Could not save that memory.',
+    { timeoutMs: AI_TIMEOUT_MS }
+  );
 }
 
 /** Edit a memory's text; the backend re-embeds so recall matches the new words. */

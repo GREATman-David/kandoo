@@ -21,11 +21,13 @@ import {
 } from '@/services/interpretationService';
 import { discardLocal, isLocalId, pendingCapture, saveMemoryEdit } from '@/services/outbox';
 import { colors, spacing, text } from '@/theme/theme';
+import { shareMemory } from '@/utils/share';
 import { timeAgo } from '@/utils/timeAgo';
 
 const ICONS = {
   back: require('@/assets/images/icons/chevron-left.png'),
   edit: require('@/assets/images/icons/pencil.png'),
+  share: require('@/assets/images/icons/share.png'),
   open: require('@/assets/images/icons/chevron-right.png'),
   expand: require('@/assets/images/icons/chevron-down.png'),
 };
@@ -179,14 +181,24 @@ export function MemoryDetail({
               </Text>
             </Pressable>
           ) : (
-            <Pressable
-              onPress={() => setEditing(true)}
-              hitSlop={12}
-              accessibilityRole="button"
-              accessibilityLabel="Edit memory"
-            >
-              <Image source={ICONS.edit} style={styles.barIcon} />
-            </Pressable>
+            <View style={styles.barActions}>
+              <Pressable
+                onPress={() => void shareMemory(content)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel="Share memory"
+              >
+                <Image source={ICONS.share} style={styles.barIcon} />
+              </Pressable>
+              <Pressable
+                onPress={() => setEditing(true)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel="Edit memory"
+              >
+                <Image source={ICONS.edit} style={styles.barIcon} />
+              </Pressable>
+            </View>
           )}
         </View>
 
@@ -219,7 +231,9 @@ export function MemoryDetail({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            <Text style={styles.content}>{content}</Text>
+            <Text style={styles.content} selectable>
+              {content}
+            </Text>
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -251,7 +265,11 @@ export function MemoryDetail({
                     style={[styles.expandIcon, showRaw && styles.expandIconOpen]}
                   />
                 </Pressable>
-                {showRaw ? <Text style={styles.raw}>{source.text}</Text> : null}
+                {showRaw ? (
+                  <Text style={styles.raw} selectable>
+                    {source.text}
+                  </Text>
+                ) : null}
               </>
             ) : null}
           </ScrollView>
@@ -271,6 +289,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   barIcon: { width: 20, height: 20, tintColor: colors.ink },
+  barActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.space5 },
   action: { ...text.bodyStrong, color: colors.markRing },
   dimAction: { color: colors.inkFaint },
   body: { paddingTop: 56, paddingBottom: spacing.space8 },

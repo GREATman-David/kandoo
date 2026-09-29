@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
+  addMemoryToCapture,
   ApiError,
   type CaptureNote,
   createManualCapture,
@@ -37,7 +38,14 @@ type Draft = { note?: { title: string; body: string }; memory?: { content: strin
 type CreateItem = { kind: 'create'; localId: string; createdAt: string; draft: Draft };
 type NoteEditItem = { kind: 'editNote'; captureId: string; note: { title: string; body: string } };
 type MemoryEditItem = { kind: 'editMemory'; memoryId: string; content: string };
-type OutboxItem = CreateItem | NoteEditItem | MemoryEditItem;
+type AddMemoryItem = {
+  kind: 'addMemory';
+  addId: string;
+  captureId: string;
+  content: string;
+  createdAt: string;
+};
+type OutboxItem = CreateItem | NoteEditItem | MemoryEditItem | AddMemoryItem;
 
 const LOCAL_PREFIX = 'local:';
 
@@ -137,6 +145,29 @@ export async function saveMemoryEdit(memoryId: string, content: string): Promise
   void flushOutbox();
 }
 
+/**
+ * A typed memory added to something already captured ("Add a memory"). On an
+ * entry that hasn't synced yet it simply becomes that entry's memory.
+ */
+export async function saveAddedMemory(captureId: string, content: string): Promise<void> {
+  const items = await readItems();
+  if (isLocalId(captureId)) {
+    const create = items.find((i): i is CreateItem => i.kind === 'create' && i.localId === captureId);
+    if (create) create.draft = { ...create.draft, memory: { content } };
+  } else {
+    items.push({
+      kind: 'addMemory',
+      addId: `${LOCAL_PREFIX}add${Date.now().toString(36)}${(seq++).toString(36)}`,
+      captureId,
+      content,
+      createdAt: new Date().toISOString(),
+    });
+  }
+  await writeItems(items);
+  notify();
+  void flushOutbox();
+}
+
 /** Delete an item that never reached the server. */
 export async function discardLocal(localId: string): Promise<void> {
   const items = await readItems();
@@ -210,6 +241,7 @@ function sameItem(a: OutboxItem, b: OutboxItem): boolean {
   if (a.kind === 'create' && b.kind === 'create') return a.localId === b.localId;
   if (a.kind === 'editNote' && b.kind === 'editNote') return a.captureId === b.captureId;
   if (a.kind === 'editMemory' && b.kind === 'editMemory') return a.memoryId === b.memoryId;
+  if (a.kind === 'addMemory' && b.kind === 'addMemory') return a.addId === b.addId;
   return false;
 }
 
@@ -223,6 +255,9 @@ async function send(item: OutboxItem): Promise<CaptureNote | null> {
       return null;
     case 'editMemory':
       await updateMemory(item.memoryId, item.content);
+      return null;
+    case 'addMemory':
+      await addMemoryToCapture(item.captureId, item.content);
       return null;
   }
 }
@@ -288,18 +323,31 @@ export async function withPendingEdits(captures: CaptureNote[]): Promise<Capture
   const items = await readItems();
   const notes = new Map<string, { title: string; body: string }>();
   const memories = new Map<string, string>();
+  const added = new Map<string, AddMemoryItem[]>();
   for (const i of items) {
     if (i.kind === 'editNote') notes.set(i.captureId, i.note);
     if (i.kind === 'editMemory') memories.set(i.memoryId, i.content);
+    if (i.kind === 'addMemory') added.set(i.captureId, [...(added.get(i.captureId) ?? []), i]);
   }
-  if (notes.size === 0 && memories.size === 0) return captures;
+  if (notes.size === 0 && memories.size === 0 && added.size === 0) return captures;
   return captures.map((c) => ({
     ...c,
     note: notes.get(c.id) ?? c.note,
-    memories: c.memories.map((m) =>
-      memories.has(m.id) ? { ...m, content: memories.get(m.id) as string } : m
-    ),
-    pending: c.pending || notes.has(c.id) || c.memories.some((m) => memories.has(m.id)),
+    memories: [
+      ...c.memories.map((m) =>
+        memories.has(m.id) ? { ...m, content: memories.get(m.id) as string } : m
+      ),
+      ...(added.get(c.id) ?? []).map((a) => ({
+        id: a.addId,
+        content: a.content,
+        person: null,
+        location: null,
+        topics: [],
+        created_at: a.createdAt,
+      })),
+    ],
+    pending:
+      c.pending || notes.has(c.id) || added.has(c.id) || c.memories.some((m) => memories.has(m.id)),
   }));
 }
 

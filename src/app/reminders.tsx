@@ -11,13 +11,17 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ActionSheet, type SheetAction } from '@/components/ActionSheet';
 import { EmptyState } from '@/components/EmptyState';
+import { ManualEntry, type ManualEntryProps } from '@/components/ManualEntry';
 import { OfflineNote } from '@/components/OfflineNote';
 import { ManualReminder } from '@/components/ManualReminder';
 import { NoteDetail } from '@/components/NoteDetail';
 import { ReminderDetail } from '@/components/ReminderDetail';
 import {
+  type CaptureNote,
   deleteReminderById,
+  fetchCaptureNote,
   fetchGroupedReminders,
   updateReminder,
   type CreatedReminder,
@@ -88,6 +92,14 @@ export default function RemindersScreen() {
   const router = useRouter();
 
   const [undo, setUndo] = useState<CreatedReminder | null>(null);
+  // Long-press menu. `capture` is what the reminder came from, fetched when
+  // the menu opens, so it can offer to add a note or memory it lacks.
+  const [menu, setMenu] = useState<{
+    reminder: CreatedReminder;
+    needsReview: boolean;
+    capture: CaptureNote | null;
+  } | null>(null);
+  const [attach, setAttach] = useState<ManualEntryProps['attach']>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The in-flight "done" write, so an Undo can never land before it.
   const doneRequest = useRef<Promise<unknown> | null>(null);
@@ -180,6 +192,38 @@ export default function RemindersScreen() {
     await load();
   };
 
+  const openMenu = (reminder: CreatedReminder, needsReview: boolean) => {
+    setMenu({ reminder, needsReview, capture: null });
+    if (!reminder.capture_id) return;
+    fetchCaptureNote(reminder.capture_id)
+      .then((capture) =>
+        setMenu((m) => (m && m.reminder.id === reminder.id ? { ...m, capture } : m))
+      )
+      .catch((caught) => logFailure('Loading the reminder source failed:', caught));
+  };
+
+  const menuActions = (): SheetAction[] => {
+    if (!menu) return [];
+    const { reminder, needsReview, capture } = menu;
+    const actions: SheetAction[] = [];
+    if (!needsReview) actions.push({ label: 'Mark done', onPress: () => markDone(reminder) });
+    // Add what the capture behind this reminder doesn't have yet, by hand.
+    if (capture && !capture.note) {
+      actions.push({
+        label: 'Add a note',
+        onPress: () => setAttach({ captureId: capture.id, kind: 'note', label: reminder.task }),
+      });
+    }
+    if (capture && capture.memories.length === 0) {
+      actions.push({
+        label: 'Add a memory',
+        onPress: () => setAttach({ captureId: capture.id, kind: 'memory', label: reminder.task }),
+      });
+    }
+    actions.push({ label: 'Delete', destructive: true, onPress: () => confirmDelete(reminder) });
+    return actions;
+  };
+
   const confirmDelete = (reminder: CreatedReminder) => {
     Alert.alert('Delete this reminder?', reminder.task, [
       { text: 'Cancel', style: 'cancel' },
@@ -261,7 +305,7 @@ export default function RemindersScreen() {
                     needsReview
                     onOpen={setSelected}
                     onDone={markDone}
-                    onDelete={confirmDelete}
+                    onMenu={openMenu}
                   />
                 ))}
               </Section>
@@ -275,7 +319,7 @@ export default function RemindersScreen() {
                     reminder={r}
                     onOpen={setSelected}
                     onDone={markDone}
-                    onDelete={confirmDelete}
+                    onMenu={openMenu}
                   />
                 ))}
               </Section>
@@ -289,7 +333,7 @@ export default function RemindersScreen() {
                     reminder={r}
                     onOpen={setSelected}
                     onDone={markDone}
-                    onDelete={confirmDelete}
+                    onMenu={openMenu}
                   />
                 ))}
               </Section>
@@ -303,7 +347,7 @@ export default function RemindersScreen() {
                     reminder={r}
                     onOpen={setSelected}
                     onDone={markDone}
-                    onDelete={confirmDelete}
+                    onMenu={openMenu}
                   />
                 ))}
               </Section>
@@ -378,6 +422,20 @@ export default function RemindersScreen() {
         visible={noteId !== null}
         onClose={() => setNoteId(null)}
       />
+
+      <ActionSheet
+        visible={menu !== null}
+        title={menu?.reminder.task}
+        actions={menuActions()}
+        onClose={() => setMenu(null)}
+      />
+
+      <ManualEntry
+        visible={attach !== null}
+        attach={attach}
+        onClose={() => setAttach(null)}
+        onCreated={load}
+      />
     </View>
   );
 }
@@ -396,16 +454,17 @@ type RowProps = {
   needsReview?: boolean;
   onOpen: (r: CreatedReminder) => void;
   onDone: (r: CreatedReminder) => void;
-  onDelete: (r: CreatedReminder) => void;
+  onMenu: (r: CreatedReminder, needsReview: boolean) => void;
 };
 
 /**
  * One reminder as a Figma card: the task in serif, its time beneath, the person
  * as a chip on the right. The circle on the left completes it in one tap; tap
- * the card to open it; long-press offers Mark done or Delete. A reminder
+ * the card to open it; long-press opens the menu (Mark done, Add a note or
+ * memory where missing, Delete). A reminder
  * awaiting review keeps its amber highlight and no circle — it isn't set yet.
  */
-function Row({ reminder, needsReview, onOpen, onDone, onDelete }: RowProps) {
+function Row({ reminder, needsReview, onOpen, onDone, onMenu }: RowProps) {
   const when = whenLine(reminder) ?? reminder.place_hint ?? '';
   // The circle fills for a beat before the row leaves, so the tap registers.
   const [ticked, setTicked] = useState(false);
@@ -415,26 +474,13 @@ function Row({ reminder, needsReview, onOpen, onDone, onDelete }: RowProps) {
     setTimeout(() => onDone(reminder), 250);
   };
 
-  // Long-press keeps both quick actions the old time pill and long-press gave:
-  // complete (with its Undo) for a scheduled reminder, and delete.
-  const quickActions = () => {
-    if (needsReview) {
-      onDelete(reminder);
-      return;
-    }
-    Alert.alert(reminder.task, undefined, [
-      { text: 'Mark done', onPress: () => onDone(reminder) },
-      { text: 'Delete', style: 'destructive', onPress: () => onDelete(reminder) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
   return (
     <Pressable
       style={[styles.row, needsReview && styles.rowReview]}
       onPress={() => onOpen(reminder)}
-      onLongPress={quickActions}
+      onLongPress={() => onMenu(reminder, !!needsReview)}
       accessibilityRole="button"
-      accessibilityHint="Long-press to mark done or delete"
+      accessibilityHint="Long-press for more options"
     >
       {needsReview ? null : (
         <Pressable

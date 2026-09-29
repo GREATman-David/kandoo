@@ -1060,7 +1060,9 @@ function Answered({ response, onDone, voiceSupported, onAskAgain }: AnsweredProp
           </Pressable>
         </View>
 
-        <Animated.Text style={[styles.spoken, style]}>{answer}</Animated.Text>
+        <Animated.Text style={[styles.spoken, style]} selectable>
+          {answer}
+        </Animated.Text>
       </ScrollView>
 
       <View style={styles.dockActions}>

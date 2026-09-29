@@ -24,10 +24,12 @@ export type ManualReminderProps = {
   visible: boolean;
   onClose: () => void;
   onCreated: () => void;
+  /** Link the reminder to something already captured ("Add a reminder"). */
+  captureId?: string | null;
 };
 
 /** A reminder the user types by hand. Created `confirmed` and scheduled at once. */
-export function ManualReminder({ visible, onClose, onCreated }: ManualReminderProps) {
+export function ManualReminder({ visible, onClose, onCreated, captureId = null }: ManualReminderProps) {
   const [task, setTask] = useState('');
   const [person, setPerson] = useState('');
   const [dueAt, setDueAt] = useState<string | null>(null);
@@ -59,6 +61,7 @@ export function ManualReminder({ visible, onClose, onCreated }: ManualReminderPr
         person: person.trim() || null,
         // Only sent when set, so a one-off reminder is exactly as before.
         ...(repeatDays ? { repeatDays } : {}),
+        ...(captureId ? { captureId } : {}),
       });
       await scheduleReminder(reminder);
       onCreated();
@@ -80,7 +83,7 @@ export function ManualReminder({ visible, onClose, onCreated }: ManualReminderPr
           <Pressable onPress={onClose} hitSlop={12}>
             <Text style={styles.cancel}>Cancel</Text>
           </Pressable>
-          <Text style={styles.title}>New reminder</Text>
+          <Text style={styles.title}>{captureId ? 'Add a reminder' : 'New reminder'}</Text>
           <Pressable onPress={create} hitSlop={12} disabled={!canCreate}>
             <Text style={[styles.create, !canCreate && styles.dim]}>
               {busy ? 'Saving…' : 'Create'}
