@@ -67,6 +67,23 @@ const config: ExpoConfig = {
         androidSpeechServicePackages: ['com.google.android.googlequicksearchbox'],
       },
     ],
+    // Places (Pro): the OS watches the circles of places the user drew and
+    // wakes Kandoo on arrival. Background location is required for that — a
+    // geofence must fire with the app closed. No foreground service: nothing
+    // tracks the user continuously (AGENTS §3.5).
+    [
+      'expo-location',
+      {
+        isAndroidBackgroundLocationEnabled: true,
+        isAndroidForegroundServiceEnabled: false,
+        locationWhenInUsePermission:
+          'Kandoo shows where you are on the map when you draw a place.',
+        locationAlwaysAndWhenInUsePermission:
+          'Kandoo reminds you when you arrive at places you have drawn, even when the app is closed.',
+      },
+    ],
+    // The Places map: MapLibre with open map data — no Google key or billing.
+    '@maplibre/maplibre-react-native',
   ],
   experiments: {
     typedRoutes: true,

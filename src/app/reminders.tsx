@@ -38,7 +38,7 @@ const ICONS = {
   expand: require('@/assets/images/icons/chevron-down.png'),
   check: require('@/assets/images/icons/check.png'),
 };
-import { formatDueDate } from '@/utils/formatDueDate';
+import { formatDueDate, formatPlaceWhen } from '@/utils/formatDueDate';
 import { isRepeating, nextOccurrence, repeatWhen } from '@/utils/repeat';
 
 import { useAuth } from '../features/Auth/useAuth';
@@ -465,7 +465,7 @@ type RowProps = {
  * awaiting review keeps its amber highlight and no circle — it isn't set yet.
  */
 function Row({ reminder, needsReview, onOpen, onDone, onMenu }: RowProps) {
-  const when = whenLine(reminder) ?? reminder.place_hint ?? '';
+  const when = whenLine(reminder) ?? formatPlaceWhen(reminder) ?? '';
   // The circle fills for a beat before the row leaves, so the tap registers.
   const [ticked, setTicked] = useState(false);
   const complete = () => {

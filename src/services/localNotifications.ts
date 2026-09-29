@@ -6,6 +6,11 @@ import { isRepeating, normalizeDays } from '@/utils/repeat';
 
 import type { CreatedReminder } from './interpretationService';
 import {
+  armPlaceReminder,
+  forgetPlaceReminder,
+  requestPlaceResync,
+} from './places/placeStore';
+import {
   clearTriggers,
   entryIds,
   getAllTriggers,
@@ -105,6 +110,67 @@ function channelFor(reminder: CreatedReminder): string {
   return reminder.insistent ? CHANNEL_INSISTENT : CHANNEL_DEFAULT;
 }
 
+type ReminderLike = Pick<CreatedReminder, 'id' | 'task' | 'insistent'>;
+
+/** What every reminder notification carries, timed or place-triggered. */
+function reminderContent(reminder: ReminderLike, body: string, repeating: boolean) {
+  return {
+    title: reminder.task,
+    body,
+    sound: true,
+    // Lets the full-screen alert show this reminder and act on it
+    // (ReminderAlertHost), with the app open or from a tap.
+    data: {
+      reminderId: reminder.id,
+      repeating,
+      insistent: reminder.insistent,
+      // Full-screen intent: with the phone locked or the screen off, Android
+      // opens this link — the reminder's full-screen alert — and wakes it.
+      kandooAlertUrl: buildAlertLink({
+        reminderId: reminder.id,
+        title: reminder.task,
+        repeating,
+        insistent: reminder.insistent,
+      }),
+    },
+  };
+}
+
+/**
+ * Fire a place reminder NOW — called from the geofence task the moment the
+ * phone decides the user arrived (or left). Same content as a timed reminder,
+ * so it wakes the phone full screen the same way. Never scheduled, so the
+ * launch sweep in reconcileReminders has nothing to cancel.
+ */
+export async function presentReminderNow(reminder: ReminderLike, body: string): Promise<void> {
+  await ensureChannels();
+  await Notifications.scheduleNotificationAsync({
+    content: reminderContent(reminder, body, false),
+    trigger: { channelId: reminder.insistent ? CHANNEL_INSISTENT : CHANNEL_DEFAULT },
+  });
+}
+
+/**
+ * A Kandoo Moment: not a reminder, a memory handed back where it happened.
+ * No full-screen alert — it is a quiet banner. Tapping opens the place.
+ */
+export async function presentMomentNow(moment: {
+  placeId: string;
+  title: string;
+  body: string;
+}): Promise<void> {
+  await ensureChannels();
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: moment.title,
+      body: moment.body,
+      sound: false,
+      data: { kandooMoment: true, placeId: moment.placeId },
+    },
+    trigger: { channelId: CHANNEL_DEFAULT },
+  });
+}
+
 /**
  * Schedule (or reschedule) a reminder's local notification. Returns the OS
  * notification id, or null when there is nothing to fire — no time set (a
@@ -118,32 +184,23 @@ export async function scheduleReminder(
   await ensureChannels();
   await cancelReminder(reminder.id);
 
+  // A place reminder has no time: the phone's geofences fire it on arrival.
+  if (!reminder.due_at && reminder.place_id && reminder.status === 'confirmed') {
+    await armPlace(reminder);
+    return null;
+  }
+
   if (!reminder.due_at) return null;
 
   const due = new Date(reminder.due_at);
   if (Number.isNaN(due.getTime())) return null;
 
   const days = normalizeDays(reminder.repeat_days);
-  const content = {
-    title: reminder.task,
-    body: reminder.person ? `With ${reminder.person}` : 'Kandoo reminder',
-    sound: true,
-    // Lets the full-screen alert show this reminder and act on it
-    // (ReminderAlertHost), with the app open or from a tap.
-    data: {
-      reminderId: reminder.id,
-      repeating: !!days,
-      insistent: reminder.insistent,
-      // Full-screen intent: with the phone locked or the screen off, Android
-      // opens this link — the reminder's full-screen alert — and wakes it.
-      kandooAlertUrl: buildAlertLink({
-        reminderId: reminder.id,
-        title: reminder.task,
-        repeating: !!days,
-        insistent: reminder.insistent,
-      }),
-    },
-  };
+  const content = reminderContent(
+    reminder,
+    reminder.person ? `With ${reminder.person}` : 'Kandoo reminder',
+    !!days
+  );
   const channelId = channelFor(reminder);
 
   // Repeating: one weekly notification per chosen day, at due_at's time of
@@ -201,8 +258,37 @@ export async function isScheduledRepeating(reminderId: string): Promise<boolean>
   return !!entry?.repeat;
 }
 
+/**
+ * Arm a confirmed place reminder on the phone. If its place is not watched yet
+ * (just drawn, or never drawn), ask for a place sync, which picks it up.
+ */
+async function armPlace(reminder: CreatedReminder): Promise<void> {
+  try {
+    const armed = await armPlaceReminder({
+      id: reminder.id,
+      task: reminder.task,
+      person: reminder.person,
+      placeId: reminder.place_id as string,
+      trigger: reminder.place_trigger === 'leave' ? 'leave' : 'arrive',
+      notBefore: reminder.not_before ?? null,
+      insistent: reminder.insistent,
+    });
+    if (!armed) requestPlaceResync();
+  } catch (error) {
+    // The next place sync arms it from the server's copy.
+    console.warn('Arming place reminder failed; a sync will retry:', error);
+    requestPlaceResync();
+  }
+}
+
 /** Cancel a reminder's notification and forget it. Safe if none exists. */
 export async function cancelReminder(reminderId: string): Promise<void> {
+  // Done, dismissed or deleted: it must never fire on arrival either.
+  try {
+    await forgetPlaceReminder(reminderId);
+  } catch (error) {
+    console.warn('Forgetting place reminder failed:', error);
+  }
   const entry = await getTrigger(reminderId);
   if (entry) {
     for (const id of entryIds(entry)) {

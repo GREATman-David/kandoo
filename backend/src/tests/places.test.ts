@@ -5,7 +5,9 @@ import { describe, it } from 'node:test';
 
 import { reminderActionSchema } from '../modules/ai/interpretationSchema';
 import {
+  MAX_COVER_CIRCLES,
   MIN_RADIUS_M,
+  coverCircles,
   distanceM,
   enclosingCircle,
   isInPlace,
@@ -66,6 +68,35 @@ describe('place geometry', () => {
     const justOutside = offset(-10, 200); // 10 m below the bottom edge
     assert.equal(isInPlace(justOutside, place), false);
     assert.equal(isInPlace(justOutside, place, 25), true);
+  });
+
+  it('covers an irregular shape with a few circles that skip its empty corner', () => {
+    const drawn = placeGeometry({ area: L_SHAPE.map((p) => [p.lat, p.lng]) });
+    assert.ok(!('error' in drawn));
+    const circles = coverCircles(drawn);
+    assert.ok(circles.length > 1 && circles.length <= MAX_COVER_CIRCLES, `${circles.length} circles`);
+
+    const inAny = (p: LatLng) => circles.some((c) => distanceM(p, c.center) <= c.radiusM + 0.5);
+    // Every part of the L is watched…
+    for (let n = 0; n <= 400; n += 25) {
+      assert.ok(inAny(offset(50, n)), `bottom arm at ${n} m`);
+      assert.ok(inAny(offset(n, 50)), `left arm at ${n} m`);
+    }
+    // …and the empty corner is not.
+    assert.equal(inAny(offset(330, 330)), false);
+  });
+
+  it('watches a round shape, or a plain circle, as one circle', () => {
+    const ring: [number, number][] = [];
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * 2 * Math.PI;
+      const p = offset(250 * Math.sin(a), 250 * Math.cos(a));
+      ring.push([p.lat, p.lng]);
+    }
+    const round = placeGeometry({ area: ring });
+    assert.ok(!('error' in round));
+    assert.equal(coverCircles(round).length, 1);
+    assert.equal(coverCircles({ center: ORIGIN, radiusM: 150, area: null }).length, 1);
   });
 
   it('cleans a finger trace: drops duplicates, closes the loop, caps the points', () => {

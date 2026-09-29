@@ -22,7 +22,7 @@ import { isLocalId, pendingCapture, saveNoteEdit, withPendingEdits } from '@/ser
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
-import { formatDueDate } from '@/utils/formatDueDate';
+import { formatDueDate, formatPlaceWhen } from '@/utils/formatDueDate';
 import { shareNote } from '@/utils/share';
 
 export type NoteDetailProps = {
@@ -302,7 +302,7 @@ export function NoteDetail({
                         </Pressable>
                       ))}
                       {capture.reminders.map((r) => {
-                        const when = formatDueDate(r.due_at) ?? r.place_hint;
+                        const when = formatDueDate(r.due_at) ?? formatPlaceWhen(r);
                         return (
                           <Pressable
                             key={r.id}

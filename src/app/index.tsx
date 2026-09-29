@@ -33,6 +33,7 @@ import {
   type HomeState,
   type RecentItem,
 } from '@/features/Home/useHome';
+import { usePlaceSync } from '@/features/places/usePlaceSync';
 import { useReminderSync } from '@/features/reminders/useReminderSync';
 import { useEntitlement } from '@/hooks/useEntitlement';
 import { useKeyboardLift } from '@/hooks/useKeyboardLift';
@@ -55,7 +56,7 @@ import {
   text,
   withOpacity,
 } from '@/theme/theme';
-import { formatDueDate } from '@/utils/formatDueDate';
+import { formatDueDate, formatPlaceWhen } from '@/utils/formatDueDate';
 import { timeAgo } from '@/utils/timeAgo';
 
 import AuthScreen from '../features/Auth/AuthScreen';
@@ -167,6 +168,9 @@ function KandooHome() {
   // Set up notification channels/permissions and rebuild the local schedule
   // from the server's active reminders. Replaces the retired server-push path.
   useReminderSync(true);
+  // Pro: hand the OS the places to watch, so arriving fires place reminders
+  // and Kandoo Moments with the app closed. A no-op for free users.
+  usePlaceSync(true);
 
   // A Recently row opens its note — unless a FREE user taps a capture older
   // than the free window, which opens the paywall (the row still looks normal).
@@ -849,7 +853,7 @@ function buildChips(response: InterpretationResponse): Chip[] {
 
     if (result.kind === 'reminder') {
       const r = result.reminder;
-      const when = formatDueDate(r.due_at) ?? r.place_hint ?? 'Reminder';
+      const when = formatDueDate(r.due_at) ?? formatPlaceWhen(r) ?? 'Reminder';
       const guessed = guessedTimes && !!r.due_at;
       times.push({
         kind: 'time',
@@ -1034,7 +1038,7 @@ function buildTicks(results: InterpretResult[]): string[] {
     if (result.status !== 'ok') continue;
     if (result.kind === 'reminder') {
       const when =
-        formatDueDate(result.reminder.due_at) ?? result.reminder.place_hint;
+        formatDueDate(result.reminder.due_at) ?? formatPlaceWhen(result.reminder);
       ticks.push(
         `Reminder · ${result.reminder.task}${when ? ` · ${when}` : ''}`
       );

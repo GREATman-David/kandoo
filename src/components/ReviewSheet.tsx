@@ -14,7 +14,7 @@ import {
 } from '@/services/interpretationService';
 import { scheduleReminder } from '@/services/localNotifications';
 import { colors, radius, spacing, text, withOpacity } from '@/theme/theme';
-import { formatDueDate } from '@/utils/formatDueDate';
+import { formatDueDate, formatPlaceWhen } from '@/utils/formatDueDate';
 
 export type ReviewSheetProps = {
   visible: boolean;
@@ -91,7 +91,9 @@ function buildReminderChips(
   const due = formatDueDate(reminder.due_at);
   if (due) chips.push({ label: due, guessed: guessedTime });
   if (reminder.person) chips.push({ label: reminder.person });
-  if (reminder.place_hint) chips.push({ label: reminder.place_hint });
+  const place = formatPlaceWhen(reminder);
+  if (place) chips.push({ label: place });
+  else if (reminder.place_hint) chips.push({ label: reminder.place_hint });
   return capChips(chips);
 }
 

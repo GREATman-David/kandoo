@@ -1,4 +1,5 @@
 import { cancelAllReminders } from './localNotifications';
+import { stopWatchingPlaces } from './places/placeEngine';
 import { clearOfflineCache } from './offlineCache';
 import { supabase } from './supabase';
 
@@ -41,7 +42,14 @@ export async function signOut() {
     throw error;
   }
 
-  await Promise.all([clearOfflineCache(), cancelAllReminders()]);
+  await Promise.all([
+    clearOfflineCache(),
+    cancelAllReminders(),
+    // Stop watching this account's places and forget its visit history.
+    stopWatchingPlaces({ forget: true }).catch((error) =>
+      console.error('Stopping places on sign-out failed:', error)
+    ),
+  ]);
 }
 
 /** Send a password-reset email. Errors bubble up for authErrorMessage to map. */

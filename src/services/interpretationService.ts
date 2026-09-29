@@ -10,6 +10,8 @@ import {
 } from './offlineCache';
 import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 
+import type { LatLng } from '@/utils/geo';
+
 import { supabase } from './supabase';
 
 function requireEnv(value: string | undefined, name: string): string {
@@ -311,6 +313,10 @@ export type CreatedReminder = {
   capture_id?: string | null;
   /** Weekdays it repeats on (0 = Sunday … 6 = Saturday); null = once. */
   repeat_days?: number[] | null;
+  /** Place reminders: fires on arriving (default) or leaving. */
+  place_trigger?: 'arrive' | 'leave';
+  /** Place reminders: an arrival before this instant does not fire it. */
+  not_before?: string | null;
 };
 
 export type CreatedMemory = {
@@ -364,6 +370,8 @@ export type CaptureNoteReminder = {
   person: string | null;
   due_at: string | null;
   place_hint: string | null;
+  place_trigger?: 'arrive' | 'leave';
+  not_before?: string | null;
   status: ReminderStatus;
   created_at: string;
 };
@@ -892,5 +900,141 @@ export async function dismissReminder(reminderId: string): Promise<void> {
       },
     },
     'Failed to dismiss reminder.'
+  );
+}
+
+// ---- Places ----
+
+export type PlaceSummary = {
+  id: string;
+  name: string;
+  /** Null until the user draws the place — known, but not yet watched. */
+  center: LatLng | null;
+  radiusM: number | null;
+  /** The traced shape; null = the area is the circle itself. */
+  area: LatLng[] | null;
+  memoryCount: number;
+  /** Place reminders still to come. */
+  waitingCount: number;
+  /** The newest memory here — what a Kandoo Moment says on arrival. */
+  latestMemory: { id: string; content: string; created_at: string } | null;
+  lastMentionedAt: string;
+};
+
+export type PlaceDetail = PlaceSummary & {
+  memories: { id: string; content: string; created_at: string; capture_id: string | null }[];
+  reminders: (Pick<
+    CreatedReminder,
+    'id' | 'task' | 'person' | 'status' | 'due_at' | 'not_before' | 'place_trigger' | 'insistent' | 'created_at'
+  > & { capture_id: string | null })[];
+};
+
+/** What the user drew: a traced shape, or a plain circle. */
+export type PlaceDrawing =
+  | { area: LatLng[] }
+  | { center: LatLng; radiusM: number };
+
+/** Drawing a place is Pro; the server answers 402 `pro_required` otherwise. */
+export function isProRequired(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 402;
+}
+
+/** The Places tab, also what the phone watches. Cached for offline viewing. */
+export async function fetchPlaces(): Promise<PlaceSummary[]> {
+  return withOfflineCache('places', () => fetchPlacesLive(), isNetworkError);
+}
+
+/**
+ * Live server truth for the geofence sync. NOT cached, for the same reason as
+ * fetchActiveReminders: the sync stops watching anything missing from it.
+ */
+export async function fetchPlacesLive(): Promise<PlaceSummary[]> {
+  const accessToken = await getAccessTokenOrThrow();
+  const data = await apiFetch<{ places?: PlaceSummary[] }>(
+    '/places',
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    'Failed to load places.'
+  );
+  return data.places ?? [];
+}
+
+export async function fetchPlace(id: string): Promise<PlaceDetail | null> {
+  return withOfflineCache(`place:${id}`, async () => {
+    const accessToken = await getAccessTokenOrThrow();
+    const data = await apiFetch<{ place?: PlaceDetail }>(
+      `/places/${encodeURIComponent(id)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+      'Failed to load that place.'
+    );
+    return data.place ?? null;
+  }, isNetworkError);
+}
+
+async function sendPlace<T>(
+  path: string,
+  method: 'POST' | 'PATCH' | 'DELETE',
+  body: unknown,
+  fallback: string
+): Promise<T> {
+  const accessToken = await getAccessTokenOrThrow();
+  return apiFetch<T>(
+    path,
+    {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    },
+    fallback
+  );
+}
+
+/** Save a newly drawn place. `replace` redraws one that already has an area. */
+export async function createPlace(
+  name: string,
+  drawing: PlaceDrawing,
+  opts: { replace?: boolean } = {}
+): Promise<PlaceSummary> {
+  const data = await sendPlace<{ place: PlaceSummary }>(
+    '/places',
+    'POST',
+    { name, ...drawing, replace: opts.replace === true },
+    'Could not save that place.'
+  );
+  return data.place;
+}
+
+/** Rename and/or redraw a place. */
+export async function updatePlace(
+  id: string,
+  patch: { name?: string } & Partial<PlaceDrawing>
+): Promise<PlaceDetail> {
+  const data = await sendPlace<{ place: PlaceDetail }>(
+    `/places/${encodeURIComponent(id)}`,
+    'PATCH',
+    patch,
+    'Could not update that place.'
+  );
+  return data.place;
+}
+
+/** Stop watching a place, keeping everything said about it. */
+export async function clearPlaceArea(id: string): Promise<void> {
+  await sendPlace<unknown>(
+    `/places/${encodeURIComponent(id)}/area`,
+    'DELETE',
+    undefined,
+    'Could not update that place.'
+  );
+}
+
+export async function deletePlace(id: string): Promise<void> {
+  await sendPlace<unknown>(
+    `/places/${encodeURIComponent(id)}`,
+    'DELETE',
+    undefined,
+    'Could not delete that place.'
   );
 }

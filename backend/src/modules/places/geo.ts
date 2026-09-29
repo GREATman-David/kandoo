@@ -227,6 +227,94 @@ export function placeGeometry(input: {
   };
 }
 
+/** Area of a traced shape in square metres (shoelace, local projection). */
+export function areaSquareM(area: LatLng[]): number {
+  if (area.length < 3) return 0;
+  const poly = area.map((q) => project(area[0], q));
+  let sum = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    sum += (poly[j].x + poly[i].x) * (poly[j].y - poly[i].y);
+  }
+  return Math.abs(sum) / 2;
+}
+
+/** Most circles one place may use — 15 watched places × 6 stays under Android's 100. */
+export const MAX_COVER_CIRCLES = 6;
+/** A shape filling this much of its enclosing circle is watched as that one circle. */
+const ROUND_ENOUGH = 0.6;
+
+/**
+ * The circles the phone actually watches for a place. Android watches circles
+ * only; one enclosing circle would fire in the empty corner of an L-shaped
+ * campus. So an irregular shape is covered by up to MAX_COVER_CIRCLES smaller
+ * circles centred inside the shape — every point of the shape is inside one of
+ * them, and none reaches more than one circle-radius beyond its edge. A shape
+ * that is roughly round, or too small to split, stays one circle.
+ *
+ * No background GPS, no foreground service: the OS does all the watching, and
+ * entering ANY of a place's circles is arriving at the place.
+ */
+export function coverCircles(place: PlaceGeometry): Circle[] {
+  const whole: Circle = { center: place.center, radiusM: place.radiusM };
+  const area = place.area;
+  if (!area) return [whole];
+
+  const fill = areaSquareM(area) / (Math.PI * place.radiusM * place.radiusM);
+  if (fill >= ROUND_ENOUGH) return [whole];
+
+  const origin = place.center;
+  const poly = area.map((q) => project(origin, q));
+  const xs = poly.map((p) => p.x);
+  const ys = poly.map((p) => p.y);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const shape = poly.map((p) => unproject(origin, p));
+
+  // Points that must be covered: every vertex, edge midpoints, and a fine
+  // interior grid — enough to catch any gap between circles.
+  const samples: XY[] = [...poly];
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    samples.push({ x: (poly[i].x + poly[j].x) / 2, y: (poly[i].y + poly[j].y) / 2 });
+  }
+  const step = Math.max(10, Math.max(maxX - minX, maxY - minY) / 20);
+  for (let x = minX; x <= maxX; x += step) {
+    for (let y = minY; y <= maxY; y += step) {
+      if (pointInArea(unproject(origin, { x, y }), shape)) samples.push({ x, y });
+    }
+  }
+
+  // Candidate centres: points INSIDE the shape only, so no circle reaches more
+  // than one radius past the edge the user drew.
+  const candidates = samples.filter((s, i) => i >= poly.length * 2 || pointInArea(unproject(origin, s), shape));
+
+  for (let r = MIN_RADIUS_M; r < place.radiusM; r *= 1.2) {
+    // Greedy set cover: take the centre covering the most still-uncovered
+    // points, until everything is covered or the budget is spent.
+    let uncovered = samples;
+    const centers: XY[] = [];
+    while (uncovered.length > 0 && centers.length < MAX_COVER_CIRCLES) {
+      let best: XY | null = null;
+      let bestCount = 0;
+      for (const c of candidates) {
+        let count = 0;
+        for (const s of uncovered) if (Math.hypot(s.x - c.x, s.y - c.y) <= r) count++;
+        if (count > bestCount) {
+          best = c;
+          bestCount = count;
+        }
+      }
+      if (!best) break;
+      const chosen = best;
+      centers.push(chosen);
+      uncovered = uncovered.filter((s) => Math.hypot(s.x - chosen.x, s.y - chosen.y) > r);
+    }
+    if (uncovered.length === 0) {
+      return centers.map((c) => ({ center: unproject(origin, c), radiusM: r }));
+    }
+  }
+
+  return [whole];
+}
+
 /** Stored form of an area: compact [[lat, lng], ...], 6 decimals (~10 cm). */
 export function areaToRows(area: LatLng[] | null): [number, number][] | null {
   return area

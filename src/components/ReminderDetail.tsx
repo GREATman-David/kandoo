@@ -24,7 +24,7 @@ import {
   scheduleReminder,
 } from '@/services/localNotifications';
 import { colors, radius, spacing, text } from '@/theme/theme';
-import { formatDueDate } from '@/utils/formatDueDate';
+import { formatDueDate, formatPlaceWhen } from '@/utils/formatDueDate';
 import { isRepeating, repeatWhen } from '@/utils/repeat';
 import { timeAgo } from '@/utils/timeAgo';
 
@@ -181,7 +181,7 @@ export function ReminderDetail({
   const when =
     r.due_at && isRepeating(r.repeat_days)
       ? repeatWhen(r.due_at, r.repeat_days)
-      : (formatDueDate(r.due_at) ?? r.place_hint ?? 'No time set');
+      : (formatDueDate(r.due_at) ?? formatPlaceWhen(r) ?? 'No time set');
   const sourceLine = r.capture_id
     ? ['From ' + (sourceTitle ?? 'what you said'), timeAgo(r.created_at)].join(' · ')
     : ['Added by you', timeAgo(r.created_at)].join(' · ');

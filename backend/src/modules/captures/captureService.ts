@@ -129,6 +129,8 @@ export type CaptureNote = {
     person: string | null;
     due_at: string | null;
     place_hint: string | null;
+    place_trigger?: 'arrive' | 'leave';
+    not_before?: string | null;
     status: string;
     created_at: string;
   }[];
@@ -201,7 +203,7 @@ export async function listCaptureNotes(
       .in('capture_id', captureIds),
     supabase
       .from('reminders')
-      .select('id, capture_id, task, person, due_at, place_hint, status, created_at')
+      .select('id, capture_id, task, person, due_at, place_hint, place_trigger, not_before, status, created_at')
       .eq('user_id', userId)
       .in('capture_id', captureIds),
   ]);
@@ -232,6 +234,8 @@ export async function listCaptureNotes(
       person: (r.person as string | null) ?? null,
       due_at: (r.due_at as string | null) ?? null,
       place_hint: (r.place_hint as string | null) ?? null,
+      place_trigger: r.place_trigger === 'leave' ? 'leave' : 'arrive',
+      not_before: (r.not_before as string | null) ?? null,
       status: r.status as string,
       created_at: r.created_at as string,
     });
@@ -294,7 +298,7 @@ export async function getCaptureNote(
       .eq('capture_id', captureId),
     supabase
       .from('reminders')
-      .select('id, task, person, due_at, place_hint, status, created_at')
+      .select('id, task, person, due_at, place_hint, place_trigger, not_before, status, created_at')
       .eq('user_id', userId)
       .eq('capture_id', captureId),
   ]);
