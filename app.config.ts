@@ -49,6 +49,9 @@ const config: ExpoConfig = {
     // Adds SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM so time reminders fire on the
     // second rather than whenever Doze next wakes. expo-notifications omits it.
     './plugins/withExactAlarmPermission',
+    // Full-screen reminder alerts over the lock screen (with the
+    // expo-notifications patch in patches/). See the plugin's comment.
+    './plugins/withFullScreenReminders',
     // Keeps RevenueCat's Test Store usable in the sideloaded release APK.
     // Remove before any store submission (see the plugin's comment).
     './plugins/withRevenueCatTestStoreRelease',

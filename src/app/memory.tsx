@@ -104,6 +104,12 @@ export default function MemoryScreen() {
   const [noteId, setNoteId] = useState<string | null>(null);
   const [memoryTarget, setMemoryTarget] = useState<MemoryDetailTarget | null>(null);
   const [fork, setFork] = useState<CaptureNote | null>(null);
+
+  // An edit or delete made from a note/memory opened over the chooser reloads
+  // the list; keep the chooser showing the fresh copy (or close it if gone).
+  useEffect(() => {
+    setFork((current) => (current ? (notes.find((n) => n.id === current.id) ?? null) : null));
+  }, [notes]);
   const [personId, setPersonId] = useState<string | null>(null);
   const [reminder, setReminder] = useState<CreatedReminder | null>(null);
   const [paywall, setPaywall] = useState(false);
@@ -457,12 +463,10 @@ export default function MemoryScreen() {
         capture={fork}
         visible={fork !== null}
         onClose={() => setFork(null)}
-        onOpenNote={(capture) => {
-          setFork(null);
-          setNoteId(capture.id);
-        }}
+        // The chooser stays open underneath: the note or memory opens on top of
+        // it, so going back from either returns here, not to the Memory list.
+        onOpenNote={(capture) => setNoteId(capture.id)}
         onOpenMemory={(capture, m) => {
-          setFork(null);
           setMemoryTarget({
             id: m.id,
             content: m.content,

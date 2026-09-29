@@ -1,6 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+import { buildAlertLink } from '@/utils/alertLink';
 import { isRepeating, normalizeDays } from '@/utils/repeat';
 
 import type { CreatedReminder } from './interpretationService';
@@ -21,6 +22,12 @@ import {
  */
 
 const CHANNEL_DEFAULT = 'kandoo-reminders';
+/**
+ * Bumped when scheduled notifications change shape. Launch reconcile
+ * reschedules anything older, so reminders set before an update pick it up
+ * (version 2: the full-screen alert link).
+ */
+const SCHEDULE_VERSION = 2;
 const CHANNEL_INSISTENT = 'kandoo-alarms';
 
 let channelsReady = false;
@@ -127,6 +134,14 @@ export async function scheduleReminder(
       reminderId: reminder.id,
       repeating: !!days,
       insistent: reminder.insistent,
+      // Full-screen intent: with the phone locked or the screen off, Android
+      // opens this link — the reminder's full-screen alert — and wakes it.
+      kandooAlertUrl: buildAlertLink({
+        reminderId: reminder.id,
+        title: reminder.task,
+        repeating: !!days,
+        insistent: reminder.insistent,
+      }),
     },
   };
   const channelId = channelFor(reminder);
@@ -154,6 +169,7 @@ export async function scheduleReminder(
       notificationIds: ids,
       dueAt: reminder.due_at,
       repeat: days.join(','),
+      version: SCHEDULE_VERSION,
     });
     return ids[0];
   }
@@ -173,6 +189,7 @@ export async function scheduleReminder(
     notificationId,
     dueAt: reminder.due_at,
     repeat: '',
+    version: SCHEDULE_VERSION,
   });
 
   return notificationId;
@@ -215,7 +232,12 @@ export async function snoozeRepeatingOnce(
       title: alert.title,
       body: alert.body,
       sound: true,
-      data: { reminderId: alert.reminderId, repeating: true, insistent: alert.insistent },
+      data: {
+        reminderId: alert.reminderId,
+        repeating: true,
+        insistent: alert.insistent,
+        kandooAlertUrl: buildAlertLink({ ...alert, repeating: true }),
+      },
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.DATE,
@@ -278,7 +300,12 @@ export async function reconcileReminders(
   for (const reminder of desired) {
     const entry = await getTrigger(reminder.id);
     const repeat = normalizeDays(reminder.repeat_days)?.join(',') ?? '';
-    if (entry && entry.dueAt === reminder.due_at && (entry.repeat ?? '') === repeat) {
+    if (
+      entry &&
+      entry.dueAt === reminder.due_at &&
+      (entry.repeat ?? '') === repeat &&
+      entry.version === SCHEDULE_VERSION
+    ) {
       continue;
     }
     await scheduleReminder(reminder);

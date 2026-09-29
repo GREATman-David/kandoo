@@ -21,6 +21,8 @@ export type TriggerEntry = {
   dueAt: string;
   /** Its repeat days at schedule time ("1,3,5"; "" = once). Detects a change. */
   repeat?: string;
+  /** Which notification format it was scheduled with (SCHEDULE_VERSION). */
+  version?: number;
 };
 
 /** All OS notification ids an entry owns. */

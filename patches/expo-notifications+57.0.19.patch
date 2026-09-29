@@ -1,0 +1,33 @@
+diff --git a/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt b/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
+index 610d303..bb2de4d 100644
+--- a/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
++++ b/node_modules/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt
+@@ -147,6 +147,28 @@ open class ExpoNotificationBuilder(
+       )
+     )
+ 
++    // Kandoo: a reminder whose data carries `kandooAlertUrl` gets a full-screen
++    // intent. With the phone locked or the screen off, Android launches the app
++    // straight onto that URL (its full-screen alert) and wakes the screen; with
++    // the phone in use it shows as a heads-up banner instead. See
++    // plugins/withFullScreenReminders.js for the lock-screen side.
++    val kandooAlertUrl = content.body?.optString("kandooAlertUrl")
++    if (!kandooAlertUrl.isNullOrEmpty()) {
++      context.packageManager.getLaunchIntentForPackage(context.packageName)?.let { launch ->
++        launch.action = android.content.Intent.ACTION_VIEW
++        launch.data = android.net.Uri.parse(kandooAlertUrl)
++        launch.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
++        val fullScreen = android.app.PendingIntent.getActivity(
++          context,
++          notification.notificationRequest.identifier.hashCode(),
++          launch,
++          android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
++        )
++        builder.setFullScreenIntent(fullScreen, true)
++        builder.setCategory(NotificationCompat.CATEGORY_ALARM)
++      }
++    }
++
+     if (notificationContent.containsImage()) {
+       val bitmap = notificationContent.getImage(context)
+       bitmap?.let { builder.setLargeIcon(it) }

@@ -1,6 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { useEffect, useState } from 'react';
-import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { KandooSymbol } from '@/components/Symbol';
@@ -24,6 +24,9 @@ export type AlertReminder = {
   insistent: boolean;
   /** When it went off (ms), shown beside IT'S TIME. */
   firedAt: number;
+  /** Opened over the lock screen by the full-screen intent: closing it hands
+   *  back to the lock screen instead of revealing the app. */
+  fromLockScreen: boolean;
 };
 
 export type ReminderAlertProps = {
@@ -81,12 +84,11 @@ export function ReminderAlert({ alert, onClose }: ReminderAlertProps) {
   const minutes = SNOOZE_STEPS[step];
 
   const close = () => {
-    if (alert.notificationId) {
-      Notifications.dismissNotificationAsync(alert.notificationId).catch((caught: unknown) =>
-        logFailure('Clearing the reminder notification failed:', caught)
-      );
-    }
+    void clearFromShade(alert);
     onClose();
+    // Over the lock screen, the app itself must not be left showing: step back
+    // to the lock screen (MainActivity drops its lock-screen flags on stop).
+    if (alert.fromLockScreen) BackHandler.exitApp();
   };
 
   // A reminder scheduled before the alert existed doesn't say whether it
@@ -251,6 +253,25 @@ export function ReminderAlert({ alert, onClose }: ReminderAlertProps) {
       </View>
     </Modal>
   );
+}
+
+/** Remove this reminder's notification from the shade once it's been handled. */
+async function clearFromShade(alert: AlertReminder): Promise<void> {
+  try {
+    if (alert.notificationId) {
+      await Notifications.dismissNotificationAsync(alert.notificationId);
+      return;
+    }
+    // Opened from the lock screen: the link doesn't carry the notification id.
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    for (const n of presented) {
+      if (n.request.content.data?.reminderId === alert.reminderId) {
+        await Notifications.dismissNotificationAsync(n.request.identifier);
+      }
+    }
+  } catch (caught) {
+    logFailure('Clearing the reminder notification failed:', caught);
+  }
 }
 
 /** The 16px checkered frame round the edge of the screen. */

@@ -1,8 +1,10 @@
 import * as Notifications from 'expo-notifications';
 import { useEffect, useRef, useState } from 'react';
+import { AppState, Linking } from 'react-native';
 
 import { type AlertReminder, ReminderAlert } from '@/components/ReminderAlert';
 import { useAuth } from '@/features/Auth/useAuth';
+import { parseAlertLink } from '@/utils/alertLink';
 
 /** The alert a reminder notification carries; null for any other notification. */
 function alertFrom(notification: Notifications.Notification): AlertReminder | null {
@@ -18,17 +20,35 @@ function alertFrom(notification: Notifications.Notification): AlertReminder | nu
     insistent: content.data?.insistent === true,
     // The moment it was delivered; a tapped-later alert still shows that time.
     firedAt: Number.isFinite(notification.date) && notification.date > 0 ? notification.date : Date.now(),
+    fromLockScreen: false,
+  };
+}
+
+/** The alert Android opened over the lock screen via its full-screen intent. */
+function alertFromLink(url: string | null): AlertReminder | null {
+  const link = parseAlertLink(url);
+  if (!link) return null;
+  return {
+    ...link,
+    notificationId: null,
+    body: '',
+    firedAt: Date.now(),
+    fromLockScreen: true,
   };
 }
 
 /**
- * Brings a reminder up full screen (ReminderAlert):
+ * Brings a reminder up full screen (ReminderAlert) in the three ways Android
+ * allows:
  *
- *   - the moment it fires while the app is open (the banner is suppressed for
- *     reminders in localNotifications, so this replaces it), and
- *   - when its notification is tapped — from the shade, or from the lock screen
- *     once the phone is unlocked — including the tap that launched the app from
- *     closed (the hook returns the last response either way).
+ *   - Phone locked or screen off: the notification's full-screen intent wakes
+ *     the screen and opens kandoo://alert over the lock screen (see
+ *     plugins/withFullScreenReminders.js). Closing it returns to the lock
+ *     screen; nothing else in the app is reachable without unlocking.
+ *   - Using Kandoo: it appears the moment the reminder fires (the banner is
+ *     suppressed for reminders in localNotifications).
+ *   - Using another app: Android shows a heads-up banner; tapping it opens the
+ *     alert. It does NOT wait inside Kandoo for the next time it is opened.
  *
  * Only for a signed-in user. Each tap is handled once, then cleared so a later
  * remount doesn't reopen it.
@@ -37,13 +57,34 @@ export function NotificationRouter() {
   const response = Notifications.useLastNotificationResponse();
   const { isAuthenticated } = useAuth();
   const handled = useRef<string | null>(null);
+  const initialLinkChecked = useRef(false);
   const [alert, setAlert] = useState<AlertReminder | null>(null);
 
-  // Fired while the app is open.
+  // Fired while Kandoo is open and in front.
   useEffect(() => {
     if (!isAuthenticated) return;
     const subscription = Notifications.addNotificationReceivedListener((notification) => {
+      if (AppState.currentState !== 'active') return;
       const next = alertFrom(notification);
+      if (next) setAlert(next);
+    });
+    return () => subscription.remove();
+  }, [isAuthenticated]);
+
+  // Opened over the lock screen by the full-screen intent.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (!initialLinkChecked.current) {
+      initialLinkChecked.current = true;
+      Linking.getInitialURL()
+        .then((url) => {
+          const next = alertFromLink(url);
+          if (next) setAlert(next);
+        })
+        .catch((error: unknown) => console.warn('Reading the launch link failed:', error));
+    }
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      const next = alertFromLink(url);
       if (next) setAlert(next);
     });
     return () => subscription.remove();
