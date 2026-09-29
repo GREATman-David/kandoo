@@ -29,6 +29,7 @@ import {
   fetchCaptureNotes,
   fetchPeople,
   interpretText,
+  degradedReason,
   isNetworkError,
   type CaptureNote,
   type CaptureNoteMemory,
@@ -207,7 +208,9 @@ export default function MemoryScreen() {
     } catch (caught) {
       logFailure('Ask failed:', caught);
       // Offline: answer from what is saved on this phone when anything matches.
-      const offlineAnswer = isNetworkError(caught) ? await answerOffline(q) : null;
+      const offlineAnswer = isNetworkError(caught)
+        ? await answerOffline(q, degradedReason(caught))
+        : null;
       if (offlineAnswer) {
         setAnswer(offlineAnswer);
         return;

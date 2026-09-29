@@ -1,5 +1,6 @@
 import { supabase } from '../../services/supabase';
-import { aiProvider } from '../ai';
+import { aiProvider, withDeadline } from '../ai';
+import { answerFromMatches } from '../ai/fallbackProvider';
 
 import type { RecallMemory } from '../ai/aiProvider';
 import type { RecallAction } from '../ai/interpretationSchema';
@@ -30,7 +31,9 @@ export async function recallMemories(
 
   let queryEmbedding: number[] | null = null;
   try {
-    const [vector] = await aiProvider.embed([query], 'query');
+    // Bounded: with the embedding model overloaded, lexical-only recall now
+    // beats a semantic answer that arrives after the app has given up.
+    const [vector] = await withDeadline(aiProvider.embed([query], 'query'), 4_000, 'Query embedding');
     queryEmbedding = vector ?? null;
   } catch (error) {
     console.error('Query embedding failed; using lexical only:', error);
@@ -49,6 +52,15 @@ export async function recallMemories(
   }
 
   let results = (data ?? []) as RecallMemory[];
+
+  // Without an embedding the RPC ranks on words alone, and ts_rank gives rows
+  // that share NO words a vanishing non-zero score, so they'd pass `score > 0`
+  // and answer with unrelated memories. Keep only real word matches; if that
+  // leaves nothing, the per-word fallback (any salient word) does better.
+  if (!queryEmbedding) {
+    results = results.filter((m) => (m.score ?? 0) > LEXICAL_MIN_SCORE);
+    if (results.length === 0) return fallbackRecall(userId, query, matchCount);
+  }
 
   // Scope filters are a narrowing pass, never a widening one: if scoping
   // removes everything, fall back to the unscoped ranking rather than
@@ -72,9 +84,13 @@ export async function recallMemories(
   return results;
 }
 
+/** Below this, a lexical-only match_context score means "no word in common". */
+const LEXICAL_MIN_SCORE = 1e-6;
+
 /**
- * Used only when the RPC is unavailable (e.g. migration not yet applied).
- * Lexical match on individual salient words across memories and reminders.
+ * Used when the RPC is unavailable, or with no embedding when the RPC finds no
+ * real word match. Matches individual salient words across memories and
+ * reminders, best first: the most query words matched, then the most recent.
  */
 async function fallbackRecall(
   userId: string,
@@ -137,7 +153,15 @@ async function fallbackRecall(
     })),
   ];
 
-  return items.slice(0, limit);
+  const hits = (text: string) => {
+    const lower = text.toLowerCase();
+    return terms.filter((term) => lower.includes(term)).length;
+  };
+  return items
+    .map((item) => ({ item, score: hits(item.content) }))
+    .sort((a, b) => b.score - a.score || Date.parse(b.item.created_at) - Date.parse(a.item.created_at))
+    .map(({ item }) => item)
+    .slice(0, limit);
 }
 
 const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000;
@@ -166,12 +190,19 @@ const PRO_ONLY_LINE =
 export async function answerRecall(
   userId: string,
   action: RecallAction,
-  isPro: boolean
+  isPro: boolean,
+  opts: { noModel?: boolean } = {}
 ): Promise<{ answer: string; memories: RecallMemory[]; proBoundaryHit: boolean }> {
   const all = await recallMemories(userId, action);
+  // Every model is known to be down: answer from the matches directly rather
+  // than spend the time budget failing again.
+  const generate = (question: string, memories: RecallMemory[]) =>
+    opts.noModel
+      ? Promise.resolve(answerFromMatches(memories))
+      : aiProvider.generateRecallAnswer(question, memories);
 
   if (isPro) {
-    const answer = await aiProvider.generateRecallAnswer(action.query, all);
+    const answer = await generate(action.query, all);
     return { answer, memories: all, proBoundaryHit: false };
   }
 
@@ -193,7 +224,7 @@ export async function answerRecall(
     firstOlder !== -1 && (firstRecent === -1 || firstOlder < firstRecent);
 
   if (!olderOutranks) {
-    const answer = await aiProvider.generateRecallAnswer(action.query, recent);
+    const answer = await generate(action.query, recent);
     return { answer, memories: recent, proBoundaryHit: false };
   }
 
@@ -202,7 +233,7 @@ export async function answerRecall(
     return { answer: PRO_ONLY_LINE, memories: [], proBoundaryHit: true };
   }
 
-  const answer = await aiProvider.generateRecallAnswer(action.query, recent);
+  const answer = await generate(action.query, recent);
   return {
     answer: `${answer}\n\n${PRO_MORE_LINE}`,
     memories: recent,

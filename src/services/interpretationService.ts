@@ -76,13 +76,34 @@ export class ApiError extends Error {
 }
 
 /**
+ * The server is up and answered, but every AI model is busy or down (Google or
+ * OpenAI overloaded). What the user said IS saved on the server. NOT offline:
+ * the app says the AI is busy and offers to keep the words as a memory.
+ */
+export class AiBusyError extends ApiError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AiBusyError';
+  }
+}
+
+/** Why an answer had to come from saved copies — said honestly to the user. */
+export function degradedReason(error: unknown): 'offline' | 'slow' {
+  return error instanceof TimeoutError ? 'slow' : 'offline';
+}
+
+/**
  * Log a failed backend call at the right level. Being offline or timing out is
  * an expected state the UI already handles (saved copies, a friendly line), so
  * it is a warning; anything else is a real error worth the red dev overlay.
  */
 export function logFailure(label: string, error: unknown): void {
-  if (error instanceof NetworkError) console.warn(label, error.message);
-  else console.error(label, error);
+  // Offline, slow, or the AI busy upstream: expected states with their own UI.
+  if (error instanceof NetworkError || error instanceof AiBusyError) {
+    console.warn(label, error.message);
+  } else {
+    console.error(label, error);
+  }
 }
 
 /**
@@ -149,9 +170,11 @@ async function apiFetch<T>(
     markNetworkOk();
     return result;
   } catch (error) {
-    // Only a lost connection or timeout opens the "known offline" window; a
-    // real answer from the server (even an error) means we are online.
-    if (error instanceof NetworkError) markNetworkFailure();
+    // Only a lost connection (or a plain read timing out) opens the "known
+    // offline" window. A slow AI call is the model being slow, not the phone
+    // being offline; a real answer from the server (even an error) means online.
+    const slowAiCall = error instanceof TimeoutError && (opts.timeoutMs ?? 0) >= AI_TIMEOUT_MS;
+    if (error instanceof NetworkError && !slowAiCall) markNetworkFailure();
     else markNetworkOk();
     throw error;
   }
@@ -254,8 +277,11 @@ async function apiFetchOnce<T>(
   }
 
   if (!response.ok) {
-    const message = (data as { error?: unknown } | null)?.error;
-    throw new ApiError(typeof message === 'string' ? message : fallbackMessage);
+    const { error: message, code } = (data ?? {}) as { error?: unknown; code?: unknown };
+    const text = typeof message === 'string' ? message : fallbackMessage;
+    // The server is up but its AI models are busy (502 ai_busy): not offline.
+    if (code === 'ai_busy') throw new AiBusyError(text);
+    throw new ApiError(text);
   }
 
   return data as T;

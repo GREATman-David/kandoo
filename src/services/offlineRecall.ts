@@ -69,7 +69,10 @@ function candidatesFrom(captures: CaptureNote[]): Candidate[] {
  * The best few saved lines for `question`, phrased as an offline answer, or
  * null when nothing saved matches (the caller then says it needs a connection).
  */
-export async function answerOffline(question: string): Promise<string | null> {
+export async function answerOffline(
+  question: string,
+  reason: 'offline' | 'slow' = 'offline'
+): Promise<string | null> {
   const wanted = keywords(question);
   if (wanted.length === 0) return null;
 
@@ -101,5 +104,10 @@ export async function answerOffline(question: string): Promise<string | null> {
     const line = candidate.text.trim();
     return /[.!?]$/.test(line) ? line : `${line}.`;
   });
-  return `You're offline, so this is from what's saved. ${lines.join(' ')}`;
+  // Said honestly: offline is the phone; slow is Kandoo taking too long.
+  const lead =
+    reason === 'slow'
+      ? "Kandoo is slow right now, so this is from what's saved on your phone."
+      : "You're offline, so this is from what's saved.";
+  return `${lead} ${lines.join(' ')}`;
 }

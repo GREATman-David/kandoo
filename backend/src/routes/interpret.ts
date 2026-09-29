@@ -5,9 +5,10 @@ import {
   type AuthenticatedRequest,
 } from '../middleware/authenticateRequest';
 import { MAX_CAPTURE_CHARS, aiRateLimit } from '../middleware/rateLimit';
+import { isLikelyQuestion } from '../utils/question';
 import { resolveTimezone } from '../utils/timezone';
 
-import { aiProvider } from '../modules/ai';
+import { AiUnavailableError, aiProvider } from '../modules/ai';
 import {
   attachNote,
   createCapture,
@@ -41,7 +42,21 @@ import {
   updateReminder,
 } from '../modules/reminders/reminderService';
 
-import type { KandooAction } from '../modules/ai/interpretationSchema';
+import type {
+  KandooAction,
+  KandooInterpretation,
+} from '../modules/ai/interpretationSchema';
+
+/**
+ * Every AI model is down or out of time. 502 (an upstream service failed) +
+ * `code: 'ai_busy'`: the app shows this — and offers to save the words as a
+ * memory. Not 503: the app reads a 503 as "the server can't reach its own
+ * services", i.e. offline, which is exactly the wrong thing to tell the user.
+ */
+const AI_BUSY = {
+  code: 'ai_busy',
+  error: 'Kandoo’s AI is busy right now. What you said is kept — try again in a moment.',
+} as const;
 
 const router = Router();
 const isProduction = process.env.NODE_ENV === 'production';
@@ -98,10 +113,25 @@ router.post('/interpret', authenticateRequest, aiRateLimit, async (req, res) => 
           : null,
     });
 
-    const interpretation = await aiProvider.interpret(text, {
-      clientTime,
-      timezone,
-    });
+    // With every model down, a question is still answered straight from the
+    // user's memories (no model involved); anything else is a clear "busy".
+    let interpretation: KandooInterpretation;
+    let modelsDown = false;
+    try {
+      interpretation = await aiProvider.interpret(text, { clientTime, timezone });
+    } catch (aiError) {
+      if (!(aiError instanceof AiUnavailableError)) throw aiError;
+      if (!isLikelyQuestion(text)) {
+        return res.status(502).json({ ...AI_BUSY, captureId: capture.id });
+      }
+      modelsDown = true;
+      interpretation = {
+        summary: null,
+        confidence: 'low',
+        note: null,
+        actions: [{ kind: 'recall', query: text, scopePerson: null, scopePlace: null }],
+      };
+    }
 
     if (!isProduction) {
       console.log(
@@ -177,7 +207,8 @@ router.post('/interpret', authenticateRequest, aiRateLimit, async (req, res) => 
             const { answer, memories, proBoundaryHit } = await answerRecall(
               userId,
               action,
-              pro
+              pro,
+              { noModel: modelsDown }
             );
             results.push({
               kind: 'recall',
@@ -478,6 +509,12 @@ router.post('/captures/:id/note', authenticateRequest, aiRateLimit, async (req, 
     return res.json({ success: true, note });
   } catch (error) {
     console.error('Take note failed:', error);
+    if (error instanceof AiUnavailableError) {
+      return res.status(502).json({
+        code: AI_BUSY.code,
+        error: 'Kandoo’s AI is busy right now — try taking the note again in a moment.',
+      });
+    }
     return res.status(500).json({ error: 'Kandoo could not take a note just now.' });
   }
 });

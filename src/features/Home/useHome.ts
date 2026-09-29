@@ -6,8 +6,10 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
+  AiBusyError,
   confirmReminder,
   createManualCapture,
+  degradedReason,
   fetchCaptureNotes,
   interpretText,
   isNetworkError,
@@ -219,7 +221,7 @@ export function useHome() {
       // No connection, and it reads as a question: answer from what is saved
       // on this phone rather than failing. Said plainly as an offline answer.
       if (isNetworkError(caught) && isLikelyQuestion(text)) {
-        const answer = await answerOffline(text);
+        const answer = await answerOffline(text, degradedReason(caught));
         if (answer) {
           setResponse({
             success: true,
@@ -234,6 +236,14 @@ export function useHome() {
           setState('answered');
           return;
         }
+      }
+
+      // Every AI model is busy: not an error the user made, and not offline.
+      // Kandoo's own voice, with "Save it as a memory" so the words are kept.
+      if (caught instanceof AiBusyError) {
+        setNotice(caught.message);
+        setState('listening');
+        return;
       }
 
       setError(

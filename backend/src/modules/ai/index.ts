@@ -1,4 +1,5 @@
 import type { AIProvider } from './aiProvider';
+import { FallbackAIProvider } from './fallbackProvider';
 import { GeminiProvider } from './geminiProvider';
 import { MockAIProvider } from './mockProvider';
 import { OpenAIProvider } from './openaiProvider';
@@ -18,9 +19,19 @@ function createAIProvider(): AIProvider {
     case 'mock':
       return new MockAIProvider();
     case 'openai':
-      return new OpenAIProvider();
-    case 'gemini':
-      return new GeminiProvider();
+      return new FallbackAIProvider(new OpenAIProvider(), null, {
+        primary: 'OpenAI',
+        backup: null,
+      });
+    case 'gemini': {
+      // OpenAI backs Gemini up for understanding and answers (never for
+      // embeddings) when both its key and model are configured.
+      const hasBackup = !!process.env.OPENAI_API_KEY && !!process.env.OPENAI_MODEL;
+      return new FallbackAIProvider(new GeminiProvider(), hasBackup ? new OpenAIProvider() : null, {
+        primary: 'Gemini',
+        backup: hasBackup ? 'OpenAI' : null,
+      });
+    }
     default:
       throw new Error(
         `Unknown AI_PROVIDER "${provider}". Expected "openai", "gemini" or "mock".`
@@ -32,5 +43,6 @@ function createAIProvider(): AIProvider {
 export const aiProvider: AIProvider = createAIProvider();
 
 export * from './aiProvider';
+export { AiUnavailableError, withDeadline } from './fallbackProvider';
 export * from './interpretationSchema';
 
