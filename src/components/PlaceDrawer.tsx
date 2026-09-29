@@ -27,6 +27,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useKandooMapStyle } from '@/features/places/mapStyle';
+import { useKeyboardLift } from '@/hooks/useKeyboardLift';
 import { placeBounds, placeFeature } from '@/features/places/placeShapes';
 import { searchPlaces, type SearchResult } from '@/features/places/searchPlaces';
 import {
@@ -95,6 +96,8 @@ export function PlaceDrawer({
 }: PlaceDrawerProps) {
   const insets = useSafeAreaInsets();
   const mapStyle = useKandooMapStyle();
+  // Edge-to-edge Android doesn't resize for the keyboard: lift the name card.
+  const keyboard = useKeyboardLift({ inModal: true });
   const mapRef = useRef<MapRef>(null);
   const cameraRef = useRef<CameraRef>(null);
 
@@ -308,7 +311,7 @@ export function PlaceDrawer({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.screen}>
+      <View ref={keyboard.ref} style={styles.screen}>
         <MapView
           ref={mapRef}
           style={StyleSheet.absoluteFill}
@@ -420,7 +423,13 @@ export function PlaceDrawer({
         </View>
 
         {/* Bottom: the one action for this step. */}
-        <View style={[styles.bottom, { paddingBottom: insets.bottom + spacing.space6 }]} pointerEvents="box-none">
+        <View
+          style={[
+            styles.bottom,
+            { paddingBottom: (keyboard.lift > 0 ? keyboard.lift + spacing.space3 : insets.bottom + spacing.space6) },
+          ]}
+          pointerEvents="box-none"
+        >
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           {step === 'browse' ? (

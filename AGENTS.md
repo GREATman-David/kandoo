@@ -293,7 +293,7 @@ duplicated — and native config never depends on a TypeScript import.
 | E. Local notifications | reminder fires with server off | ⬜ |
 | F. Review card | pending → confirmed on device | ⬜ browser-proven, not device-proven |
 | G. Voice | speak → actions appear | ⬜ |
-| H. Geofence | walk in → memory surfaces | ⬜ |
+| H. Geofence (Places, Pro) | walk in → reminder / Moment fires | 🟡 built on `feature/places`; needs migration 007 + device walk test |
 | I. Design tokens + brand | theme, Symbol, BrandIntro | in progress |
 | J. RevenueCat | paywall + `useEntitlement()` | ⬜ |
 | K. Freeze → film → submit | submitted | ⬜ |
@@ -477,3 +477,28 @@ The arm cross-compile and the Defender/`.cxx` race did NOT bite under
 only be filmed on hardware (no emulator has an `android.speech.RecognitionService`),
 so this build is mandatory before filming — do not first discover its runtime on
 the 28th.
+
+**Places: the OS reports every region's CURRENT state the moment you register.**
+expo-location registers geofences with `INITIAL_TRIGGER_ENTER | INITIAL_TRIGGER_EXIT`,
+so (re)registering while at home sends ENTER for home at once. `placeRules.ts`
+records that burst silently (the `settleUntil` window) — otherwise "when I get
+home" fires while the user is sitting at home. `placeSync` only re-registers
+when the set of circles actually changes. expo-task-manager restores the task
+after a reboot (BOOT_COMPLETED), and the persisted region state keeps that
+second burst silent too.
+
+**Places: irregular shapes are covered by circles, not watched with GPS.**
+Android geofences are circles only. A traced shape is covered by ≤ 6 circles
+centred inside it (`coverCircles`, `src/utils/geo.ts`). The alternative —
+starting a location foreground service on arrival to check the exact shape —
+is restricted from the background on Android 12+ and would fail silently.
+`src/utils/geo.ts` is byte-copied to `backend/src/modules/places/geo.ts`;
+edit the app copy, then copy it — a backend test fails if they differ.
+
+**Never import MapLibre's `Map` under its own name.** Same trap as `Symbol`:
+`import { Map as MapView } from '@maplibre/maplibre-react-native'`.
+
+**The app entry is `index.ts`, not `expo-router/entry`.** It defines the
+geofence task before anything else loads, because Android can start Kandoo
+headless just to run it. Do not point `main` back at `expo-router/entry`.
+
