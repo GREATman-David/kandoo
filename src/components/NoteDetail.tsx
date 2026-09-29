@@ -10,15 +10,15 @@ import {
   View,
 } from 'react-native';
 
+import { useKeyboardLift } from '@/hooks/useKeyboardLift';
 import {
   fetchCaptureNote,
-  updateCaptureNote,
   type CaptureNote,
   type CaptureNoteMemory,
   type CaptureNoteReminder,
-  userMessage,
   logFailure,
 } from '@/services/interpretationService';
+import { isLocalId, pendingCapture, saveNoteEdit, withPendingEdits } from '@/services/outbox';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
@@ -70,6 +70,8 @@ export function NoteDetail({
   onOpenMemory,
 }: NoteDetailProps) {
   const insets = useSafeAreaInsets();
+  // While typing, the editor ends at the top of the keyboard (see styles.editor).
+  const keyboard = useKeyboardLift({ inModal: true });
   const [capture, setCapture] = useState<CaptureNote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +92,14 @@ export function NoteDetail({
     setEditing(false);
     setSaveError(null);
     setCapture(null);
-    fetchCaptureNote(captureId)
+    // Saved on this phone and not synced yet: it lives in the outbox. Otherwise
+    // the server's copy, with any edit still waiting to sync laid over it.
+    const load: Promise<CaptureNote | null> = isLocalId(captureId)
+      ? pendingCapture(captureId)
+      : fetchCaptureNote(captureId).then(async (c) =>
+          c ? ((await withPendingEdits([c]))[0] ?? c) : null
+        );
+    load
       .then((c) => {
         if (active) setCapture(c);
       })
@@ -127,15 +136,15 @@ export function NoteDetail({
     setEditing(true);
   }
 
-  const canSave =
-    draftTitle.trim().length > 0 && draftBody.trim().length > 0 && !saving;
+  const canSave = draftTitle.trim().length > 0 && draftBody.trim().length > 0 && !saving;
 
   async function save() {
     if (!capture || !canSave) return;
     setSaving(true);
     setSaveError(null);
     try {
-      await updateCaptureNote(capture.id, {
+      // Saved on this phone at once; the outbox syncs it (no connection needed).
+      await saveNoteEdit(capture.id, {
         title: draftTitle.trim(),
         body: draftBody.trim(),
       });
@@ -147,10 +156,9 @@ export function NoteDetail({
       setEditing(false);
       onChanged?.();
     } catch (caught) {
-      logFailure('Editing note failed:', caught);
-      setSaveError(
-        userMessage(caught, 'Could not save that edit.')
-      );
+      // Only a failure to write to the phone's own storage lands here.
+      logFailure('Saving the note edit on this phone failed:', caught);
+      setSaveError('Could not save that edit on this phone. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -158,7 +166,7 @@ export function NoteDetail({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.screen}>
+      <View ref={keyboard.ref} style={[styles.screen, { paddingBottom: keyboard.lift }]}>
         <View style={[styles.bar, { marginTop: insets.top + spacing.space4 }]}>
           <Pressable
             onPress={onClose}
@@ -188,129 +196,133 @@ export function NoteDetail({
           ) : null}
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.body}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {loading ? (
-            <Text style={styles.dim}>Loading…</Text>
-          ) : error ? (
-            <Text style={styles.error}>{error}</Text>
-          ) : !capture ? (
-            <Text style={styles.dim}>This note is no longer here.</Text>
-          ) : editing ? (
-            <>
-              <TextInput
-                style={styles.titleInput}
-                value={draftTitle}
-                onChangeText={setDraftTitle}
-                placeholder="Title"
-                placeholderTextColor={colors.inkFaint}
-                autoFocus
-              />
-              <TextInput
-                style={styles.bodyInput}
-                value={draftBody}
-                onChangeText={setDraftBody}
-                placeholder="Write it in your own words…"
-                placeholderTextColor={colors.inkFaint}
-                multiline
-              />
-              {saveError ? <Text style={styles.error}>{saveError}</Text> : null}
-            </>
-          ) : (
-            <>
-              <Text style={styles.title}>
-                {capture.note?.title ?? 'What you said'}
-              </Text>
-              <Text style={styles.captured}>
-                Captured {capturedAgo(capture.created_at).toLowerCase()}
-                {isManual ? ' · Written by you' : ''}
-              </Text>
+        {editing && capture ? (
+          // Editing: the body box fills exactly the space between the title
+          // and the keyboard, and scrolls inside itself, so Android keeps the
+          // line being typed in view however long the note gets.
+          <View style={styles.editor}>
+            <TextInput
+              style={styles.titleInput}
+              value={draftTitle}
+              onChangeText={setDraftTitle}
+              placeholder="Title"
+              placeholderTextColor={colors.inkFaint}
+              underlineColorAndroid="transparent"
+              returnKeyType="next"
+            />
+            <TextInput
+              style={[styles.bodyInput, styles.bodyInputFill]}
+              value={draftBody}
+              onChangeText={setDraftBody}
+              placeholder="Write it in your own words…"
+              placeholderTextColor={colors.inkFaint}
+              underlineColorAndroid="transparent"
+              autoFocus
+              multiline
+              scrollEnabled
+            />
+            {saveError ? <Text style={styles.error}>{saveError}</Text> : null}
+          </View>
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.body}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {loading ? (
+              <Text style={styles.dim}>Loading…</Text>
+            ) : error ? (
+              <Text style={styles.error}>{error}</Text>
+            ) : !capture ? (
+              <Text style={styles.dim}>This note is no longer here.</Text>
+            ) : (
+              <>
+                <Text style={styles.title}>{capture.note?.title ?? 'What you said'}</Text>
+                <Text style={styles.captured}>
+                  Captured {capturedAgo(capture.created_at).toLowerCase()}
+                  {isManual ? ' · Written by you' : ''}
+                </Text>
 
-              <Text style={styles.noteBody}>
-                {capture.note?.body ?? capture.text}
-              </Text>
+                <Text style={styles.noteBody}>{capture.note?.body ?? capture.text}</Text>
 
-              {capture.memories.length > 0 ? (
-                <View style={styles.section}>
-                  <Text style={styles.eyebrow}>What Kandoo remembered</Text>
-                  {capture.memories.map((m) => (
-                    <Pressable
-                      key={m.id}
-                      style={styles.memoryRow}
-                      onPress={() => onOpenMemory?.(m)}
-                      disabled={!onOpenMemory}
-                    >
-                      <Text style={styles.memoryText} numberOfLines={2}>
-                        {m.content}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
-
-              {/* A manual note infers nothing, so it has no Connections and no
-                  separate "what you said" — the body IS what you wrote. */}
-              {!isManual &&
-              (people.length > 0 || capture.reminders.length > 0) ? (
-                <View style={styles.section}>
-                  <Text style={styles.eyebrow}>Connections</Text>
-                  <View style={styles.chips}>
-                    {people.map((p) => (
+                {capture.memories.length > 0 ? (
+                  <View style={styles.section}>
+                    <Text style={styles.eyebrow}>What Kandoo remembered</Text>
+                    {capture.memories.map((m) => (
                       <Pressable
-                        key={`p-${p}`}
-                        style={styles.chip}
-                        onPress={() => onOpenPerson?.(p)}
-                        disabled={!onOpenPerson}
+                        key={m.id}
+                        style={styles.memoryRow}
+                        onPress={() => onOpenMemory?.(m)}
+                        disabled={!onOpenMemory}
                       >
-                        <Image source={ICONS.person} style={styles.chipIcon} />
-                        <Text style={styles.chipText}>{p}</Text>
+                        <Text style={styles.memoryText} numberOfLines={2}>
+                          {m.content}
+                        </Text>
                       </Pressable>
                     ))}
-                    {capture.reminders.map((r) => {
-                      const when = formatDueDate(r.due_at) ?? r.place_hint;
-                      return (
-                        <Pressable
-                          key={r.id}
-                          style={styles.chip}
-                          onPress={() => onOpenReminder?.(r)}
-                          disabled={!onOpenReminder}
-                        >
-                          <Image source={ICONS.time} style={styles.chipIcon} />
-                          <Text style={styles.chipText}>
-                            {r.task}
-                            {when ? ` · ${when}` : ''}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
                   </View>
-                </View>
-              ) : null}
+                ) : null}
 
-              {!isManual && capture.note ? (
-                <>
-                  <Pressable
-                    style={styles.rawToggle}
-                    onPress={() => setShowRaw((v) => !v)}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityState={{ expanded: showRaw }}
-                  >
-                    <Text style={styles.rawToggleText}>What you said</Text>
-                    <Image
-                      source={ICONS.expand}
-                      style={[styles.expandIcon, showRaw && styles.expandIconOpen]}
-                    />
-                  </Pressable>
-                  {showRaw ? <Text style={styles.raw}>{capture.text}</Text> : null}
-                </>
-              ) : null}
-            </>
-          )}
-        </ScrollView>
+                {/* A manual note infers nothing, so it has no Connections and no
+                  separate "what you said" — the body IS what you wrote. */}
+                {!isManual && (people.length > 0 || capture.reminders.length > 0) ? (
+                  <View style={styles.section}>
+                    <Text style={styles.eyebrow}>Connections</Text>
+                    <View style={styles.chips}>
+                      {people.map((p) => (
+                        <Pressable
+                          key={`p-${p}`}
+                          style={styles.chip}
+                          onPress={() => onOpenPerson?.(p)}
+                          disabled={!onOpenPerson}
+                        >
+                          <Image source={ICONS.person} style={styles.chipIcon} />
+                          <Text style={styles.chipText}>{p}</Text>
+                        </Pressable>
+                      ))}
+                      {capture.reminders.map((r) => {
+                        const when = formatDueDate(r.due_at) ?? r.place_hint;
+                        return (
+                          <Pressable
+                            key={r.id}
+                            style={styles.chip}
+                            onPress={() => onOpenReminder?.(r)}
+                            disabled={!onOpenReminder}
+                          >
+                            <Image source={ICONS.time} style={styles.chipIcon} />
+                            <Text style={styles.chipText}>
+                              {r.task}
+                              {when ? ` · ${when}` : ''}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+
+                {!isManual && capture.note ? (
+                  <>
+                    <Pressable
+                      style={styles.rawToggle}
+                      onPress={() => setShowRaw((v) => !v)}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: showRaw }}
+                    >
+                      <Text style={styles.rawToggleText}>What you said</Text>
+                      <Image
+                        source={ICONS.expand}
+                        style={[styles.expandIcon, showRaw && styles.expandIconOpen]}
+                      />
+                    </Pressable>
+                    {showRaw ? <Text style={styles.raw}>{capture.text}</Text> : null}
+                  </>
+                ) : null}
+              </>
+            )}
+          </ScrollView>
+        )}
       </View>
     </Modal>
   );
@@ -374,6 +386,13 @@ const styles = StyleSheet.create({
     ...text.memory,
     color: colors.ink,
   },
+  editor: {
+    flex: 1,
+    paddingHorizontal: spacing.space5,
+    paddingTop: 20,
+    paddingBottom: spacing.space4,
+  },
+  bodyInputFill: { flex: 1, minHeight: 0 },
   bodyInput: {
     ...text.memory,
     color: colors.ink,

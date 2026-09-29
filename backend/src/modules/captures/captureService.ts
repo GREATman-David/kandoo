@@ -27,6 +27,34 @@ export type Capture = {
  * say?" could only be answered with the model's paraphrase. For a memory
  * product that is the wrong thing to lose.
  */
+/**
+ * A manual capture already saved with this exact text at this exact device
+ * time — the same entry sent twice. The phone saves notes and memories
+ * locally first and syncs them later (src/services/outbox.ts); if a sync
+ * reached the server but its reply was lost, the retry must not duplicate it.
+ */
+export async function findManualCapture(
+  userId: string,
+  clientTime: string,
+  text: string
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('captures')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('source', 'manual')
+    .eq('client_time', clientTime)
+    .eq('text', text.trim())
+    .limit(1);
+
+  if (error) {
+    // Not fatal: without the check the save still happens, at worst twice.
+    console.error('Duplicate check for a manual capture failed:', error);
+    return null;
+  }
+  return (data?.[0]?.id as string | undefined) ?? null;
+}
+
 export async function createCapture(
   userId: string,
   input: CaptureInput

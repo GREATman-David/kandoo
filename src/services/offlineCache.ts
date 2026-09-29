@@ -77,7 +77,8 @@ export async function rememberUser(userId: string): Promise<void> {
   }
 }
 
-async function cacheOwner(): Promise<string | null> {
+/** The signed-in user these saved copies belong to (also keys the outbox). */
+export async function cacheOwner(): Promise<string | null> {
   if (currentUser) return currentUser;
   try {
     currentUser = await AsyncStorage.getItem(LAST_USER_KEY);

@@ -8,7 +8,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AiBusyError,
   confirmReminder,
-  createManualCapture,
   degradedReason,
   fetchCaptureNotes,
   interpretText,
@@ -22,6 +21,7 @@ import {
 } from '@/services/interpretationService';
 import { scheduleReminder } from '@/services/localNotifications';
 import { answerOffline, isLikelyQuestion } from '@/services/offlineRecall';
+import { onOutboxChange, pendingCaptures, saveManual, withPendingEdits } from '@/services/outbox';
 
 /**
  * Home is one route with four states, not four screens. This hook owns the
@@ -153,6 +153,7 @@ export function useHome() {
   // memory — the old in-memory list was empty on every cold start, which is why
   // Home looked bare. Best-effort: a failure just leaves Recently empty.
   const loadRecent = useCallback(async () => {
+    const pending = await pendingCaptures();
     try {
       // Only captures that kept something — a question is answered, not listed.
       const captures = await fetchCaptureNotes({
@@ -160,13 +161,18 @@ export function useHome() {
         notedOnly: false,
         requireActions: true,
       });
-      setRecent(captures.map(toRecentItem));
+      const merged = [...pending, ...(await withPendingEdits(captures))];
+      setRecent(merged.slice(0, RECENT_LIMIT).map(toRecentItem));
     } catch (caught) {
       console.warn('Loading Recently failed:', caught);
+      if (pending.length > 0) setRecent(pending.slice(0, RECENT_LIMIT).map(toRecentItem));
     } finally {
       setRecentLoaded(true);
     }
   }, []);
+
+  // A save or a finished sync changes what Recently should show.
+  useEffect(() => onOutboxChange(() => void loadRecent()), [loadRecent]);
 
   useEffect(() => {
     void loadRecent();
@@ -429,7 +435,8 @@ export function useHome() {
     setBusy(true);
     setError(null);
     try {
-      await createManualCapture({ memory: { content: text } });
+      // Saved on the phone at once; synced when there is a connection.
+      await saveManual({ memory: { content: text } });
       committed.current = '';
       setTranscriptBoth('');
       setNotice(null);

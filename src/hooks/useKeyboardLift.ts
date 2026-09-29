@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Keyboard, type View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
  * How far a screen must lift its bottom edge to stay above the on-screen
@@ -12,7 +13,8 @@ import { Keyboard, type View } from 'react-native';
  * the keyboard, so it is right whether or not a tab bar sits below the screen,
  * and it is 0 on a device whose window still resizes by itself.
  */
-export function useKeyboardLift() {
+export function useKeyboardLift(opts: { inModal?: boolean } = {}) {
+  const insets = useSafeAreaInsets();
   const ref = useRef<View>(null);
   const [lift, setLift] = useState(0);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
@@ -35,5 +37,9 @@ export function useKeyboardLift() {
     };
   }, []);
 
-  return { ref, lift, keyboardOpen };
+  // A Modal's window starts below the status bar, so the measurement above
+  // comes out short by that much. Erring high only adds a little space above
+  // the keyboard; erring low would hide the line being typed.
+  const extra = opts.inModal && lift > 0 ? insets.top : 0;
+  return { ref, lift: lift + extra, keyboardOpen };
 }

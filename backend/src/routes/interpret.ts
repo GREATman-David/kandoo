@@ -12,6 +12,7 @@ import { AiUnavailableError, aiProvider } from '../modules/ai';
 import {
   attachNote,
   createCapture,
+  findManualCapture,
   deleteCapture,
   getCaptureNote,
   listCaptureNotes,
@@ -462,6 +463,18 @@ router.post('/captures/manual', authenticateRequest, aiRateLimit, async (req, re
   const timezone = resolveTimezone(req.body?.timezone);
 
   try {
+    // Saved offline and synced later: a retry of an entry that already reached
+    // the server returns that entry instead of creating a second one.
+    const existingId = await findManualCapture(
+      userId,
+      clientTime,
+      hasNote ? noteBody : memoryContent
+    );
+    if (existingId) {
+      const saved = await getCaptureNote(userId, existingId);
+      return res.json({ success: true, capture: saved });
+    }
+
     // The capture's verbatim text is whatever the user typed — the note body, or
     // the memory content when there's no note.
     const capture = await createCapture(userId, {

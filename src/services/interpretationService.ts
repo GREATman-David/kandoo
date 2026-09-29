@@ -69,9 +69,12 @@ export const isNetworkError = (error: unknown): boolean =>
  * Distinct from a plain Error so the UI can tell it apart from a JS bug.
  */
 export class ApiError extends Error {
-  constructor(message: string) {
+  /** The HTTP status, when the error came from a response. */
+  readonly status: number | undefined;
+  constructor(message: string, status?: number) {
     super(message);
     this.name = 'ApiError';
+    this.status = status;
   }
 }
 
@@ -281,7 +284,7 @@ async function apiFetchOnce<T>(
     const text = typeof message === 'string' ? message : fallbackMessage;
     // The server is up but its AI models are busy (502 ai_busy): not offline.
     if (code === 'ai_busy') throw new AiBusyError(text);
-    throw new ApiError(text);
+    throw new ApiError(text, response.status);
   }
 
   return data as T;
@@ -375,6 +378,8 @@ export type CaptureNote = {
   created_at: string;
   memories: CaptureNoteMemory[];
   reminders: CaptureNoteReminder[];
+  /** Saved on this phone and not yet on the server (src/services/outbox.ts). */
+  pending?: boolean;
 };
 
 async function getAccessTokenOrThrow(): Promise<string> {
@@ -707,13 +712,18 @@ export async function fetchCaptureNotes(
  * Manual entry from the + button. Send a note, a memory, or both; Kandoo saves
  * one `manual`-source capture and embeds the memory. Returns the assembled row.
  */
-export async function createManualCapture(input: {
-  note?: { title: string; body: string };
-  memory?: { content: string };
-}): Promise<CaptureNote | null> {
+export async function createManualCapture(
+  input: {
+    note?: { title: string; body: string };
+    memory?: { content: string };
+  },
+  /** When the user actually saved it — kept through an offline wait, and how
+   *  the server recognises a retry of the same entry. */
+  opts: { clientTime?: string } = {}
+): Promise<CaptureNote | null> {
   const accessToken = await getAccessTokenOrThrow();
 
-  const clientTime = new Date().toISOString();
+  const clientTime = opts.clientTime ?? new Date().toISOString();
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const data = await apiFetch<{ capture?: CaptureNote | null }>(

@@ -25,6 +25,14 @@ import { OfflineNote } from '@/components/OfflineNote';
 import { useEntitlement } from '@/hooks/useEntitlement';
 import { answerOffline } from '@/services/offlineRecall';
 import {
+  discardLocal,
+  flushOutbox,
+  isLocalId,
+  onOutboxChange,
+  pendingCaptures,
+  withPendingEdits,
+} from '@/services/outbox';
+import {
   deleteCaptureById,
   fetchCaptureNotes,
   fetchPeople,
@@ -129,21 +137,29 @@ export default function MemoryScreen() {
 
   const load = useCallback(async () => {
     setError(null);
+    // Anything saved on this phone and not yet synced: try to send it now, and
+    // list it either way — at the top, marked, until the server has it.
+    void flushOutbox();
+    const pending = await pendingCaptures();
     try {
       const [captures, peopleList] = await Promise.all([
         fetchCaptureNotes({ requireContent: true, limit: PAGE }),
         fetchPeople().catch(() => [] as PersonSummary[]),
       ]);
-      setNotes(captures);
+      setNotes([...pending, ...(await withPendingEdits(captures))]);
       setHasMore(captures.length === PAGE);
       setPeople(peopleList);
     } catch (caught) {
       logFailure('Loading memory failed:', caught);
-      setError(userMessage(caught, 'Could not load your memory.'));
+      if (pending.length > 0) setNotes(pending);
+      else setError(userMessage(caught, 'Could not load your memory.'));
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // A save or a finished sync changes what should be listed.
+  useEffect(() => onOutboxChange(() => void load()), [load]);
 
   // Refresh on focus, not just on mount — otherwise a capture added on Home (or
   // an edit/delete on a detail screen) leaves this list showing stale data until
@@ -268,7 +284,9 @@ export default function MemoryScreen() {
               const previous = notes;
               setNotes((cur) => cur.filter((n) => n.id !== note.id));
               try {
-                await deleteCaptureById(note.id);
+                // Never reached the server: just forget it on the phone.
+                if (isLocalId(note.id)) await discardLocal(note.id);
+                else await deleteCaptureById(note.id);
               } catch (caught) {
                 logFailure('Delete failed:', caught);
                 setNotes(previous);
@@ -555,6 +573,8 @@ function MemoryRow({ note, onPress, onLongPress }: MemoryRowProps) {
   const meta: string[] = [];
   if (isManual) meta.push('Written by you');
   meta.push(timeAgo(note.created_at));
+  // Safe on the phone; the outbox sends it when there is a connection.
+  if (note.pending) meta.push('Saved on this phone');
   if (hasNote ? items > 0 : items > 1) meta.push(`${items} item${items === 1 ? '' : 's'}`);
 
   return (

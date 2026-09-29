@@ -12,14 +12,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useKeyboardLift } from '@/hooks/useKeyboardLift';
 import {
   deleteMemoryById,
   fetchCaptureNote,
-  updateMemory,
-  userMessage,
   logFailure,
   type CaptureNote,
 } from '@/services/interpretationService';
+import { discardLocal, isLocalId, pendingCapture, saveMemoryEdit } from '@/services/outbox';
 import { colors, spacing, text } from '@/theme/theme';
 import { timeAgo } from '@/utils/timeAgo';
 
@@ -66,7 +66,11 @@ export function MemoryDetail({
   onOpenNote,
 }: MemoryDetailProps) {
   const insets = useSafeAreaInsets();
+  // While typing, the editor ends at the top of the keyboard (see styles.editor).
+  const keyboard = useKeyboardLift({ inModal: true });
   const [editing, setEditing] = useState(false);
+  // What the screen shows: the saved wording, updated at once by an edit.
+  const [content, setContent] = useState(memory?.content ?? '');
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +85,7 @@ export function MemoryDetail({
       setError(null);
       setShowRaw(false);
       setDraft(memory?.content ?? '');
+      setContent(memory?.content ?? '');
     }
   }, [visible, memory]);
 
@@ -89,7 +94,7 @@ export function MemoryDetail({
     const captureId = memory?.captureId;
     if (!visible || !captureId) return;
     let active = true;
-    fetchCaptureNote(captureId)
+    (isLocalId(captureId) ? pendingCapture(captureId) : fetchCaptureNote(captureId))
       .then((capture) => {
         if (active) setSource(capture);
       })
@@ -100,24 +105,25 @@ export function MemoryDetail({
   }, [visible, memory?.captureId]);
 
   if (!memory) {
-    return (
-      <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} />
-    );
+    return <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} />;
   }
 
-  const canSave = draft.trim().length > 0 && draft.trim() !== memory.content && !busy;
+  const canSave = draft.trim().length > 0 && draft.trim() !== content && !busy;
 
   async function save() {
     if (!memory || !canSave) return;
     setBusy(true);
     setError(null);
     try {
-      await updateMemory(memory.id, draft.trim());
+      // Saved on this phone at once; the outbox syncs it (no connection needed).
+      await saveMemoryEdit(memory.id, draft.trim());
+      setContent(draft.trim());
       setEditing(false);
       onChanged();
     } catch (caught) {
-      logFailure('Editing memory failed:', caught);
-      setError(userMessage(caught, 'Could not save that edit.'));
+      // Only a failure to write to the phone's own storage lands here.
+      logFailure('Saving the memory edit on this phone failed:', caught);
+      setError('Could not save that edit on this phone. Please try again.');
     } finally {
       setBusy(false);
     }
@@ -132,7 +138,9 @@ export function MemoryDetail({
         style: 'destructive',
         onPress: async () => {
           try {
-            await deleteMemoryById(memory.id);
+            // Never reached the server: forget it on the phone.
+            if (isLocalId(memory.id) && memory.captureId) await discardLocal(memory.captureId);
+            else await deleteMemoryById(memory.id);
             onChanged();
             onClose();
           } catch (caught) {
@@ -154,7 +162,7 @@ export function MemoryDetail({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.screen}>
+      <View ref={keyboard.ref} style={[styles.screen, { paddingBottom: keyboard.lift }]}>
         <View style={[styles.bar, { marginTop: insets.top + spacing.space4 }]}>
           <Pressable
             onPress={onClose}
@@ -182,65 +190,72 @@ export function MemoryDetail({
           )}
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.body}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {editing ? (
+        {editing ? (
+          // Editing: the box fills the space down to the keyboard and scrolls
+          // inside itself, so the line being typed always stays in view.
+          <View style={styles.editor}>
             <TextInput
-              style={styles.input}
+              style={[styles.input, styles.inputFill]}
               value={draft}
               onChangeText={setDraft}
               placeholder="What should Kandoo remember?"
               placeholderTextColor={colors.inkFaint}
+              underlineColorAndroid="transparent"
               autoFocus
               multiline
+              scrollEnabled
             />
-          ) : (
-            <Text style={styles.content}>{memory.content}</Text>
-          )}
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <Pressable
-            style={styles.sourceRow}
-            onPress={() => canOpenSource && onOpenNote?.(memory.captureId as string)}
-            disabled={!canOpenSource}
-            hitSlop={6}
-            accessibilityRole={canOpenSource ? 'link' : undefined}
-          >
-            <Text style={styles.sourceText} numberOfLines={1}>
-              {sourceLine}
-            </Text>
-            {canOpenSource ? <Image source={ICONS.open} style={styles.openIcon} /> : null}
-          </Pressable>
-
-          {!memory.isManual && source ? (
-            <>
-              <Pressable
-                style={styles.rawToggle}
-                onPress={() => setShowRaw((v) => !v)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityState={{ expanded: showRaw }}
-              >
-                <Text style={styles.rawToggleText}>What you said</Text>
-                <Image
-                  source={ICONS.expand}
-                  style={[styles.expandIcon, showRaw && styles.expandIconOpen]}
-                />
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+            {/* Out of the way while typing; back when the keyboard closes. */}
+            {keyboard.keyboardOpen ? null : (
+              <Pressable style={styles.delete} onPress={confirmDelete} hitSlop={8}>
+                <Text style={styles.deleteText}>Delete this memory</Text>
               </Pressable>
-              {showRaw ? <Text style={styles.raw}>{source.text}</Text> : null}
-            </>
-          ) : null}
+            )}
+          </View>
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.body}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Text style={styles.content}>{content}</Text>
 
-          {editing ? (
-            <Pressable style={styles.delete} onPress={confirmDelete} hitSlop={8}>
-              <Text style={styles.deleteText}>Delete this memory</Text>
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+
+            <Pressable
+              style={styles.sourceRow}
+              onPress={() => canOpenSource && onOpenNote?.(memory.captureId as string)}
+              disabled={!canOpenSource}
+              hitSlop={6}
+              accessibilityRole={canOpenSource ? 'link' : undefined}
+            >
+              <Text style={styles.sourceText} numberOfLines={1}>
+                {sourceLine}
+              </Text>
+              {canOpenSource ? <Image source={ICONS.open} style={styles.openIcon} /> : null}
             </Pressable>
-          ) : null}
-        </ScrollView>
+
+            {!memory.isManual && source ? (
+              <>
+                <Pressable
+                  style={styles.rawToggle}
+                  onPress={() => setShowRaw((v) => !v)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: showRaw }}
+                >
+                  <Text style={styles.rawToggleText}>What you said</Text>
+                  <Image
+                    source={ICONS.expand}
+                    style={[styles.expandIcon, showRaw && styles.expandIconOpen]}
+                  />
+                </Pressable>
+                {showRaw ? <Text style={styles.raw}>{source.text}</Text> : null}
+              </>
+            ) : null}
+          </ScrollView>
+        )}
       </View>
     </Modal>
   );
@@ -259,6 +274,8 @@ const styles = StyleSheet.create({
   action: { ...text.bodyStrong, color: colors.markRing },
   dimAction: { color: colors.inkFaint },
   body: { paddingTop: 56, paddingBottom: spacing.space8 },
+  editor: { flex: 1, paddingTop: 56, paddingBottom: spacing.space4 },
+  inputFill: { flex: 1, textAlignVertical: 'top' },
   content: { ...text.displayL, letterSpacing: 0, color: colors.ink },
   input: {
     ...text.displayL,
