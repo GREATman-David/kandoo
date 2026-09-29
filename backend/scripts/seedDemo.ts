@@ -1,8 +1,9 @@
 /**
- * Seed the DEMO account with a believable slice of one person's life — work,
- * family, health and errands — spread across the last six weeks with backdated
- * `created_at`, so recall has real history and, crucially, memories OLDER than
- * 7 days for the Pro paywall boundary to gate.
+ * Seed the DEMO account with a believable slice of one person's life in Accra —
+ * product work at a fintech, family, health and errands — spread across the
+ * last seven weeks with backdated `created_at`, so recall has real history and,
+ * crucially, memories OLDER than 10 days for the Pro paywall to gate (the app's
+ * free window is `TEN_DAYS_MS` in src/app/memory.tsx).
  *
  * SAFETY: this writes real rows with the service-role key (RLS bypassed), so it
  * refuses to run against anything but the demo account. You must pass BOTH
@@ -16,9 +17,21 @@
 import 'dotenv/config';
 
 import { aiProvider } from '../src/modules/ai';
+import {
+  type EntityKind,
+  linkMemoryToEntities,
+  linkReminderToEntities,
+  resolveEntities,
+} from '../src/modules/entities/entityService';
 import { supabase } from '../src/services/supabase';
 
-const TIMEZONE = 'Africa/Lagos';
+const TIMEZONE = 'Africa/Accra';
+
+/** The free window in the app. Anything older is locked on Free. */
+const FREE_DAYS = 10;
+
+const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
+const WEEKDAYS = [1, 2, 3, 4, 5];
 
 type MemorySeed = {
   kind: 'memory';
@@ -40,93 +53,112 @@ type ReminderSeed = {
   dueHour: number;
   status: 'fired' | 'confirmed' | 'pending';
   insistent?: boolean;
+  /** Weekdays it repeats on, 0 = Sunday. */
+  repeatDays?: number[];
 };
 
 type Seed = MemorySeed | ReminderSeed;
 
 /**
- * ~20 items. Several pairs deliberately straddle the 7-day line on the same
- * theme (health, work) so the demo can show recent answers free and older ones
- * gated. `daysAgo` > 7 is where the paywall has something to sell.
+ * Hand-written facts and reminders. Several themes straddle the 10-day line on
+ * purpose (the Momo launch, family health, the car) so the demo can show recent
+ * answers free and older ones locked. A negative `daysAgo` is a reminder still
+ * to come: `confirmed` ones are scheduled on the phone after sign-in.
  */
 const SEED: Seed[] = [
-  // --- Work ---
-  { kind: 'memory', daysAgo: 33, hour: 11, content: 'The budget for the platform team got cut by fifteen percent this year.', topics: ['work', 'budget'] },
-  { kind: 'memory', daysAgo: 21, hour: 15, content: 'Priya owns the vendor migration now, not me.', person: 'Priya', topics: ['work', 'ownership'] },
-  { kind: 'memory', daysAgo: 12, hour: 9, content: 'Standup moved to 9:30 so the New York team can join.', topics: ['work', 'schedule'] },
-  { kind: 'memory', daysAgo: 4, hour: 17, content: 'The Q1 roadmap review is the first week of February.', topics: ['work', 'roadmap'] },
-  { kind: 'reminder', daysAgo: 26, hour: 10, task: 'Send Michael the design spec', person: 'Michael', dueHour: 17, status: 'fired' },
-  { kind: 'reminder', daysAgo: 3, hour: 8, task: 'Book the review room for the retro', place: 'the office', dueHour: 9, status: 'confirmed' },
+  // --- Work: product lead at a fintech in Airport City ---
+  { kind: 'memory', daysAgo: 44, hour: 10, content: 'The Momo wallet integration has to pass the Bank of Ghana sandbox review before any public launch.', topics: ['work', 'compliance'] },
+  { kind: 'memory', daysAgo: 36, hour: 15, content: 'Sarah from the London office owns the investor update deck every quarter.', person: 'Sarah', topics: ['work', 'investors'] },
+  { kind: 'memory', daysAgo: 27, hour: 11, content: 'Kofi prefers bug reports with a screen recording, not screenshots.', person: 'Kofi', topics: ['work', 'engineering'] },
+  { kind: 'memory', daysAgo: 22, hour: 16, content: 'Merchant onboarding drop-off is worst at the Ghana Card verification step, about forty percent.', topics: ['work', 'metrics'] },
+  { kind: 'memory', daysAgo: 13, hour: 9, content: 'Ama Owusu from legal signs off on every change to the terms of service.', person: 'Ama Owusu', topics: ['work', 'legal'] },
+  { kind: 'memory', daysAgo: 6, hour: 14, content: 'Daniel agreed to move the design review to Thursdays at 2pm.', person: 'Daniel', topics: ['work', 'schedule'] },
+  { kind: 'memory', daysAgo: 2, hour: 17, content: 'The Q4 target is 5,000 active merchants by the end of December.', topics: ['work', 'targets'] },
+  { kind: 'reminder', daysAgo: 31, hour: 9, task: 'Send Sarah the Q3 merchant numbers for the investor deck', person: 'Sarah', dueHour: 16, status: 'fired' },
+  { kind: 'reminder', daysAgo: 4, hour: 8, task: 'Review the Ghana Card verification redesign with Daniel', person: 'Daniel', dueHour: 14, status: 'fired' },
+  { kind: 'reminder', daysAgo: -1, hour: 10, task: 'Send Ama Owusu the updated terms for sign-off', person: 'Ama Owusu', dueHour: 11, status: 'confirmed' },
+  { kind: 'reminder', daysAgo: -1, hour: 8, task: 'Post the standup notes in the team channel', dueHour: 9, status: 'confirmed', repeatDays: WEEKDAYS },
 
   // --- Family ---
-  { kind: 'memory', daysAgo: 29, hour: 20, content: "Mum's birthday dinner is booked at the Italian place on the 14th.", person: 'Mum', location: 'the Italian place', topics: ['family', 'birthday'] },
-  { kind: 'memory', daysAgo: 18, hour: 19, content: 'My sister Ada is visiting the last weekend of the month.', person: 'Ada', topics: ['family', 'visit'] },
-  { kind: 'memory', daysAgo: 9, hour: 21, content: 'Dad moved his heart tablets to the morning after the checkup.', person: 'Dad', topics: ['family', 'health'] },
-  { kind: 'memory', daysAgo: 2, hour: 18, content: 'Ada wants to go to the pottery class together when she visits.', person: 'Ada', topics: ['family', 'plans'] },
-  { kind: 'reminder', daysAgo: 5, hour: 16, task: 'Call Mummy', person: 'Mummy', dueHour: 17, status: 'fired', insistent: false },
+  { kind: 'memory', daysAgo: 40, hour: 20, content: "Mum's blood pressure tablets are Amlodipine 5mg, taken every morning.", person: 'Mum', topics: ['family', 'health'] },
+  { kind: 'memory', daysAgo: 24, hour: 19, content: 'Akosua is getting married in Kumasi on the 12th of December.', person: 'Akosua', location: 'Kumasi', topics: ['family', 'wedding'] },
+  { kind: 'memory', daysAgo: 15, hour: 21, content: 'Nana Yaw wants football boots, size 5, for his birthday.', person: 'Nana Yaw', topics: ['family', 'birthday'] },
+  { kind: 'memory', daysAgo: 3, hour: 18, content: 'Esi is collecting the kente for the wedding from the weaver in Bonwire.', person: 'Esi', location: 'Bonwire', topics: ['family', 'wedding'] },
+  { kind: 'reminder', daysAgo: 16, hour: 12, task: 'Buy Nana Yaw his football boots', person: 'Nana Yaw', place: 'Accra Mall', dueHour: 17, status: 'fired' },
+  { kind: 'reminder', daysAgo: -2, hour: 18, task: 'Call Mum', person: 'Mum', dueHour: 19, status: 'confirmed' },
 
   // --- Health ---
-  { kind: 'memory', daysAgo: 25, hour: 14, content: 'Dr. Okafor said my vitamin D was low and to retest in three months.', person: 'Dr. Okafor', location: 'the clinic', topics: ['health', 'bloodwork'] },
-  { kind: 'memory', daysAgo: 16, hour: 8, content: 'Physio gave me the resistance-band routine for my left shoulder.', topics: ['health', 'physio'] },
-  { kind: 'memory', daysAgo: 6, hour: 7, content: 'Switched to the 7am gym slot because it is quieter.', location: 'the gym', topics: ['health', 'routine'] },
-  { kind: 'reminder', daysAgo: 6, hour: 9, task: 'Take the antibiotics with food for a week', dueHour: 20, status: 'fired', insistent: true },
+  { kind: 'memory', daysAgo: 33, hour: 14, content: 'Dr. Mensah said my vitamin D was low and to retest in three months.', person: 'Dr. Mensah', location: 'Nyaho Clinic', topics: ['health', 'bloodwork'] },
+  { kind: 'memory', daysAgo: 19, hour: 7, content: 'Coach James set my 5k target at under 28 minutes by November.', person: 'James', topics: ['health', 'running'] },
+  { kind: 'memory', daysAgo: 5, hour: 7, content: 'The morning run loop around Legon is 5.2 km.', location: 'Legon', topics: ['health', 'running'] },
+  { kind: 'reminder', daysAgo: -1, hour: 7, task: 'Take the vitamin D tablet', dueHour: 8, status: 'confirmed', insistent: true, repeatDays: EVERY_DAY },
 
   // --- Errands / life ---
-  { kind: 'memory', daysAgo: 38, hour: 13, content: "The car's next service is due at 45,000 km.", topics: ['car', 'maintenance'] },
-  { kind: 'memory', daysAgo: 20, hour: 12, content: 'Left the grey coat at the dry cleaner on Adeola street.', location: 'Adeola street', topics: ['errands', 'dry cleaning'] },
-  { kind: 'memory', daysAgo: 3, hour: 13, content: "Found a good jollof spot near the office — Mama Nkechi's.", location: "Mama Nkechi's", topics: ['food', 'lunch'] },
-  { kind: 'reminder', daysAgo: 19, hour: 12, task: 'Pick up the grey coat from the dry cleaner', place: 'Adeola street', dueHour: 18, status: 'fired' },
-  { kind: 'reminder', daysAgo: 1, hour: 9, task: 'Pay the electricity bill', dueHour: 21, status: 'confirmed', insistent: true },
+  { kind: 'memory', daysAgo: 47, hour: 13, content: 'The car is due its next service at 60,000 km at the Toyota workshop on Spintex Road.', location: 'Spintex Road', topics: ['car', 'maintenance'] },
+  { kind: 'memory', daysAgo: 29, hour: 12, content: 'The landlord, Mr. Asante, takes rent by mobile money on the 1st of each month.', person: 'Mr. Asante', topics: ['home', 'rent'] },
+  { kind: 'memory', daysAgo: 11, hour: 13, content: "The best waakye near the office is Auntie Muni's, and it sells out by 11am.", location: "Auntie Muni's", topics: ['food', 'lunch'] },
+  { kind: 'memory', daysAgo: 1, hour: 20, content: 'Grace lent me her copy of Things Fall Apart and wants it back by the end of October.', person: 'Grace', topics: ['books', 'friends'] },
+  { kind: 'reminder', daysAgo: 9, hour: 9, task: 'Renew the car insurance before it lapses', dueHour: 12, status: 'fired', insistent: true },
+  { kind: 'reminder', daysAgo: -2, hour: 8, task: 'Pay Mr. Asante the rent by mobile money', person: 'Mr. Asante', dueHour: 9, status: 'confirmed', insistent: true },
 ];
 
 /**
  * Substantial spoken recaps, run through the REAL extraction so their notes are
  * genuine (organised, nothing invented) rather than hand-written — and so each
  * populates the Memory tab with a note plus the memories/reminders it produced.
- * Spread across the six weeks; two land older than a week.
+ * Spread across the seven weeks; three land older than the free window.
  */
 const RECAPS: { daysAgo: number; hour: number; text: string }[] = [
   {
-    // The Jed standup, so People's Jed matches the design frame: three memories
-    // clearly attributed to Jed, one Jed reminder, and one note.
+    // Today's standup with Kofi, so the People view has a clear, recent Kofi:
+    // several facts attributed to him, one Kofi reminder, and one note.
     daysAgo: 0,
-    hour: 9,
+    hour: 10,
     text:
-      'Just came out of the standup with Jed. First, Jed is pushing the API ' +
-      'migration to Q1 because of the vendor issue. Second, Jed is taking two ' +
-      'weeks off in December for the holidays. Third, Jed prefers we review the ' +
-      'spec together before it goes out to the client. Remind me to send Jed ' +
-      'the revised timeline on Friday morning.',
+      'Just came out of the standup with Kofi. First, Kofi is pushing the Momo ' +
+      'wallet launch to January because the Bank of Ghana review is still open. ' +
+      'Second, Kofi is on leave the first two weeks of December for his cousin ' +
+      "Akosua's wedding. Third, Kofi wants the payout API reviewed by two " +
+      'engineers before it merges. Remind me to send Kofi the revised launch ' +
+      'plan on Friday morning.',
   },
   {
-    daysAgo: 34,
+    daysAgo: 38,
     hour: 16,
     text:
-      "Just wrapped the sprint review. We're cutting the analytics dashboard " +
-      "from this release because QA found a data race we can't fix in time. " +
-      'Tunde is taking over the vendor contract renewal, and finance wants the ' +
-      'revised budget by Friday. I need to send the board the updated timeline ' +
-      'before end of day, and set a reminder to prep the demo script next week.',
+      "Just wrapped the quarterly planning with Michael and Yaw. We're dropping " +
+      'the savings goals feature from this quarter because the partner bank ' +
+      "can't give us the API until November. Yaw is taking over the agent " +
+      'network pilot in Kumasi, and Michael wants the revised headcount plan by ' +
+      'Friday. I need to send the board the updated roadmap before end of day.',
   },
   {
-    daysAgo: 20,
+    daysAgo: 21,
     hour: 19,
     text:
-      "Had a long call with Mum about Dad's checkup. His blood pressure is down " +
-      'and the doctor is happy, but they want him off salt and walking every ' +
-      "day. Ada confirmed she's coming for Christmas and bringing the kids, so " +
-      'the spare room needs sorting. Remind me to order Dad the new blood ' +
-      "pressure monitor, and to call the doctor's office about his next appointment.",
+      "Had a long call with Mum about Dad's checkup at Korle Bu. His sugar " +
+      'levels are better and the doctor is happy, but he has to cut down on ' +
+      'rice and walk every evening. Abena confirmed she is flying in from ' +
+      'London for Christmas with the kids, so the spare room needs sorting. ' +
+      'Remind me to order Dad a glucose meter.',
   },
   {
-    daysAgo: 5,
+    daysAgo: 12,
+    hour: 11,
+    text:
+      'Coffee with Kwame Boateng from the Stanbic partnerships team. They can ' +
+      'offer merchants overdrafts of up to twenty thousand cedis if we share ' +
+      'transaction history with consent. Kwame needs a one-page data sharing ' +
+      'proposal, and their risk committee meets on the 15th of October.',
+  },
+  {
+    daysAgo: 4,
     hour: 18,
     text:
-      'Got a lot done today. The plumber fixed the kitchen leak and said the ' +
-      'pipes under the sink need replacing within the year. I picked up the dry ' +
-      'cleaning and dropped the tax documents with the accountant. I still need ' +
-      'to renew the car insurance before it lapses next week, and book the ' +
-      'dentist for that filling.',
+      'Busy Saturday. The electrician fixed the socket in the kitchen and said ' +
+      'the whole house needs rewiring within the year. Efua helped me pick the ' +
+      'fabric for my wedding outfit at Makola, and the seamstress needs it by ' +
+      'the 20th. I still need to book the bus to Kumasi for the wedding.',
   },
 ];
 
@@ -174,12 +206,51 @@ async function clearPreviousSeed(userId: string): Promise<void> {
   const capIds = (caps ?? []).map((c: { id: string }) => c.id);
   if (capIds.length === 0) return;
 
-  // Children first — seed memories/reminders carry no entity links, so there is
-  // nothing in memory_entities to block the delete.
+  // Children first: the entity links, then the memories/reminders they point at.
+  const { data: mems } = await supabase
+    .from('memories')
+    .select('id')
+    .eq('user_id', userId)
+    .in('capture_id', capIds);
+  const { data: rems } = await supabase
+    .from('reminders')
+    .select('id')
+    .eq('user_id', userId)
+    .in('capture_id', capIds);
+  const memIds = (mems ?? []).map((m: { id: string }) => m.id);
+  const remIds = (rems ?? []).map((r: { id: string }) => r.id);
+  if (memIds.length) await supabase.from('memory_entities').delete().in('memory_id', memIds);
+  if (remIds.length) await supabase.from('reminder_entities').delete().in('reminder_id', remIds);
+
   await supabase.from('memories').delete().eq('user_id', userId).in('capture_id', capIds);
   await supabase.from('reminders').delete().eq('user_id', userId).in('capture_id', capIds);
   await supabase.from('captures').delete().eq('user_id', userId).eq('source', 'seed');
   console.log(`Cleared ${capIds.length} previous seed captures.`);
+}
+
+/**
+ * Link a seeded row to its people (and, for memories, topics and place) the way
+ * a real capture does, so the People view and person recall have them.
+ */
+async function linkEntities(
+  userId: string,
+  table: 'memories' | 'reminders',
+  id: string,
+  people: string[],
+  topics: string[] = [],
+  place: string | null = null
+): Promise<void> {
+  const groups: [EntityKind, string[]][] = [['person', people]];
+  if (table === 'memories') {
+    groups.push(['topic', topics]);
+    if (place) groups.push(['place', [place]]);
+  }
+  const ids: string[] = [];
+  for (const [kind, names] of groups) {
+    ids.push(...(await resolveEntities(userId, kind, names)).map((e) => e.id));
+  }
+  if (table === 'memories') await linkMemoryToEntities(id, ids);
+  else await linkReminderToEntities(id, ids);
 }
 
 async function insertItem(
@@ -195,7 +266,7 @@ async function insertItem(
       user_id: userId,
       text,
       client_time: createdAt,
-      timezone: 'Africa/Lagos',
+      timezone: TIMEZONE,
       source: 'seed',
       created_at: createdAt,
     })
@@ -219,6 +290,14 @@ async function insertItem(
       .select('id')
       .single();
     if (error || !data) throw new Error(`Memory insert failed: ${error?.message}`);
+    await linkEntities(
+      userId,
+      'memories',
+      data.id,
+      item.person ? [item.person] : [],
+      item.topics,
+      item.location ?? null
+    );
     return { table: 'memories', id: data.id, text: item.content };
   }
 
@@ -236,12 +315,14 @@ async function insertItem(
       place_id: null,
       insistent: item.insistent ?? false,
       status: item.status,
+      repeat_days: item.repeatDays ?? null,
       embedding: null,
       created_at: createdAt,
     })
     .select('id')
     .single();
   if (error || !data) throw new Error(`Reminder insert failed: ${error?.message}`);
+  await linkEntities(userId, 'reminders', data.id, item.person ? [item.person] : []);
   return { table: 'reminders', id: data.id, text: item.task };
 }
 
@@ -292,6 +373,14 @@ async function insertRecap(
         .select('id')
         .single();
       if (error || !data) throw new Error(`Recap memory insert failed: ${error?.message}`);
+      await linkEntities(
+        userId,
+        'memories',
+        data.id,
+        action.people,
+        action.topics,
+        action.placeHint
+      );
       rows.push({ table: 'memories', id: data.id, text: action.content });
     } else if (action.kind === 'reminder') {
       const past = action.dueAt ? Date.parse(action.dueAt) < Date.now() : true;
@@ -316,6 +405,7 @@ async function insertRecap(
         .select('id')
         .single();
       if (error || !data) throw new Error(`Recap reminder insert failed: ${error?.message}`);
+      await linkEntities(userId, 'reminders', data.id, action.people);
       rows.push({ table: 'reminders', id: data.id, text: action.task });
     }
     // A recall action would be odd inside a recap; ignore it if one appears.
@@ -388,12 +478,12 @@ async function main() {
   const memories = rows.filter((r) => r.table === 'memories').length;
   const reminders = rows.filter((r) => r.table === 'reminders').length;
   const older =
-    SEED.filter((s) => s.daysAgo > 7).length +
-    RECAPS.filter((r) => r.daysAgo > 7).length;
+    SEED.filter((s) => s.daysAgo > FREE_DAYS).length +
+    RECAPS.filter((r) => r.daysAgo > FREE_DAYS).length;
   console.log(
     `Inserted ${memories} memories and ${reminders} reminders across ` +
       `${SEED.length} facts + ${RECAPS.length} recaps ` +
-      `(${older} captures older than 7 days — the paywall boundary).`
+      `(${older} captures older than ${FREE_DAYS} days — locked on Free).`
   );
 
   await embedAll(rows);
