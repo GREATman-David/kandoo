@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
 
 import { presentMomentNow, presentReminderNow } from '@/services/localNotifications';
 
@@ -53,8 +54,18 @@ export async function handleGeofenceEvent(event: PlaceEvent, regionId: string): 
  * Failures reach the caller rather than being swallowed.
  */
 export async function stopWatchingPlaces(opts: { forget: boolean }): Promise<void> {
-  if (await Location.hasStartedGeofencingAsync(GEOFENCE_TASK)) {
-    await Location.stopGeofencingAsync(GEOFENCE_TASK);
+  // Ask TaskManager, not Location: hasStartedGeofencingAsync itself throws
+  // without background permission — exactly the state (free, or permission
+  // never granted) in which this is usually called.
+  if (await TaskManager.isTaskRegisteredAsync(GEOFENCE_TASK)) {
+    try {
+      await Location.stopGeofencingAsync(GEOFENCE_TASK);
+    } catch (error) {
+      // Permission was withdrawn since registering: Location refuses to stop
+      // it, but the OS has stopped delivering anyway. Drop the registration.
+      console.warn('Stopping geofencing failed; unregistering the task:', error);
+      await TaskManager.unregisterTaskAsync(GEOFENCE_TASK);
+    }
   }
   if (opts.forget) {
     await clearPlaceState();
