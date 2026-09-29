@@ -33,6 +33,7 @@ import {
   type CreatedReminder,
   type PlaceDetail as PlaceDetailData,
 } from '@/services/interpretationService';
+import { getPlacePermission } from '@/services/places/placePermissions';
 import { requestPlaceResync } from '@/services/places/placeStore';
 import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 import { formatDueDate, formatPlaceWhen } from '@/utils/formatDueDate';
@@ -84,6 +85,7 @@ export function PlaceDetail({ placeId, visible, onClose, onChanged, onDraw, onNe
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [alwaysAllowed, setAlwaysAllowed] = useState(true);
 
   const [noteId, setNoteId] = useState<string | null>(null);
   const [reminder, setReminder] = useState<CreatedReminder | null>(null);
@@ -106,6 +108,9 @@ export function PlaceDetail({ placeId, visible, onClose, onChanged, onDraw, onNe
       setPlace(null);
       setRenaming(null);
       load();
+      void getPlacePermission()
+        .then((p) => setAlwaysAllowed(p === 'granted'))
+        .catch((caught) => logFailure('Reading location permission failed:', caught));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, placeId]);
@@ -280,12 +285,14 @@ export function PlaceDetail({ placeId, visible, onClose, onChanged, onDraw, onNe
                     <Image source={ICONS.edit} style={styles.editIcon} />
                   </Pressable>
                 )}
-                <Text style={[styles.status, geometry && isPro ? styles.statusOn : null]}>
+                <Text style={[styles.status, geometry && isPro && alwaysAllowed ? styles.statusOn : null]}>
                   {!geometry
                     ? 'Not drawn yet'
                     : !isPro
                       ? 'Drawn · watching is part of Pro'
-                      : 'Kandoo will notice when you arrive'}
+                      : !alwaysAllowed
+                        ? 'Allow location all the time so Kandoo notices you arrive'
+                        : 'Kandoo will notice when you arrive'}
                 </Text>
               </View>
 
