@@ -73,8 +73,11 @@ function symbolFor(state: HomeState) {
 
 export default function HomeScreen() {
   const { loading, isAuthenticated, user } = useAuth();
-  const { seen: onboardingSeen, loading: onboardingLoading, markSeen } =
-    useOnboarding();
+  const {
+    seen: onboardingSeen,
+    loading: onboardingLoading,
+    markSeen,
+  } = useOnboarding();
 
   // Configure RevenueCat once, then tie the customer to the Supabase account so
   // the backend can read the entitlement by the same id over the V2 REST API.
@@ -158,6 +161,8 @@ function KandooHome() {
   // Typing: lift the docked field above the keyboard, and shrink the mark so
   // what is being typed stays in view. Voice is full-screen and unaffected.
   const keyboard = useKeyboardLift();
+  // The same for the full-screen layer, where the spoken words are edited.
+  const modalKeyboard = useKeyboardLift();
 
   // Set up notification channels/permissions and rebuild the local schedule
   // from the server's active reminders. Replaces the retired server-push path.
@@ -182,7 +187,8 @@ function KandooHome() {
     home.state === 'understanding' ||
     home.state === 'remembered';
   // Understood and Complete use Figma's smaller halo; listening the larger.
-  const compactHalo = home.state === 'understanding' || home.state === 'remembered';
+  const compactHalo =
+    home.state === 'understanding' || home.state === 'remembered';
   const halo = haloStyles(compactHalo ? UNDERSTOOD_HALO : LISTENING_HALO);
 
   return (
@@ -190,7 +196,10 @@ function KandooHome() {
       ref={keyboard.ref}
       style={[
         styles.screen,
-        { paddingTop: insets.top + spacing.space5, paddingBottom: keyboard.lift },
+        {
+          paddingTop: insets.top + spacing.space5,
+          paddingBottom: keyboard.lift,
+        },
       ]}
     >
       <Modal
@@ -209,6 +218,7 @@ function KandooHome() {
         }
       >
         <View
+          ref={modalKeyboard.ref}
           style={[
             styles.screen,
             {
@@ -219,31 +229,45 @@ function KandooHome() {
                   : home.state === 'remembered'
                     ? spacing.space7 + spacing.space2
                     : spacing.space6 + spacing.space2),
-              paddingBottom: insets.bottom,
+              // Above the keyboard while the spoken words are being edited.
+              paddingBottom: Math.max(insets.bottom, modalKeyboard.lift),
             },
           ]}
         >
-          <View style={[styles.halo, halo.box]}>
-            <View style={[styles.haloGlow, halo.glow]} pointerEvents="none" />
-            <Pressable
-              onPress={voiceListening ? home.stopListening : undefined}
-              accessibilityRole={voiceListening ? 'button' : undefined}
-              accessibilityLabel={voiceListening ? 'Stop and send' : undefined}
-              hitSlop={12}
-            >
-              <KandooSymbol state={symbolFor(home.state)} size={HALO_SYMBOL_SIZE} />
-            </Pressable>
-          </View>
+          {/* The large halo steps aside while the keyboard is up, so the words
+              being edited get the room. */}
+          {voiceListening && modalKeyboard.keyboardOpen ? null : (
+            <View style={[styles.halo, halo.box]}>
+              <View style={[styles.haloGlow, halo.glow]} pointerEvents="none" />
+              <Pressable
+                onPress={voiceListening ? home.stopListening : undefined}
+                accessibilityRole={voiceListening ? 'button' : undefined}
+                accessibilityLabel={
+                  voiceListening ? 'Stop and send' : undefined
+                }
+                hitSlop={12}
+              >
+                <KandooSymbol
+                  state={symbolFor(home.state)}
+                  size={HALO_SYMBOL_SIZE}
+                />
+              </Pressable>
+            </View>
+          )}
 
           {voiceListening ? (
             <VoiceListening
               transcript={home.transcript}
+              paused={home.voicePaused}
               canSend={home.voiceActive || home.transcript.trim().length > 0}
               error={home.error}
               notice={home.notice}
               busy={home.busy}
               onSend={home.stopListening}
               onCancel={home.cancelListening}
+              onEdit={home.editVoiceTranscript}
+              onPause={home.pauseVoice}
+              onResume={home.resumeVoice}
             />
           ) : null}
 
@@ -292,7 +316,9 @@ function KandooHome() {
         </Pressable>
       </View>
 
-      <View style={[styles.symbol, keyboard.keyboardOpen && styles.symbolTyping]}>
+      <View
+        style={[styles.symbol, keyboard.keyboardOpen && styles.symbolTyping]}
+      >
         <Pressable
           onPress={
             home.state === 'idle'
@@ -360,7 +386,6 @@ function KandooHome() {
             onSaveAsMemory={home.saveAsMemory}
           />
         ) : null}
-
       </ScrollView>
 
       {/*
@@ -369,7 +394,8 @@ function KandooHome() {
         states — swapping or reparenting it on the first keystroke would drop
         focus and blink the keyboard. Only the mic button toggles.
       */}
-      {(home.state === 'idle' || home.state === 'listening') && !voiceListening ? (
+      {(home.state === 'idle' || home.state === 'listening') &&
+      !voiceListening ? (
         <View style={styles.inputDock}>
           <View style={styles.inputRow}>
             <TextInput
@@ -517,8 +543,12 @@ function SpeakerGlyph({ color, muted }: { color: string; muted: boolean }) {
         <View style={[styles.speakerSlash, { backgroundColor: color }]} />
       ) : (
         <View style={styles.speakerWaves}>
-          <View style={[styles.wave, styles.waveSm, { backgroundColor: color }]} />
-          <View style={[styles.wave, styles.waveLg, { backgroundColor: color }]} />
+          <View
+            style={[styles.wave, styles.waveSm, { backgroundColor: color }]}
+          />
+          <View
+            style={[styles.wave, styles.waveLg, { backgroundColor: color }]}
+          />
         </View>
       )}
     </View>
@@ -591,13 +621,28 @@ function Listening({
 
 type VoiceListeningProps = {
   transcript: string;
+  /** Listening is paused while the user edits the words. */
+  paused: boolean;
   canSend: boolean;
   error: string | null;
   notice: string | null;
   busy: boolean;
   onSend: () => void;
   onCancel: () => void;
+  onEdit: (text: string) => void;
+  onPause: () => void;
+  onResume: () => void;
 };
+
+/** How long after the last touch or keystroke Kandoo starts listening again. */
+const RESUME_AFTER_EDIT_MS = 2000;
+
+/** The spoken words start large and step down as they grow, like a caption. */
+function spokenSize(length: number) {
+  if (length <= 80) return { fontSize: 24, lineHeight: 32 };
+  if (length <= 200) return { fontSize: 20, lineHeight: 28 };
+  return { fontSize: 17, lineHeight: 26 };
+}
 
 /**
  * The mic is live: the words appear in Kandoo's serif as they are heard, and
@@ -605,21 +650,71 @@ type VoiceListeningProps = {
  */
 function VoiceListening({
   transcript,
+  paused,
   canSend,
   error,
   notice,
   busy,
   onSend,
   onCancel,
+  onEdit,
+  onPause,
+  onResume,
 }: VoiceListeningProps) {
+  // Touching the words pauses listening; two seconds after the last touch or
+  // keystroke, it listens again and new speech is added after the edit.
+  const resumeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const holdForEdit = () => {
+    onPause();
+    if (resumeTimer.current) clearTimeout(resumeTimer.current);
+    resumeTimer.current = null;
+  };
+  const resumeSoon = () => {
+    if (resumeTimer.current) clearTimeout(resumeTimer.current);
+    resumeTimer.current = setTimeout(onResume, RESUME_AFTER_EDIT_MS);
+  };
+
+  useEffect(
+    () => () => {
+      if (resumeTimer.current) clearTimeout(resumeTimer.current);
+    },
+    []
+  );
+
   return (
     <>
-      <ScrollView style={styles.body} contentContainerStyle={styles.immersiveContent}>
-        <Text style={styles.immersiveLabel}>Listening…</Text>
-        {transcript ? <Text style={styles.spoken}>{transcript}</Text> : null}
+      <View style={styles.voiceBody}>
+        <Text style={styles.immersiveLabel}>
+          {paused ? 'Paused while you edit' : 'Listening…'}
+        </Text>
+        {/* The words as heard, editable in place: tap to place the cursor.
+            It scrolls inside itself once long, so the line being edited stays
+            in view above the keyboard. */}
+        <TextInput
+          style={[
+            styles.spoken,
+            styles.spokenInput,
+            spokenSize(transcript.length),
+          ]}
+          value={transcript}
+          onChangeText={(text) => {
+            holdForEdit();
+            onEdit(text);
+            resumeSoon();
+          }}
+          onTouchStart={holdForEdit}
+          onTouchEnd={resumeSoon}
+          placeholder="Start speaking — tap here to edit"
+          placeholderTextColor={colors.inkFaint}
+          underlineColorAndroid="transparent"
+          multiline
+          scrollEnabled
+          accessibilityLabel="What you said. Tap to edit."
+        />
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-      </ScrollView>
+      </View>
 
       <View style={styles.dockActions}>
         <Pressable style={styles.btn} onPress={onCancel} disabled={busy}>
@@ -667,11 +762,16 @@ function Understanding({
       ? 'Saved what you said'
       : 'I understood';
   const title =
-    !response || nothingActionable ? transcript : response.summary ?? transcript;
+    !response || nothingActionable
+      ? transcript
+      : (response.summary ?? transcript);
 
   return (
     <>
-      <ScrollView style={styles.body} contentContainerStyle={styles.understoodContent}>
+      <ScrollView
+        style={styles.body}
+        contentContainerStyle={styles.understoodContent}
+      >
         <Text style={styles.understoodLabel}>{label}</Text>
 
         <View style={styles.card}>
@@ -681,7 +781,11 @@ function Understanding({
           {chips.length > 0 ? (
             <View style={styles.chips}>
               {chips.map((chip, index) => (
-                <StaggerChip key={`${chip.label}-${index}`} chip={chip} index={index} />
+                <StaggerChip
+                  key={`${chip.label}-${index}`}
+                  chip={chip}
+                  index={index}
+                />
               ))}
             </View>
           ) : null}
@@ -762,7 +866,10 @@ function buildChips(response: InterpretationResponse): Chip[] {
   }
 
   const chips: Chip[] = [
-    ...[...people.values()].map((label) => ({ kind: 'person' as const, label })),
+    ...[...people.values()].map((label) => ({
+      kind: 'person' as const,
+      label,
+    })),
     ...[...topics.values()].map((label) => ({ kind: 'topic' as const, label })),
     ...loose,
     ...times,
@@ -798,7 +905,9 @@ function StaggerChip({ chip, index }: { chip: Chip; index: number }) {
   }));
 
   return (
-    <Animated.View style={[styles.chip, chip.guessed && styles.chipGuessed, style]}>
+    <Animated.View
+      style={[styles.chip, chip.guessed && styles.chipGuessed, style]}
+    >
       {chip.kind ? (
         <Image
           source={CHIP_ICONS[chip.kind]}
@@ -832,7 +941,9 @@ type NoteStatus = 'idle' | 'taking' | 'failed';
  */
 function Remembered({ response, onDone, onOpenNote }: RememberedProps) {
   const ticks = useMemo(() => buildTicks(response.results), [response.results]);
-  const [note, setNote] = useState<{ title: string } | null>(response.note ?? null);
+  const [note, setNote] = useState<{ title: string } | null>(
+    response.note ?? null
+  );
   const [noteStatus, setNoteStatus] = useState<NoteStatus>('idle');
 
   async function onTakeNote() {
@@ -850,7 +961,10 @@ function Remembered({ response, onDone, onOpenNote }: RememberedProps) {
 
   return (
     <>
-      <ScrollView style={styles.body} contentContainerStyle={styles.completeContent}>
+      <ScrollView
+        style={styles.body}
+        contentContainerStyle={styles.completeContent}
+      >
         <Text style={styles.completeLabel}>I’ve got it</Text>
 
         <View style={styles.ticks}>
@@ -880,13 +994,17 @@ function Remembered({ response, onDone, onOpenNote }: RememberedProps) {
           ) : noteStatus === 'taking' ? (
             <View style={styles.tickRow}>
               <View style={styles.tickIconWrap} />
-              <Text style={[styles.tickText, styles.tickPending]}>Taking note…</Text>
+              <Text style={[styles.tickText, styles.tickPending]}>
+                Taking note…
+              </Text>
             </View>
           ) : null}
         </View>
 
         {noteStatus === 'failed' ? (
-          <Text style={styles.error}>Couldn’t take a note just now. Try again.</Text>
+          <Text style={styles.error}>
+            Couldn’t take a note just now. Try again.
+          </Text>
         ) : null}
       </ScrollView>
 
@@ -917,7 +1035,9 @@ function buildTicks(results: InterpretResult[]): string[] {
     if (result.kind === 'reminder') {
       const when =
         formatDueDate(result.reminder.due_at) ?? result.reminder.place_hint;
-      ticks.push(`Reminder · ${result.reminder.task}${when ? ` · ${when}` : ''}`);
+      ticks.push(
+        `Reminder · ${result.reminder.task}${when ? ` · ${when}` : ''}`
+      );
     } else if (result.kind === 'memory') {
       memories++;
     } else {
@@ -934,7 +1054,8 @@ function buildTicks(results: InterpretResult[]): string[] {
 
 function recallAnswer(response: InterpretationResponse): string {
   for (const result of response.results) {
-    if (result.kind === 'recall' && result.status === 'ok') return result.answer;
+    if (result.kind === 'recall' && result.status === 'ok')
+      return result.answer;
   }
   return response.summary ?? '';
 }
@@ -957,7 +1078,12 @@ type AnsweredProps = {
  * mute, mic, Done, navigating away, backgrounding — because a voice still
  * talking after the user has left is the worst failure this feature has.
  */
-function Answered({ response, onDone, voiceSupported, onAskAgain }: AnsweredProps) {
+function Answered({
+  response,
+  onDone,
+  voiceSupported,
+  onAskAgain,
+}: AnsweredProps) {
   const answer = recallAnswer(response);
   const { enabled, loading, toggle } = useSpeechEnabled();
   const shown = useSharedValue(0);
@@ -1044,7 +1170,10 @@ function Answered({ response, onDone, voiceSupported, onAskAgain }: AnsweredProp
   // speaker keeps the persisted mute preference one tap away.
   return (
     <>
-      <ScrollView style={styles.body} contentContainerStyle={styles.immersiveContent}>
+      <ScrollView
+        style={styles.body}
+        contentContainerStyle={styles.immersiveContent}
+      >
         <View style={styles.answeredHead}>
           <Text style={styles.immersiveLabel}>
             {speaking ? 'Speaking…' : 'Here’s what you told me'}
@@ -1076,8 +1205,13 @@ function Answered({ response, onDone, voiceSupported, onAskAgain }: AnsweredProp
             <Text style={styles.btnText}>Ask again</Text>
           </Pressable>
         ) : null}
-        <Pressable style={styles.btnPrimary} onPress={speaking ? silence : onPressDone}>
-          <Text style={styles.btnPrimaryText}>{speaking ? 'Stop' : 'Done'}</Text>
+        <Pressable
+          style={styles.btnPrimary}
+          onPress={speaking ? silence : onPressDone}
+        >
+          <Text style={styles.btnPrimaryText}>
+            {speaking ? 'Stop' : 'Done'}
+          </Text>
         </Pressable>
       </View>
     </>
@@ -1218,6 +1352,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.space5,
     paddingTop: spacing.space4,
     paddingBottom: spacing.space5,
+  },
+  voiceBody: {
+    flex: 1,
+    paddingHorizontal: spacing.space5,
+    paddingTop: spacing.space4,
+  },
+  spokenInput: {
+    flex: 1,
+    textAlignVertical: 'top',
+    padding: 0,
   },
   immersiveLabel: {
     ...text.caption,

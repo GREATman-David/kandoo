@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ForgotPasswordSheet } from '@/components/ForgotPasswordSheet';
 import { KandooSymbol } from '@/components/Symbol';
@@ -7,9 +7,14 @@ import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 
 import { authErrorMessage, signIn, signUp } from '../../services/authService';
 
+const EYE = require('@/assets/images/icons/eye.png');
+const EYE_OFF = require('@/assets/images/icons/eye-off.png');
+
 export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Asked only when creating an account: you confirm a password you're setting.
+  const [confirm, setConfirm] = useState('');
   // Errors read in alarm colour; a notice (e.g. "account created") reads muted.
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -20,6 +25,10 @@ export default function AuthScreen() {
   async function handleSubmit() {
     if (!email.trim() || !password.trim()) {
       setError('Enter your email and password to continue.');
+      return;
+    }
+    if (isCreatingAccount && password !== confirm) {
+      setError('Those passwords don’t match. Please type them again.');
       return;
     }
 
@@ -74,16 +83,21 @@ export default function AuthScreen() {
           editable={!loading}
         />
 
-        <TextInput
-          style={[styles.field, styles.fieldGap]}
+        <PasswordField
           placeholder="Password"
-          placeholderTextColor={colors.inkFaint}
           value={password}
           onChangeText={setPassword}
-          secureTextEntry
-          autoCapitalize="none"
           editable={!loading}
         />
+
+        {isCreatingAccount ? (
+          <PasswordField
+            placeholder="Confirm password"
+            value={confirm}
+            onChangeText={setConfirm}
+            editable={!loading}
+          />
+        ) : null}
 
         <Pressable
           style={[styles.button, loading && styles.buttonDim]}
@@ -98,6 +112,7 @@ export default function AuthScreen() {
           style={styles.toggle}
           onPress={() => {
             setIsCreatingAccount((current) => !current);
+            setConfirm('');
             setError(null);
             setNotice(null);
           }}
@@ -106,9 +121,7 @@ export default function AuthScreen() {
         >
           <Text style={styles.toggleText}>
             {isCreatingAccount ? 'Already have an account? ' : 'Need an account? '}
-            <Text style={styles.toggleAccent}>
-              {isCreatingAccount ? 'Sign in' : 'Create one'}
-            </Text>
+            <Text style={styles.toggleAccent}>{isCreatingAccount ? 'Sign in' : 'Create one'}</Text>
           </Text>
         </Pressable>
 
@@ -132,6 +145,49 @@ export default function AuthScreen() {
         onClose={() => setForgotOpen(false)}
         initialEmail={email.trim()}
       />
+    </View>
+  );
+}
+
+/**
+ * A password box with an eye to show or hide what's been typed. Hidden by
+ * default; the eye's label says what tapping it will do.
+ */
+function PasswordField({
+  placeholder,
+  value,
+  onChangeText,
+  editable,
+}: {
+  placeholder: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  editable: boolean;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <View style={[styles.passwordRow, styles.fieldGap]}>
+      <TextInput
+        style={styles.passwordInput}
+        placeholder={placeholder}
+        placeholderTextColor={colors.inkFaint}
+        value={value}
+        onChangeText={onChangeText}
+        secureTextEntry={!visible}
+        autoCapitalize="none"
+        autoCorrect={false}
+        underlineColorAndroid="transparent"
+        editable={editable}
+      />
+      <Pressable
+        style={styles.eye}
+        onPress={() => setVisible((v) => !v)}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={visible ? 'Hide password' : 'Show password'}
+      >
+        <Image source={visible ? EYE_OFF : EYE} style={styles.eyeIcon} />
+      </Pressable>
     </View>
   );
 }
@@ -187,6 +243,30 @@ const styles = StyleSheet.create({
   fieldGap: {
     marginTop: spacing.space3,
   },
+  passwordRow: {
+    alignSelf: 'stretch',
+    height: FIELD_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+  },
+  passwordInput: {
+    ...text.body,
+    flex: 1,
+    height: FIELD_HEIGHT,
+    paddingLeft: spacing.space4,
+    color: colors.ink,
+  },
+  eye: {
+    height: FIELD_HEIGHT,
+    paddingHorizontal: spacing.space4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eyeIcon: { width: 20, height: 20, tintColor: colors.inkMuted },
 
   // Primary button ———————————————————————————————————————————
   button: {
@@ -232,7 +312,8 @@ const styles = StyleSheet.create({
   },
   forgotText: {
     ...text.caption,
-    color: colors.inkFaint,
+    // Same gold as "Create one": both are actions, and they read as a pair.
+    color: colors.markRing,
   },
   error: {
     ...text.caption,

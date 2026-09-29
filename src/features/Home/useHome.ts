@@ -111,6 +111,8 @@ export function useHome() {
   const [recentLoaded, setRecentLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
+  // Voice is on but the recognizer is paused while the user edits the words.
+  const [voicePaused, setVoicePaused] = useState(false);
   // Raised when extraction returns nothing actionable. Kandoo says so in its own
   // voice and the typed text stays in the field — the UI never shows nothing.
   const [notice, setNotice] = useState<string | null>(null);
@@ -143,6 +145,8 @@ export function useHome() {
   // silent restart. The user, never the OS, decides when capture ends.
   const cancelRequested = useRef(false);
   const fatalError = useRef(false);
+  // Paused for an edit: the 'end' this causes must not restart listening.
+  const pausedRef = useRef(false);
 
   function setTranscriptBoth(text: string) {
     latest.current = text;
@@ -267,6 +271,9 @@ export function useHome() {
   // Each result is the current segment only; we append it to everything
   // finalized so far, so the displayed transcript grows across pauses.
   useSpeechRecognitionEvent('result', (event) => {
+    // A result still in flight when the user paused to edit would overwrite
+    // their edit; while paused, the text box is theirs.
+    if (pausedRef.current) return;
     const segment = event.results[0]?.transcript ?? '';
     const full = [committed.current, segment]
       .filter(Boolean)
@@ -279,6 +286,12 @@ export function useHome() {
   });
 
   useSpeechRecognitionEvent('end', () => {
+    // Paused so the user can edit: keep what was heard, don't restart. The
+    // screen resumes listening once the edit is done (resumeVoice).
+    if (pausedRef.current) {
+      committed.current = latest.current.trim();
+      return;
+    }
     // Cancelled: cancelListening already reset the UI. Nothing to do.
     if (cancelRequested.current) {
       cancelRequested.current = false;
@@ -381,6 +394,8 @@ export function useHome() {
       cancelRequested.current = false;
       fatalError.current = false;
       submitOnEnd.current = false;
+      pausedRef.current = false;
+      setVoicePaused(false);
       setTranscriptBoth('');
       setState('listening');
       setVoiceActive(true);
@@ -396,12 +411,14 @@ export function useHome() {
   }, []);
 
   const cancelListening = useCallback(() => {
-    if (voiceActive) {
+    if (voiceActive && !pausedRef.current) {
       // Flag the cancel BEFORE abort so the 'end' it triggers doesn't restart.
       cancelRequested.current = true;
       submitOnEnd.current = false;
       ExpoSpeechRecognitionModule.abort();
     }
+    pausedRef.current = false;
+    setVoicePaused(false);
     committed.current = '';
     setVoiceActive(false);
     setTranscriptBoth('');
@@ -415,6 +432,16 @@ export function useHome() {
    * 'end' handler submit the final transcript; otherwise submit now.
    */
   const stopListening = useCallback(async () => {
+    // Paused for an edit: the recognizer is already stopped, so there is no
+    // 'end' to wait for — send the edited words now.
+    if (voiceActive && pausedRef.current) {
+      pausedRef.current = false;
+      setVoicePaused(false);
+      committed.current = latest.current.trim();
+      setVoiceActive(false);
+      await runInterpret();
+      return;
+    }
     if (voiceActive) {
       submitOnEnd.current = true;
       ExpoSpeechRecognitionModule.stop();
@@ -422,6 +449,44 @@ export function useHome() {
     }
     await runInterpret();
   }, [voiceActive, runInterpret]);
+
+  /**
+   * The user touched the spoken words to edit them: pause listening so their
+   * edit and new speech don't fight over the text. Words heard so far are kept.
+   */
+  const pauseVoice = useCallback(() => {
+    if (!voiceActive || pausedRef.current) return;
+    pausedRef.current = true;
+    setVoicePaused(true);
+    committed.current = latest.current.trim();
+    try {
+      ExpoSpeechRecognitionModule.stop();
+    } catch (caught) {
+      console.warn('Pausing voice failed:', caught);
+    }
+  }, [voiceActive]);
+
+  /** Listening again after an edit; new speech is added after the edited text. */
+  const resumeVoice = useCallback(() => {
+    if (!voiceActive || !pausedRef.current) return;
+    pausedRef.current = false;
+    setVoicePaused(false);
+    committed.current = latest.current.trim();
+    try {
+      ExpoSpeechRecognitionModule.start(START_OPTIONS);
+    } catch (caught) {
+      console.warn('Resuming voice failed:', caught);
+      setVoiceActive(false);
+      setError('Voice capture stopped. You can keep typing.');
+    }
+  }, [voiceActive]);
+
+  /** An edit to the spoken words while paused: it becomes what speech adds to. */
+  const editVoiceTranscript = useCallback((text: string) => {
+    setTranscriptBoth(text);
+    committed.current = text.trim();
+    setNotice(null);
+  }, []);
 
   /**
    * Kandoo found nothing actionable, but the user wants it kept: save their
@@ -575,6 +640,10 @@ export function useHome() {
     startVoice,
     stopListening,
     cancelListening,
+    voicePaused,
+    pauseVoice,
+    resumeVoice,
+    editVoiceTranscript,
     remember,
     done,
   };
