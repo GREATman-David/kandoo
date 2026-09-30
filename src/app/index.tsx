@@ -32,6 +32,7 @@ import { Paywall } from '@/components/Paywall';
 import { ReviewSheet } from '@/components/ReviewSheet';
 import { KandooSymbol } from '@/components/Symbol';
 import { TierBadge } from '@/components/TierBadge';
+import { AgentButton } from '@/components/AgentButton';
 import {
   useHome,
   type HomeState,
@@ -333,21 +334,6 @@ function KandooHome() {
       <View style={styles.topBar}>
         <Text style={styles.wordmark}>Kandoo</Text>
         <View style={styles.topActions}>
-        {/* Kandoo Agent (Pro): a spoken conversation that can act across the app. */}
-        <Pressable
-          style={styles.talk}
-          onPress={() => {
-            stopSpeaking();
-            // Pro gets a five-minute taste each month; Elite the full allowance.
-            if (entitlement.isPro) setAgentOpen(true);
-            else openPaywallFor('elite');
-          }}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Talk to Kandoo"
-        >
-          <Text style={styles.talkText}>Talk to Kandoo</Text>
-        </Pressable>
         <TierBadge tier={entitlement.tier} onPress={() => setAccountOpen(true)} />
         </View>
       </View>
@@ -506,6 +492,22 @@ function KandooHome() {
         visible={askName}
         welcome={entitlement.isElite ? 'Kandoo Elite' : 'Kandoo Pro'}
         onClose={() => setAskName(false)} />
+
+      {/* Kandoo Agent (Pro): a spoken conversation that can act across the app.
+          Its door rests on the right edge of Home, clear of the typing bar. */}
+      {keyboard.keyboardOpen ? null : (
+        <View style={styles.agentDoor} pointerEvents="box-none">
+          <AgentButton
+            active={agentOpen}
+            onPress={() => {
+              stopSpeaking();
+              // Pro gets a five-minute taste each month; Elite the full allowance.
+              if (entitlement.isPro) setAgentOpen(true);
+              else openPaywallFor('elite');
+            }}
+          />
+        </View>
+      )}
 
       <KandooAgent
         visible={agentOpen}
@@ -1328,15 +1330,7 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   topActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.space2 },
-  talk: {
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-  },
-  talkText: { ...text.label, textTransform: 'none', letterSpacing: 0.5, color: colors.ink },
+  agentDoor: { position: 'absolute', right: spacing.space4, top: '44%' },
   answerText: {
     ...text.answer,
     color: colors.ink,

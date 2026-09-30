@@ -11,13 +11,20 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, radius, spacing, text } from '@/theme/theme';
+import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 
 import { KandooSymbol } from './Symbol';
 
-type Card = { headline: string; body: string };
+type Card = { headline: string; body: string; plans?: true };
 
-/** Three cards: what Kandoo does · how you talk to it · how it remembers. */
+/** The three plans, as the last card says them. Prices live on the paywall. */
+const PLANS = [
+  { name: 'Free', line: 'Capture, reminders and answers from your last ten days, spoken in your phone’s voice.' },
+  { name: 'Kandoo Pro', line: 'Your whole history, places that remind you the moment you arrive, and Kandoo’s own voice.' },
+  { name: 'Kandoo Elite', line: 'Everything in Pro, plus Kandoo Agent — 45 minutes a month of conversation that acts across the app.' },
+] as const;
+
+/** Four cards: what Kandoo does · how you talk to it · how it remembers · the plans. */
 const CARDS: Card[] = [
   {
     headline: 'Tell Kandoo once.',
@@ -30,6 +37,11 @@ const CARDS: Card[] = [
   {
     headline: 'It finds the moment.',
     body: 'A time, a place, a person — Kandoo surfaces the right memory when it counts, and shows you before it commits anything.',
+  },
+  {
+    headline: 'Start free. Grow into it.',
+    body: '',
+    plans: true,
   },
 ];
 
@@ -85,9 +97,20 @@ export function Onboarding({ onDone }: OnboardingProps) {
       >
         {CARDS.map((card) => (
           <View key={card.headline} style={[styles.card, { width }]}>
-            <KandooSymbol state="idle" size={96} />
+            <KandooSymbol state="idle" size={card.plans ? 64 : 96} />
             <Text style={styles.headline}>{card.headline}</Text>
-            <Text style={styles.body}>{card.body}</Text>
+            {card.plans ? (
+              <View style={styles.plans}>
+                {PLANS.map((plan) => (
+                  <View key={plan.name} style={[styles.plan, plan.name === 'Kandoo Elite' && styles.planElite]}>
+                    <Text style={styles.planName}>{plan.name}</Text>
+                    <Text style={styles.planLine}>{plan.line}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.body}>{card.body}</Text>
+            )}
           </View>
         ))}
       </ScrollView>
@@ -147,6 +170,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: 320,
   },
+  plans: { alignSelf: 'stretch', gap: spacing.space3 },
+  plan: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingVertical: spacing.space3,
+    paddingHorizontal: spacing.space4,
+    gap: 2,
+  },
+  // Elite wears the same thicker gold border as its badge on Home.
+  planElite: { borderWidth: 2, borderColor: colors.markCore },
+  planName: { ...text.memory, fontFamily: fontFamily.displayItalic, color: colors.ink },
+  planLine: { ...text.body, color: colors.inkMuted },
   footer: {
     paddingHorizontal: spacing.space4,
     gap: spacing.space5,
