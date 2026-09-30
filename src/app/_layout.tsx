@@ -1,3 +1,4 @@
+import { ConversationProvider } from '@elevenlabs/react-native';
 import { DefaultTheme, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -33,10 +34,13 @@ export default function TabLayout() {
   // as dark navigation chrome or light status-bar icons on a cream ground.
   return (
     <ThemeProvider value={DefaultTheme}>
-      <StatusBar style="dark" />
-      <AnimatedSplashOverlay />
-      <AppTabs />
-      <NotificationRouter />
+      {/* Kandoo Agent's voice session (Pro) — idle until the user opens it. */}
+      <ConversationProvider>
+        <StatusBar style="dark" />
+        <AnimatedSplashOverlay />
+        <AppTabs />
+        <NotificationRouter />
+      </ConversationProvider>
     </ThemeProvider>
   );
 }

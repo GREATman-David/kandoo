@@ -84,6 +84,10 @@ const config: ExpoConfig = {
     ],
     // The Places map: MapLibre with open map data — no Google key or billing.
     '@maplibre/maplibre-react-native',
+    // Kandoo Agent (Pro): ElevenLabs voice conversations run over LiveKit's
+    // WebRTC. RECORD_AUDIO is already declared by expo-speech-recognition.
+    '@livekit/react-native-expo-plugin',
+    '@config-plugins/react-native-webrtc',
   ],
   experiments: {
     typedRoutes: true,

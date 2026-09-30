@@ -26,6 +26,7 @@ import { PlaceHomeCards } from '@/components/PlaceHomeCards';
 import { OfflineNote } from '@/components/OfflineNote';
 import { NoteDetail } from '@/components/NoteDetail';
 import { Onboarding } from '@/components/Onboarding';
+import { KandooAgent } from '@/components/KandooAgent';
 import { Paywall } from '@/components/Paywall';
 import { ReviewSheet } from '@/components/ReviewSheet';
 import { KandooSymbol } from '@/components/Symbol';
@@ -159,6 +160,7 @@ function KandooHome() {
   const insets = useSafeAreaInsets();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
   const [noteId, setNoteId] = useState<string | null>(null);
   // Typing: lift the docked field above the keyboard, and shrink the mark so
   // what is being typed stays in view. Voice is full-screen and unaffected.
@@ -308,6 +310,21 @@ function KandooHome() {
 
       <View style={styles.topBar}>
         <Text style={styles.wordmark}>Kandoo</Text>
+        <View style={styles.topActions}>
+        {/* Kandoo Agent (Pro): a spoken conversation that can act across the app. */}
+        <Pressable
+          style={styles.talk}
+          onPress={() => {
+            stopSpeaking();
+            if (entitlement.isPro) setAgentOpen(true);
+            else home.openPaywall();
+          }}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Talk to Kandoo"
+        >
+          <Text style={styles.talkText}>Talk to Kandoo</Text>
+        </Pressable>
         <Pressable
           style={styles.badge}
           onPress={() => setAccountOpen(true)}
@@ -319,6 +336,7 @@ function KandooHome() {
             {entitlement.isPro ? 'Kandoo Pro' : 'Free'}
           </Text>
         </Pressable>
+        </View>
       </View>
 
       <View
@@ -458,6 +476,12 @@ function KandooHome() {
           entitlement.refresh();
           home.onProUnlocked();
         }}
+      />
+
+      <KandooAgent
+        visible={agentOpen}
+        onClose={() => setAgentOpen(false)}
+        onNeedPro={home.openPaywall}
       />
 
       <AccountSheet
@@ -1258,6 +1282,16 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: colors.ink,
   },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.space2 },
+  talk: {
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  talkText: { ...text.label, textTransform: 'none', letterSpacing: 0.5, color: colors.ink },
   badge: {
     backgroundColor: colors.accentWash,
     borderRadius: radius.full,
