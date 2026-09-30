@@ -4,6 +4,7 @@ import express from 'express';
 
 import authPagesRouter from './routes/authPages';
 import interpretRouter from './routes/interpret';
+import agentRouter from './routes/agent';
 import insightsRouter from './routes/insights';
 import placesRouter from './routes/places';
 
@@ -47,6 +48,9 @@ app.use('/', placesRouter);
 
 // /insights/month — the monthly recap's server half (counts only).
 app.use('/', insightsRouter);
+
+// /agent/session, /agent/search, /speak — Kandoo Agent (Pro) and Kandoo's voice.
+app.use('/', agentRouter);
 
 /**
  * The 30-second setInterval scheduler is gone.

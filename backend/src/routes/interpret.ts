@@ -324,7 +324,41 @@ router.post('/reminders', authenticateRequest, async (req, res) => {
   const captureId = typeof req.body?.captureId === 'string' ? req.body.captureId : null;
 
   if (!task.trim()) return res.status(400).json({ error: 'A task is required.' });
-  if (!dueAt) return res.status(400).json({ error: 'A time is required.' });
+
+  // A place instead of a time ("when I get to school") — Kandoo Agent. Same
+  // path as a spoken capture (place resolution, aliases, people links), then
+  // confirmed at once: the user asked for it directly.
+  const placeName = typeof req.body?.placeName === 'string' ? req.body.placeName.trim().slice(0, 60) : '';
+  if (!dueAt && placeName) {
+    const notBefore =
+      typeof req.body?.notBefore === 'string' && !Number.isNaN(Date.parse(req.body.notBefore))
+        ? req.body.notBefore
+        : null;
+    try {
+      const created = await createReminder(
+        userId,
+        null,
+        {
+          kind: 'reminder',
+          task,
+          dueAt: null,
+          placeHint: placeName,
+          placeTrigger: req.body?.placeTrigger === 'leave' ? 'leave' : 'arrive',
+          notBefore,
+          people: person ? [person] : [],
+          insistent: false,
+        },
+        new Date().toISOString()
+      );
+      const reminder = await confirmReminder(userId, created.id);
+      return res.json({ success: true, reminder });
+    } catch (error) {
+      console.error('Create place reminder failed:', error);
+      return res.status(500).json({ error: 'Could not create that reminder.' });
+    }
+  }
+
+  if (!dueAt) return res.status(400).json({ error: 'A time or a place is required.' });
   if (repeatDays === 'invalid') return res.status(400).json({ error: 'Invalid repeat days.' });
 
   try {

@@ -520,8 +520,14 @@ export async function fetchGroupedReminders(): Promise<GroupedReminders> {
 /** Manual reminder from the + button — created confirmed. Caller schedules it. */
 export async function createManualReminder(input: {
   task: string;
-  dueAt: string;
+  /** A time — or null for a place reminder (placeName). */
+  dueAt: string | null;
   person: string | null;
+  /** Kandoo Agent: a place instead of a time ("when I get to school"). */
+  placeName?: string | null;
+  placeTrigger?: 'arrive' | 'leave';
+  /** ISO; the place reminder waits until then ("…tomorrow"). */
+  notBefore?: string | null;
   repeatDays?: number[] | null;
   /** Link it to something already captured ("Add a reminder"). */
   captureId?: string | null;
@@ -1087,4 +1093,78 @@ export async function deletePlace(id: string): Promise<void> {
     undefined,
     'Could not delete that place.'
   );
+}
+
+// ---- Kandoo Agent ----
+
+/** A short-lived token for the private Kandoo agent. Pro only (402 otherwise). */
+export async function fetchAgentToken(): Promise<string> {
+  const accessToken = await getAccessTokenOrThrow();
+  const data = await apiFetch<{ token: string }>(
+    '/agent/session',
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    'Kandoo Agent is not available right now.'
+  );
+  return data.token;
+}
+
+export type AgentMatch = {
+  id: string;
+  kind: 'memory' | 'reminder';
+  content: string;
+  person: string | null;
+  place: string | null;
+  dueAt: string | null;
+  savedAt: string;
+};
+
+/** The agent's memory search: hybrid recall matches, no capture created. */
+export async function agentSearch(query: string): Promise<AgentMatch[]> {
+  const accessToken = await getAccessTokenOrThrow();
+  const data = await apiFetch<{ matches?: AgentMatch[] }>(
+    '/agent/search',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ query }),
+    },
+    'Could not search your memories just now.',
+    { timeoutMs: AI_TIMEOUT_MS }
+  );
+  return data.matches ?? [];
+}
+
+/** Kandoo's voice: MP3 bytes as base64 (for the audio player). */
+export async function fetchSpeech(text: string): Promise<string> {
+  const accessToken = await getAccessTokenOrThrow();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const response = await fetch(`${BACKEND_URL}/speak`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new ApiError('Kandoo’s voice is not available right now.', response.status);
+    const buffer = await response.arrayBuffer();
+    return arrayBufferToBase64(buffer);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i];
+    const b = bytes[i + 1] ?? 0;
+    const c = bytes[i + 2] ?? 0;
+    out += chars[a >> 2] + chars[((a & 3) << 4) | (b >> 4)];
+    out += i + 1 < bytes.length ? chars[((b & 15) << 2) | (c >> 6)] : '=';
+    out += i + 2 < bytes.length ? chars[c & 63] : '=';
+  }
+  return out;
 }
