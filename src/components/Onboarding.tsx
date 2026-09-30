@@ -17,12 +17,22 @@ import { KandooSymbol } from './Symbol';
 
 type Card = { headline: string; body: string; plans?: true };
 
-/** The three plans, as the last card says them. Prices live on the paywall. */
-const PLANS = [
+/**
+ * The three plans, as the last card says them. Prices live on the paywall.
+ * Elite is a list, so each new Elite feature is one more line here.
+ */
+const PLANS: { name: string; line: string; points?: string[] }[] = [
   { name: 'Free', line: 'Capture, reminders and answers from your last ten days, spoken in your phone’s voice.' },
   { name: 'Kandoo Pro', line: 'Your whole history, places that remind you the moment you arrive, and Kandoo’s own voice.' },
-  { name: 'Kandoo Elite', line: 'Everything in Pro, plus Kandoo Agent — 45 minutes a month of conversation that acts across the app.' },
-] as const;
+  {
+    name: 'Kandoo Elite',
+    line: 'Everything in Pro, plus Mr. Kandoo:',
+    points: [
+      '45 minutes a month of conversation that acts across the app',
+      'Photograph your notes or a document — he pulls out what matters and files it in your Library',
+    ],
+  },
+];
 
 /** Four cards: what Kandoo does · how you talk to it · how it remembers · the plans. */
 const CARDS: Card[] = [
@@ -61,6 +71,12 @@ function CardContent({ card }: { card: Card }) {
             <View key={plan.name} style={[styles.plan, plan.name === 'Kandoo Elite' && styles.planElite]}>
               <Text style={styles.planName}>{plan.name}</Text>
               <Text style={styles.planLine}>{plan.line}</Text>
+              {plan.points?.map((point) => (
+                <View key={point} style={styles.planPoint}>
+                  <Text style={styles.planLine}>•</Text>
+                  <Text style={[styles.planLine, styles.planPointText]}>{point}</Text>
+                </View>
+              ))}
             </View>
           ))}
         </View>
@@ -118,13 +134,15 @@ export function Onboarding({ onDone }: OnboardingProps) {
       >
         {CARDS.map((card) =>
           card.plans ? (
-            // The plans card can be taller than a small phone: it scrolls
-            // up and down, while the pager still swipes sideways.
+            // The plans card is taller than most phones: it scrolls up and
+            // down, while the pager still swipes sideways. Its content must
+            // NOT take `flex: 1` (styles.card) — that pins it to one screen
+            // height, so nothing below the fold (Elite) could scroll into view.
             <ScrollView
               key={card.headline}
               style={{ width }}
-              contentContainerStyle={[styles.card, styles.cardScroll]}
-              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.cardScroll}
+              showsVerticalScrollIndicator
               nestedScrollEnabled
             >
               <CardContent card={card} />
@@ -180,7 +198,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.space6,
     gap: spacing.space5,
   },
-  cardScroll: { flexGrow: 1, paddingVertical: spacing.space5 },
+  // Grows past the screen when it must (and scrolls); centred when it fits.
+  cardScroll: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.space6,
+    paddingVertical: spacing.space5,
+    gap: spacing.space5,
+  },
   headline: {
     ...text.displayXl,
     color: colors.ink,
@@ -207,6 +233,9 @@ const styles = StyleSheet.create({
   planElite: { borderWidth: 2, borderColor: colors.markCore },
   planName: { ...text.memory, fontFamily: fontFamily.displayItalic, color: colors.ink },
   planLine: { ...text.body, color: colors.inkMuted },
+  // A hanging indent: a wrapped line lines up with the text, not the bullet.
+  planPoint: { flexDirection: 'row', gap: spacing.space2, paddingLeft: spacing.space1 },
+  planPointText: { flex: 1 },
   footer: {
     paddingHorizontal: spacing.space4,
     gap: spacing.space5,
