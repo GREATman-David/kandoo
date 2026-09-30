@@ -28,6 +28,7 @@ import { formatDueDate, formatPlaceWhen } from '@/utils/formatDueDate';
 import { isRepeating, repeatWhen } from '@/utils/repeat';
 import { timeAgo } from '@/utils/timeAgo';
 
+import { PlaceReadiness } from './PlaceReadiness';
 import { TimeEntry } from './TimeEntry';
 
 export type ReminderDetailProps = {
@@ -245,6 +246,7 @@ export function ReminderDetail({
             >
               <Text style={styles.when}>{when}</Text>
             </Pressable>
+            <PlaceReadiness reminder={r} onLeave={onClose} />
 
             {editing ? (
               <TextInput

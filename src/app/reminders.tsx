@@ -252,8 +252,11 @@ export default function RemindersScreen() {
   const today = groups.active.filter(
     (r) => r.due_at && nextDue(r) >= todayStart && nextDue(r) <= cutoff
   );
+  // Place reminders have no time: they wait for an arrival, under their own
+  // heading rather than lost at the end of "Upcoming".
+  const atPlace = groups.active.filter((r) => !r.due_at && !!r.place_hint);
   const upcoming = groups.active.filter(
-    (r) => !r.due_at || nextDue(r) > cutoff
+    (r) => (!r.due_at && !r.place_hint) || (!!r.due_at && nextDue(r) > cutoff)
   );
   const nothing =
     groups.needsReview.length === 0 &&
@@ -328,6 +331,20 @@ export default function RemindersScreen() {
             {today.length > 0 ? (
               <Section title="Today">
                 {today.map((r) => (
+                  <Row
+                    key={r.id}
+                    reminder={r}
+                    onOpen={setSelected}
+                    onDone={markDone}
+                    onMenu={openMenu}
+                  />
+                ))}
+              </Section>
+            ) : null}
+
+            {atPlace.length > 0 ? (
+              <Section title="When you arrive">
+                {atPlace.map((r) => (
                   <Row
                     key={r.id}
                     reminder={r}

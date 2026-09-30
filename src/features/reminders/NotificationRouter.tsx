@@ -109,6 +109,10 @@ export function NotificationRouter() {
       // Cast: typed routes regenerate only when Metro runs.
       router.navigate({ pathname: '/places' as never, params: { open: data.placeId } });
     }
+    // The monthly recap arrived by itself: open it.
+    if (data?.kandooRecap === true && typeof data.month === 'string') {
+      router.navigate({ pathname: '/places' as never, params: { recap: data.month } });
+    }
 
     Notifications.clearLastNotificationResponseAsync().catch((error: unknown) => {
       console.warn('Clearing the handled notification failed:', error);

@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AccountSheet } from '@/components/AccountSheet';
 import { EmptyState } from '@/components/EmptyState';
+import { PlaceHomeCards } from '@/components/PlaceHomeCards';
 import { OfflineNote } from '@/components/OfflineNote';
 import { NoteDetail } from '@/components/NoteDetail';
 import { Onboarding } from '@/components/Onboarding';
@@ -369,6 +370,8 @@ function KandooHome() {
         {home.state === 'listening' ? (
           <Text style={styles.listeningLabel}>Listening…</Text>
         ) : null}
+
+        {home.state === 'idle' ? <PlaceHomeCards /> : null}
 
         {home.state === 'idle' ? (
           <Idle

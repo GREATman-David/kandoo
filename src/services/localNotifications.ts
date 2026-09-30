@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
@@ -464,4 +465,36 @@ export async function cancelAllReminders(): Promise<void> {
     console.warn('Cancelling scheduled reminders failed:', error);
   }
   await clearTriggers();
+}
+
+const RECAP_KEY = 'kandoo.recap.scheduled.v1';
+
+/**
+ * The monthly recap arrives by itself: one quiet notification at 10:00 on the
+ * 1st, for the month just ended. Idempotent — called on every launch, it
+ * schedules only when the upcoming one isn't already waiting.
+ */
+export async function ensureMonthlyRecapScheduled(at: Date, month: { key: string; label: string }): Promise<void> {
+  await ensureChannels();
+  const stored = await AsyncStorage.getItem(RECAP_KEY);
+  const [storedKey, storedId] = stored?.split('|') ?? [];
+  if (storedKey === month.key && storedId) {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    if (scheduled.some((r) => r.identifier === storedId)) return;
+  }
+  if (storedId) {
+    await Notifications.cancelScheduledNotificationAsync(storedId).catch((error) =>
+      console.warn('Cancelling the old recap notice failed:', error)
+    );
+  }
+  const id = await Notifications.scheduleNotificationAsync({
+    content: {
+      title: `Your ${month.label} with Kandoo`,
+      body: 'Where your month went, and who was on your mind.',
+      sound: false,
+      data: { kandooRecap: true, month: month.key },
+    },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId: CHANNEL_MOMENTS },
+  });
+  await AsyncStorage.setItem(RECAP_KEY, `${month.key}|${id}`);
 }

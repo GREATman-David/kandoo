@@ -28,6 +28,8 @@ import {
   fetchPlace,
   isProRequired,
   logFailure,
+  mergePlaceInto,
+  setPlaceStarred,
   updatePlace,
   userMessage,
   type CreatedReminder,
@@ -49,6 +51,8 @@ const ICONS = {
   back: require('@/assets/images/icons/chevron-left.png'),
   open: require('@/assets/images/icons/chevron-right.png'),
   edit: require('@/assets/images/icons/pencil.png'),
+  star: require('@/assets/images/icons/star.png'),
+  starred: require('@/assets/images/icons/star-filled.png'),
 };
 
 function Row({ title, meta, onPress }: { title: string; meta?: string | null; onPress: () => void }) {
@@ -74,9 +78,19 @@ export type PlaceDetailProps = {
   /** Open the drawer to draw (or redraw) this place. */
   onDraw: (place: PlaceDetailData) => void;
   onNeedPro: () => void;
+  /** The user's drawn places: an undrawn name can be folded into one of them. */
+  drawnPlaces?: { id: string; name: string }[];
 };
 
-export function PlaceDetail({ placeId, visible, onClose, onChanged, onDraw, onNeedPro }: PlaceDetailProps) {
+export function PlaceDetail({
+  placeId,
+  visible,
+  onClose,
+  onChanged,
+  onDraw,
+  onNeedPro,
+  drawnPlaces = [],
+}: PlaceDetailProps) {
   const insets = useSafeAreaInsets();
   const mapStyle = useKandooMapStyle();
   const { isPro } = useEntitlement();
@@ -136,6 +150,46 @@ export function PlaceDetail({ placeId, visible, onClose, onChanged, onDraw, onNe
       logFailure('Renaming place failed:', caught);
       Alert.alert('Couldn’t rename', userMessage(caught, 'Please try again.'));
     }
+  };
+
+  const toggleStar = async () => {
+    if (!place) return;
+    const next = !place.starred;
+    setPlace({ ...place, starred: next }); // at once; undone below if it fails
+    try {
+      await setPlaceStarred(place.id, next);
+      changed();
+    } catch (caught) {
+      logFailure('Starring place failed:', caught);
+      setPlace({ ...place, starred: !next });
+      Alert.alert('Couldn’t update', userMessage(caught, 'Please try again.'));
+    }
+  };
+
+  /** "school" is my "UG Campus": fold this name into a drawn place. */
+  const mergeInto = (target: { id: string; name: string }) => {
+    if (!place) return;
+    Alert.alert(
+      `Is “${place.name}” your ${target.name}?`,
+      `Everything about ${place.name} moves to ${target.name}, and from now on “${place.name}” means ${target.name}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes, same place',
+          onPress: () =>
+            void mergePlaceInto(place.id, target.id)
+              .then(() => {
+                requestPlaceResync();
+                onChanged();
+                onClose();
+              })
+              .catch((caught) => {
+                logFailure('Merging places failed:', caught);
+                Alert.alert('Couldn’t merge', userMessage(caught, 'Please try again.'));
+              }),
+        },
+      ]
+    );
   };
 
   const more = () => {
@@ -201,9 +255,22 @@ export function PlaceDetail({ placeId, visible, onClose, onChanged, onDraw, onNe
             <Image source={ICONS.back} style={styles.barIcon} />
           </Pressable>
           {place ? (
-            <Pressable onPress={more} hitSlop={12} accessibilityRole="button" accessibilityLabel="More">
-              <Text style={styles.more}>•••</Text>
-            </Pressable>
+            <View style={styles.barActions}>
+              <Pressable
+                onPress={() => void toggleStar()}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel={place.starred ? 'Unstar this place' : 'Star this place'}
+              >
+                <Image
+                  source={place.starred ? ICONS.starred : ICONS.star}
+                  style={[styles.barIcon, place.starred && styles.starOn]}
+                />
+              </Pressable>
+              <Pressable onPress={more} hitSlop={12} accessibilityRole="button" accessibilityLabel="More">
+                <Text style={styles.more}>•••</Text>
+              </Pressable>
+            </View>
           ) : null}
         </View>
 
@@ -285,6 +352,9 @@ export function PlaceDetail({ placeId, visible, onClose, onChanged, onDraw, onNe
                     <Image source={ICONS.edit} style={styles.editIcon} />
                   </Pressable>
                 )}
+                {place.aliases && place.aliases.length > 0 ? (
+                  <Text style={styles.aliases}>Also “{place.aliases.join('”, “')}”</Text>
+                ) : null}
                 <Text style={[styles.status, geometry && isPro && alwaysAllowed ? styles.statusOn : null]}>
                   {!geometry
                     ? 'Not drawn yet'
@@ -295,6 +365,26 @@ export function PlaceDetail({ placeId, visible, onClose, onChanged, onDraw, onNe
                         : 'Kandoo will notice when you arrive'}
                 </Text>
               </View>
+
+              {!geometry && drawnPlaces.length > 0 ? (
+                <View style={styles.section}>
+                  <Text style={styles.eyebrow}>Is this one of your places?</Text>
+                  <Text style={styles.mergeHelp}>
+                    If “{place.name}” is another name for a place you’ve drawn, tap it. Kandoo will
+                    remember they’re the same.
+                  </Text>
+                  <View style={styles.chips}>
+                    {drawnPlaces
+                      .filter((p) => p.id !== place.id)
+                      .slice(0, 8)
+                      .map((p) => (
+                        <Pressable key={p.id} style={styles.chip} onPress={() => mergeInto(p)} accessibilityRole="button">
+                          <Text style={styles.chipText}>{p.name}</Text>
+                        </Pressable>
+                      ))}
+                  </View>
+                </View>
+              ) : null}
 
               {waiting.length > 0 ? (
                 <View style={styles.section}>
@@ -385,6 +475,20 @@ const styles = StyleSheet.create({
   bar: { height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   barIcon: { width: 20, height: 20, tintColor: colors.ink },
   more: { ...text.bodyStrong, color: colors.inkMuted, letterSpacing: 2 },
+  barActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.space5 },
+  starOn: { tintColor: colors.markCore },
+  aliases: { ...text.caption, color: colors.inkMuted, marginTop: 4 },
+  mergeHelp: { ...text.caption, color: colors.inkMuted, marginTop: spacing.space1, marginBottom: spacing.space3 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.space2 },
+  chip: {
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.space3,
+    paddingVertical: 6,
+  },
+  chipText: { fontFamily: fontFamily.displayRegular, fontSize: 15, lineHeight: 20, color: colors.ink },
   body: { paddingTop: spacing.space3, paddingBottom: spacing.space8 },
   dim: { ...text.body, color: colors.inkFaint, marginTop: spacing.space6 },
   error: { ...text.body, color: colors.alarmText, marginTop: spacing.space6 },

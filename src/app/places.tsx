@@ -4,11 +4,14 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EmptyState } from '@/components/EmptyState';
+import { MonthlyRecap } from '@/components/MonthlyRecap';
 import { OfflineNote } from '@/components/OfflineNote';
 import { Paywall } from '@/components/Paywall';
 import { PlaceDetail } from '@/components/PlaceDetail';
 import { PlaceDrawer } from '@/components/PlaceDrawer';
 import { PlacePermissionSheet } from '@/components/PlacePermissionSheet';
+import { monthWindow, type MonthWindow } from '@/features/places/monthRecap';
+import { openBatterySettings, openLocationSettings, usePlaceHealth } from '@/features/places/usePlaceHealth';
 import { useEntitlement } from '@/hooks/useEntitlement';
 import {
   fetchPlaces,
@@ -24,6 +27,7 @@ import { useAuth } from '../features/Auth/useAuth';
 const PIN_ICON = require('@/assets/images/tabIcons/places.png');
 const PLUS_ICON = require('@/assets/images/icons/plus.png');
 const CLOCK_ICON = require('@/assets/images/icons/chip-time.png');
+const STAR_ICON = require('@/assets/images/icons/star-filled.png');
 
 type DrawTarget = {
   place: PlaceSummary | null;
@@ -35,14 +39,17 @@ type DrawTarget = {
  * on the map — with what happened there and what is waiting there. Drawing a
  * place is what lets the phone notice arriving.
  *
- * Deep links: /places?open=<id> (a Kandoo Moment was tapped) and
- * /places?draw=<name> (a review card's "Where is school?").
+ * Deep links: /places?open=<id> (a Kandoo Moment was tapped),
+ * /places?draw=<name> (a review card's "Where is school?") and
+ * /places?recap=<YYYY-MM> (the monthly recap arrived).
  */
 export default function PlacesScreen() {
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuth();
   const { isPro, refresh } = useEntitlement();
-  const params = useLocalSearchParams<{ open?: string; draw?: string }>();
+  const params = useLocalSearchParams<{ open?: string; draw?: string; recap?: string }>();
+  const { health, refresh: refreshHealth } = usePlaceHealth();
+  const [recap, setRecap] = useState<MonthWindow | null>(null);
 
   const [places, setPlaces] = useState<PlaceSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,9 +96,13 @@ export default function PlacesScreen() {
     } else if (params.draw) {
       startDrawing(null, params.draw);
       router.setParams({ draw: undefined });
+    } else if (params.recap && /^\d{4}-\d{2}$/.test(params.recap)) {
+      const [y, m] = params.recap.split('-').map(Number);
+      setRecap(monthWindow(new Date(y, m - 1, 15)));
+      router.setParams({ recap: undefined });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.open, params.draw]);
+  }, [params.open, params.draw, params.recap]);
 
   const startDrawing = (place: PlaceSummary | null, suggestedName: string | null = null) => {
     if (!isPro) {
@@ -102,9 +113,11 @@ export default function PlacesScreen() {
     setDrawing({ place, suggestedName });
   };
 
-  const drawn = places.filter((p) => p.center);
+  const starred = places.filter((p) => p.center && p.starred);
+  const drawn = places.filter((p) => p.center && !p.starred);
   const known = places.filter((p) => !p.center);
-  const needsPermission = isPro && permission !== null && permission !== 'granted' && drawn.length > 0;
+  const anyDrawn = starred.length + drawn.length > 0;
+  const needsPermission = isPro && permission !== null && permission !== 'granted' && anyDrawn;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.space2 }]}>
@@ -141,6 +154,31 @@ export default function PlacesScreen() {
               </Pressable>
             ) : null}
 
+            {/* Honest status: is Kandoo actually able to notice arrivals? */}
+            {isPro && anyDrawn && !needsPermission ? (
+              health.kind === 'location-off' ? (
+                <Pressable style={styles.notice} onPress={openLocationSettings} accessibilityRole="button">
+                  <Text style={styles.noticeText}>Location is off, so Kandoo can’t notice you arriving.</Text>
+                  <Text style={styles.noticeAction}>Turn on location</Text>
+                </Pressable>
+              ) : health.kind === 'error' ? (
+                <View style={styles.notice}>
+                  <Text style={styles.noticeText}>
+                    Kandoo couldn’t update the places it watches. It will try again.
+                  </Text>
+                </View>
+              ) : health.kind === 'watching' && health.places > 0 ? (
+                <View style={styles.status}>
+                  <Text style={styles.statusText}>
+                    Watching {health.places} {health.places === 1 ? 'place' : 'places'}
+                  </Text>
+                  <Pressable onPress={openBatterySettings} hitSlop={8} accessibilityRole="button">
+                    <Text style={styles.statusLink}>Reminders late? Let Kandoo run in the background</Text>
+                  </Pressable>
+                </View>
+              ) : null
+            ) : null}
+
             {loading ? (
               <Text style={styles.dim}>Loading…</Text>
             ) : error ? (
@@ -152,6 +190,15 @@ export default function PlacesScreen() {
               />
             ) : (
               <>
+                {starred.length > 0 ? (
+                  <>
+                    <Text style={[styles.eyebrow, styles.eyebrowFirst]}>Starred</Text>
+                    {starred.map((p, i) => (
+                      <PlaceRow key={p.id} place={p} first={i === 0} onPress={() => setSelected(p.id)} />
+                    ))}
+                    {drawn.length > 0 ? <Text style={styles.eyebrow}>Your places</Text> : null}
+                  </>
+                ) : null}
                 {drawn.map((p, i) => (
                   <PlaceRow key={p.id} place={p} first={i === 0} onPress={() => setSelected(p.id)} />
                 ))}
@@ -165,14 +212,32 @@ export default function PlacesScreen() {
                 ) : null}
               </>
             )}
+
+            <Pressable style={styles.recapRow} onPress={() => setRecap(monthWindow(new Date()))} accessibilityRole="button">
+              <Text style={styles.recapTitle}>Your {monthWindow(new Date()).label} so far</Text>
+              <Text style={styles.counts}>Where your month went, and who was on your mind</Text>
+            </Pressable>
           </>
         )}
       </ScrollView>
 
+      <MonthlyRecap
+        month={recap}
+        onClose={() => setRecap(null)}
+        onOpenPlace={(id) => {
+          setRecap(null);
+          setSelected(id);
+        }}
+      />
+
       <PlaceDetail
         placeId={selected}
         visible={selected !== null}
-        onClose={() => setSelected(null)}
+        drawnPlaces={[...starred, ...drawn].map((p) => ({ id: p.id, name: p.name }))}
+        onClose={() => {
+          setSelected(null);
+          refreshHealth();
+        }}
         onChanged={load}
         onDraw={(p) => startDrawing(p)}
         onNeedPro={() => setPaywall(true)}
@@ -183,7 +248,7 @@ export default function PlacesScreen() {
         place={drawing?.place ?? null}
         suggestedName={drawing?.suggestedName ?? null}
         knownNames={known.map((p) => p.name)}
-        otherPlaces={drawn.map((p) => ({
+        otherPlaces={[...starred, ...drawn].map((p) => ({
           id: p.id,
           name: p.name,
           center: p.center!,
@@ -240,7 +305,13 @@ function PlaceRow({ place, first, onPress }: { place: PlaceSummary; first: boole
         <Image source={PIN_ICON} style={[styles.pinIcon, !drawn && styles.pinIconUndrawn]} />
       </View>
       <View style={styles.rowMain}>
-        <Text style={styles.name}>{place.name}</Text>
+        <View style={styles.nameRow}>
+          <Text style={styles.name}>{place.name}</Text>
+          {place.starred ? <Image source={STAR_ICON} style={styles.starIcon} /> : null}
+        </View>
+        {place.aliases && place.aliases.length > 0 ? (
+          <Text style={styles.counts} numberOfLines={1}>Also “{place.aliases.join('”, “')}”</Text>
+        ) : null}
         {place.latestMemory ? (
           <Text style={styles.summary} numberOfLines={1}>
             {place.latestMemory.content}
@@ -304,6 +375,21 @@ const styles = StyleSheet.create({
   },
   noticeText: { ...text.caption, color: colors.ink },
   noticeAction: { ...text.bodyStrong, color: colors.accent },
+  status: { gap: 2, marginBottom: spacing.space3 },
+  statusText: { ...text.caption, color: colors.settled },
+  statusLink: { ...text.caption, color: colors.inkMuted, textDecorationLine: 'underline' },
+  eyebrowFirst: { marginTop: spacing.space2 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  starIcon: { width: 13, height: 13, tintColor: colors.markCore },
+  recapRow: {
+    marginTop: spacing.space7,
+    padding: spacing.space4,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surfaceRaised,
+  },
+  recapTitle: { fontFamily: fontFamily.displaySemiBold, fontSize: 17, lineHeight: 22, color: colors.ink },
 
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.space3, paddingVertical: spacing.space4 },
   rowDivider: { borderTopWidth: 1, borderTopColor: colors.line },
