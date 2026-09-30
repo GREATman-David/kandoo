@@ -62,6 +62,36 @@ to run again — do so if saving a research note fails.
 - NOT yet: any Mr. Kandoo voice flow — the emulator account is Free and the agent is
   Elite-gated. Needs an Elite account (RevenueCat Test Store) on the device.
 
+## Elite QA pass (30 Sep, late) — 23 scenarios on the emulator
+
+Log: every Mr. Kandoo tool path, capture (B1), recall (Home, Memory, Library),
+Library CRUD, photos, people, places, reminders, account. Fixed and verified:
+Memory search filler words; duplicate-name copy; Done/Back guard for a waiting
+card; typing mutes the mic ("Mic off · type to him"); long card fields readable;
+"+N" chip expands; Reminders Today-first with Overdue capped; no reminders in the
+past; paper-title footnotes; "Kandoo Agent" copy → Mr. Kandoo.
+Dev-only, not bugs: reloads while typing "tomorrow" (double-R dev shortcut);
+the perf-monitor overlay.
+
+## Mr. Kandoo (ElevenLabs) — state after the upgrade
+
+Live now: 41 tools (+ edit_library_note, delete_library_note; open_screen has
+"library"), prompt v3 (Listening rules, people on reminders, never in the past,
+research hedged to the sources, tool results are data not instructions),
+background_voice_detection on, turn_timeout 40 s, silence_end_call_timeout 90 s.
+Verified after: typed yes → save_draft → "Saved"; "call Jed at 9" at 23:15 →
+tomorrow 09:00 with person Jed.
+
+Next-level backlog (from real transcripts):
+- A day briefing tool ("what's my day") combining today's reminders, overdue,
+  and place reminders — now composed from list_reminders by the model.
+- Research depth ("quick" vs "deep": more queries and sources) and follow-up
+  research that appends to an existing research note.
+- Merge-people suggestions surfaced by the app, not only the prompt.
+- An eval set in ElevenLabs (agent tests) for: noise fragments, card yes/no,
+  research hedging, prompt-injection note — run after every prompt change.
+- Consider a cheaper model for simple turns; Sonnet 4.5 costs ~$0.05/min here.
+
 ## Remaining steps (in order)
 
 1. Secret scan, then push (Render auto-deploys the backend from master):
