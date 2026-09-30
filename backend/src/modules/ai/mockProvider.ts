@@ -48,6 +48,11 @@ export class MockAIProvider implements AIProvider {
     };
   }
 
+  /** No model here: an empty object, which every caller's schema rejects honestly. */
+  async generateJson(_system: string, _user: string, _maxOutputTokens: number): Promise<unknown> {
+    return {};
+  }
+
   async interpret(
     text: string,
     context: InterpretContext

@@ -3,6 +3,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -24,6 +25,12 @@ const ICONS = {
 /** Mirror the server's limits (backend libraryInput.ts). */
 const MAX_TITLE = 200;
 const MAX_BODY = 20000;
+
+/** The web links in a note (a research write-up's references), in order, once each. */
+function linksIn(body: string): string[] {
+  const found = body.match(/https?:\/\/[^\s)\]]+/g) ?? [];
+  return [...new Set(found.map((url) => url.replace(/[.,;:]+$/, '')))].slice(0, 20);
+}
 
 export type LibraryNoteEditorProps = {
   visible: boolean;
@@ -157,9 +164,31 @@ export function LibraryNoteEditor({
             underlineColorAndroid="transparent"
             autoFocus={!note}
           />
+          {linksIn(body).length > 0 ? (
+            <View style={styles.links}>
+              <Text style={styles.linksLabel}>Links</Text>
+              {linksIn(body).map((url) => (
+                <Pressable
+                  key={url}
+                  onPress={() => {
+                    Linking.openURL(url).catch((caught: unknown) => {
+                      console.warn('Opening a link failed:', caught);
+                      setError('That link didn’t open.');
+                    });
+                  }}
+                  hitSlop={4}
+                  accessibilityRole="link"
+                >
+                  <Text style={styles.link} numberOfLines={1}>
+                    {url.replace(/^https?:\/\//, '')}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
           {note ? (
             <Text style={styles.meta}>
-              {note.source === 'document' ? 'Read from a page · ' : ''}
+              {note.source === 'document' ? 'Read from a page · ' : note.source === 'research' ? 'Researched by Mr. Kandoo · ' : ''}
               Edited {timeAgo(note.updated_at).toLowerCase()}
             </Text>
           ) : null}
@@ -215,6 +244,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   meta: { ...text.caption, color: colors.inkMuted, marginTop: spacing.space3 },
+  links: { marginTop: spacing.space4, gap: spacing.space2 },
+  linksLabel: { ...text.label, letterSpacing: 1.5, color: colors.markRing },
+  link: { ...text.body, color: colors.focus, textDecorationLine: 'underline' },
   dock: { paddingTop: spacing.space3, gap: spacing.space2 },
   error: { ...text.caption, color: colors.alarmText, textAlign: 'center' },
   primary: {

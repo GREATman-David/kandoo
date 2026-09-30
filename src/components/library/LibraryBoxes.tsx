@@ -106,7 +106,9 @@ export function NoteBox({
     >
       <View style={styles.head}>
         <Image source={ICONS.note} style={styles.icon} />
-        <Text style={styles.label}>{note.source === 'document' ? 'From a page' : 'Note'}</Text>
+        <Text style={styles.label}>
+          {note.source === 'document' ? 'From a page' : note.source === 'research' ? 'Research' : 'Note'}
+        </Text>
       </View>
       {note.title ? (
         <Text style={styles.noteTitle} numberOfLines={2}>

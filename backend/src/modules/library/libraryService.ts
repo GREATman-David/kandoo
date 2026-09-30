@@ -23,7 +23,7 @@ export type LibraryNote = {
   category_id: string;
   title: string | null;
   body: string;
-  source: 'manual' | 'document';
+  source: 'manual' | 'document' | 'research';
   created_at: string;
   updated_at: string;
 };

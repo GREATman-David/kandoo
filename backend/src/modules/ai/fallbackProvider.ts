@@ -140,6 +140,10 @@ export class FallbackAIProvider implements AIProvider {
     return this.run('document', (p) => p.readDocument(photo, context));
   }
 
+  generateJson(system: string, user: string, maxOutputTokens: number): Promise<unknown> {
+    return this.run('json', (p) => p.generateJson(system, user, maxOutputTokens));
+  }
+
   async generateRecallAnswer(question: string, memories: RecallMemory[]): Promise<string> {
     try {
       return await this.run('recall answer', (p) => p.generateRecallAnswer(question, memories));

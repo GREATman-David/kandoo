@@ -277,6 +277,87 @@ Return JSON only, exactly this shape:
 `.trim();
 }
 
+// ── Research (Elite, through Mr. Kandoo) ───────────────────────────────────
+//
+// Three steps, so every claim can be traced to a real source:
+//   1. plan    → a few general search queries (these leave Kandoo, so they
+//                never carry the user's private details);
+//   2. write   → findings written ONLY from the numbered sources we fetched;
+//   3. format  → the findings as a Library note in the shape the user asked
+//                for. The References list is appended by code, never by the
+//                model, so no link can be invented.
+
+export const RESEARCH_PLAN_PROMPT = `
+You plan research for Kandoo's assistant, Mr. Kandoo. Given the user's question
+(and, sometimes, notes from their project), write 1 to 3 short search queries
+that together would find authoritative background on it.
+
+Rules:
+- Queries are sent to public search services (an encyclopedia and a scholarly
+  index). Use GENERAL topic words only. Never include names of people, private
+  project names, amounts, places, dates or anything else from the user's notes.
+- Each query 2 to 6 words, in English, no quotes or operators.
+- Use the ESTABLISHED names of the concepts involved, the way an encyclopedia
+  or a paper would title them ("freemium", "customer churn", "price
+  anchoring", "spaced repetition"), not the user's own phrasing. Cover the
+  question from different angles rather than repeating one idea.
+- scholarly: true if academic papers would genuinely help (science, health,
+  engineering, business, economics, marketing, education, psychology,
+  methods); false only for everyday how-to questions.
+
+Return JSON only: {"queries": ["..."], "scholarly": true}
+`.trim();
+
+export const RESEARCH_WRITE_PROMPT = `
+You are Mr. Kandoo, a careful research assistant. Answer the user's question
+using ONLY the numbered sources provided. You may use the user's project notes
+to make the answer relevant to their situation, but never cite the notes.
+
+Rules:
+- Every factual sentence ends with the number(s) of the source(s) that support
+  it, in square brackets: "Annual plans reduce churn [2][4]." Only cite numbers
+  that exist in the list.
+- If the sources don't cover part of the question, say so plainly in the
+  findings ("The sources found don't cover pricing in Ghana specifically.").
+  Never fill a gap from general knowledge.
+- findings: well structured — short headings on their own line ending in ":",
+  and "• " bullets beneath them. 150 to 400 words.
+- spoken: 2 or 3 plain sentences Mr. Kandoo can say aloud, no citations, no
+  bullets, ending by offering to write it up. Speak like a person who just
+  looked into it ("From what I found, ..."); never say "the provided sources"
+  or "the documents".
+
+Return JSON only: {"spoken": "...", "findings": "..."}
+`.trim();
+
+export type ResearchFormat = 'points' | 'structured' | 'summary' | 'report';
+
+const RESEARCH_FORMATS: Record<ResearchFormat, string> = {
+  points: 'A tight list of the key points: one "• " bullet per point, most important first, no headings.',
+  structured: 'Short headings on their own line ending in ":", each with "• " bullets beneath.',
+  summary: 'Two to four short plain paragraphs, no bullets or headings.',
+  report:
+    'A fuller write-up: an opening paragraph, then headed sections ("Background:", "Key findings:", "What this means for the project:", "Open questions:") with bullets or short paragraphs.',
+};
+
+export function researchNotePrompt(format: ResearchFormat): string {
+  return `
+You turn Mr. Kandoo's research findings into a note for the user's Library.
+
+Shape: ${RESEARCH_FORMATS[format]}
+
+Rules:
+- Use only what is in the findings. Keep every citation marker like [2] with
+  the claim it supports; never add a citation number that isn't in the
+  findings, and never write a References or Sources section (it is added
+  separately).
+- Plain text only: headings end in ":", bullets start with "• ". No markdown.
+- title: under 8 words, naming the topic.
+
+Return JSON only: {"title": "...", "body": "..."}
+`.trim();
+}
+
 /** Returned without calling a model: there is nothing to summarise. */
 export const EMPTY_RECALL_ANSWER = "I don't have anything saved about that yet.";
 

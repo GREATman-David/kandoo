@@ -20,6 +20,7 @@ import {
   fetchCaptureNotes,
   fetchGroupedReminders,
   fetchLibrary,
+  fetchLibraryCategory,
   fetchMonthInsights,
   fetchPeople,
   fetchPerson,
@@ -30,13 +31,16 @@ import {
   mergePeople,
   mergePlaceInto,
   readDocument,
+  researchTopic,
   setPlaceStarred,
   updateCaptureNote,
   updateMemory,
   updatePlace,
   updateReminder,
   userMessage,
+  writeResearch,
   type CreatedReminder,
+  type ResearchResult,
 } from '@/services/interpretationService';
 import { cancelReminder, scheduleReminder, snoozeRepeatingOnce } from '@/services/localNotifications';
 import { PhotoPermissionError, pickPhoto } from '@/services/photos';
@@ -176,6 +180,38 @@ function compactReminder(r: CreatedReminder) {
 // Cast: typed routes regenerate only when Metro runs.
 const go = (pathname: string, params?: Record<string, string>) =>
   router.navigate({ pathname: pathname as never, params });
+
+/** Research kept for this conversation, so a write-up quotes the exact sources. */
+const research = new Map<string, ResearchResult>();
+let researchCounter = 0;
+let lastResearchId: string | null = null;
+
+/** A Library category by name, ignoring case. */
+async function findShelf(name: string) {
+  const shelves = await fetchLibrary();
+  return shelves.find((c) => c.name.toLowerCase() === name.trim().toLowerCase()) ?? null;
+}
+
+/**
+ * Save an approved note card into the Library: on the shelf its category field
+ * names NOW (the user may have edited it), making that category only if it
+ * doesn't exist yet.
+ */
+async function fileNote(
+  v: Record<string, string | null>,
+  source: 'manual' | 'document' | 'research'
+): ReturnType<DraftCommit> {
+  const body = v.body?.trim();
+  const name = v.category?.trim();
+  if (!body || !name) throw new Error('empty');
+  const existing = await findShelf(name);
+  const shelf = existing ?? (await createLibraryCategory(name));
+  const note = await createLibraryNote(shelf.id, { title: v.title?.trim() || null, body }, source);
+  return {
+    result: { filedIn: shelf.name, newCategory: !existing, noteId: note.id },
+    open: { pathname: '/memory', params: { view: 'library' } },
+  };
+}
 
 /** Found by find_place, drawn by draw_place — kept between the two calls. */
 let lastFound: { id: string; name: string; center: LatLng; bounds: [number, number, number, number] | null }[] = [];
@@ -634,6 +670,112 @@ export const kandooTools: Record<string, Tool> = {
           open: { pathname: '/memory', params: { view: 'library' } },
         };
       }
+    );
+  }),
+
+  /** The user's Library categories, so Mr. Kandoo can talk about their projects. */
+  list_library: guard(async () => {
+    const shelves = await fetchLibrary();
+    return ok({
+      categories: shelves.map((c) => ({ name: c.name, notes: c.noteCount, updatedAt: c.updated_at })),
+    });
+  }),
+
+  /** What is in one category: its notes (trimmed), newest first. */
+  read_library_category: guard(async (p) => {
+    const name = str(p.category_name);
+    if (!name) return fail('Which category?');
+    const shelf = await findShelf(name);
+    if (!shelf) return fail(`There is no category called ${name}. list_library shows the ones they have.`);
+    const { notes } = await fetchLibraryCategory(shelf.id);
+    return ok({
+      category: shelf.name,
+      notes: notes.slice(0, 15).map((n) => ({
+        title: n.title,
+        text: n.body.length > 1200 ? `${n.body.slice(0, 1200)}…` : n.body,
+        kind: n.source,
+        updatedAt: n.updated_at,
+      })),
+      more: Math.max(0, notes.length - 15),
+    });
+  }),
+
+  /**
+   * Elite: research a question from real sources (Wikipedia, scholarly papers),
+   * optionally in the light of one category's notes. Nothing is written until
+   * the user asks (write_research_note).
+   */
+  research_topic: guard(async (p) => {
+    const question = str(p.question);
+    if (!question) return fail('What should I research?');
+    const tier = await readTier().catch(() => null);
+    if (tier === 'free' || tier === 'pro') return fail('Research with Mr. Kandoo is part of Kandoo Elite.');
+    let result: ResearchResult;
+    try {
+      result = await researchTopic(question, str(p.category_name));
+    } catch (error) {
+      if (isProRequired(error)) return fail('Research with Mr. Kandoo is part of Kandoo Elite.');
+      throw error;
+    }
+    const id = `r${++researchCounter}`;
+    research.set(id, result);
+    lastResearchId = id;
+    return ok({
+      research_id: id,
+      grounded: result.grounded,
+      say: result.spoken,
+      forCategory: result.category,
+      findings: result.findings,
+      sources: result.sources.map((s, i) => `[${i + 1}] ${s.title}${s.year ? ` (${s.year})` : ''} — ${s.publisher ?? s.kind}`),
+      next: result.grounded
+        ? 'Tell them the gist in your own words. When they ask, write_research_note with this research_id and the format they want.'
+        : 'No sources were found: say so. Do not answer from your own knowledge as if it were research.',
+    });
+  }),
+
+  /** Elite: write the research up as a Library note, in the format asked for, with references. */
+  write_research_note: guard(async (p) => {
+    const id = str(p.research_id) ?? lastResearchId;
+    const result = id ? research.get(id) : undefined;
+    if (!result) return fail('There is no research to write up yet. Use research_topic first.');
+    if (!result.grounded) return fail('That research found no sources, so there is nothing reliable to write up.');
+    const format = (['points', 'structured', 'summary', 'report'] as const).find((f) => f === str(p.format)) ?? 'structured';
+    let note: { title: string; body: string };
+    try {
+      note = await writeResearch(result, format);
+    } catch (error) {
+      if (isProRequired(error)) return fail('Research with Mr. Kandoo is part of Kandoo Elite.');
+      throw error;
+    }
+    const shelfName = str(p.category_name) ?? result.category ?? 'Research';
+    const existing = await findShelf(shelfName);
+    return propose(
+      'write_research_note',
+      'Write up research',
+      [
+        field('category', existing ? 'Category' : 'Category (new)', existing?.name ?? shelfName),
+        field('title', 'Title', note.title),
+        field('body', 'Note', note.body, 'long'),
+      ],
+      (v) => fileNote(v, 'research')
+    );
+  }),
+
+  /** Write something down in the Library (dictated, or Mr. Kandoo's own answer). */
+  write_library_note: guard(async (p) => {
+    const body = str(p.body);
+    const name = str(p.category_name);
+    if (!body || !name) return fail('Need the category and what to write.');
+    const existing = await findShelf(name);
+    return propose(
+      'write_library_note',
+      'New library note',
+      [
+        field('category', existing ? 'Category' : 'Category (new)', existing?.name ?? name),
+        field('title', 'Title', str(p.title)),
+        field('body', 'Note', body, 'long'),
+      ],
+      (v) => fileNote(v, 'manual')
     );
   }),
 

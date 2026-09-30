@@ -81,6 +81,13 @@ export interface AIProvider {
    */
   readDocument(photo: PhotoInput, context: DocumentContext): Promise<DocumentReading>;
 
+  /**
+   * One JSON completion for a shared prompt (prompts.ts). Returns the parsed
+   * value UNVALIDATED — the caller owns the Zod schema, as for research, whose
+   * steps each have their own shape. Temperature 0, no thinking tokens.
+   */
+  generateJson(system: string, user: string, maxOutputTokens: number): Promise<unknown>;
+
   generateRecallAnswer(
     question: string,
     memories: RecallMemory[]

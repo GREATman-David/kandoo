@@ -1331,7 +1331,7 @@ export type LibraryNote = {
   title: string | null;
   body: string;
   /** 'document': read off a photographed page by Mr. Kandoo. */
-  source: 'manual' | 'document';
+  source: 'manual' | 'document' | 'research';
   created_at: string;
   updated_at: string;
 };
@@ -1472,6 +1472,70 @@ export async function readDocument(
       }),
     },
     'Kandoo couldn’t read that page.',
+    { timeoutMs: AI_TIMEOUT_MS }
+  );
+}
+
+// ── Research with Mr. Kandoo (Elite) ─────────────────────────────────────────
+
+/** A real, fetched source (Wikipedia or a paper via OpenAlex). */
+export type ResearchSource = {
+  title: string;
+  url: string;
+  publisher: string | null;
+  authors: string | null;
+  year: number | null;
+  excerpt: string;
+  kind: 'encyclopedia' | 'paper';
+};
+
+export type ResearchResult = {
+  question: string;
+  category: string | null;
+  spoken: string;
+  /** Structured findings with [n] citations into `sources`. */
+  findings: string;
+  sources: ResearchSource[];
+  /** False when no source could be found: nothing was claimed. */
+  grounded: boolean;
+};
+
+export type ResearchFormat = 'points' | 'structured' | 'summary' | 'report';
+
+/** Elite: research a question from real sources, optionally for one category. Saves nothing. */
+export async function researchTopic(question: string, categoryName: string | null): Promise<ResearchResult> {
+  const accessToken = await getAccessTokenOrThrow();
+  return apiFetch<ResearchResult>(
+    '/library/research',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ question, categoryName }),
+    },
+    'Mr. Kandoo couldn’t finish that research.',
+    { timeoutMs: AI_TIMEOUT_MS }
+  );
+}
+
+/** Elite: the findings written up as a Library note (with references). Saves nothing. */
+export async function writeResearch(
+  research: ResearchResult,
+  format: ResearchFormat
+): Promise<{ title: string; body: string }> {
+  const accessToken = await getAccessTokenOrThrow();
+  return apiFetch<{ title: string; body: string }>(
+    '/library/research/write',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        question: research.question,
+        findings: research.findings,
+        sources: research.sources,
+        format,
+      }),
+    },
+    'Mr. Kandoo couldn’t write that up.',
     { timeoutMs: AI_TIMEOUT_MS }
   );
 }

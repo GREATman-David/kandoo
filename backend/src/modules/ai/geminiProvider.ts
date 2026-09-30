@@ -386,6 +386,11 @@ export class GeminiProvider implements AIProvider {
     return parsed.data;
   }
 
+  async generateJson(system: string, user: string, maxOutputTokens: number): Promise<unknown> {
+    const { value } = await this.completeJson(system, [{ role: 'user', parts: [{ text: user }] }], maxOutputTokens);
+    return value;
+  }
+
   async writeNote(text: string): Promise<KandooNote> {
     const { value } = await this.completeJson(NOTE_SYSTEM_PROMPT, [
       { role: 'user', parts: [{ text }] },

@@ -1,4 +1,5 @@
 import { Router, type Response } from 'express';
+import { z } from 'zod';
 
 import {
   authenticateRequest,
@@ -23,12 +24,14 @@ import {
   createNote,
   deleteCategory,
   deleteNote,
+  findCategoryByName,
   getCategory,
   listCategories,
   listNotes,
   renameCategory,
   updateNote,
 } from '../modules/library/libraryService';
+import { runResearch, writeResearchNote } from '../modules/research/researchService';
 
 /**
  * The Library: categories of the user's own notes. Plain CRUD — nothing here
@@ -112,7 +115,9 @@ router.post('/library/categories/:id/notes', authenticateRequest, async (req, re
   const userId = (req as AuthenticatedRequest).user.id;
   try {
     // 'document': filed from a page Mr. Kandoo read (the card the user approved).
-    const source = req.body?.source === 'document' ? 'document' : 'manual';
+    // 'document': a page Mr. Kandoo read; 'research': his write-up (both approved on a card).
+    const source =
+      req.body?.source === 'document' || req.body?.source === 'research' ? req.body.source : 'manual';
     const note = await createNote(userId, String(req.params.id), cleanNote(req.body ?? {}), source);
     if (!note) return res.status(404).json({ error: 'Category not found.' });
     return res.status(201).json({ note });
@@ -202,6 +207,93 @@ router.post('/library/read', authenticateRequest, aiRateLimit, async (req, res) 
     if (inputError(res, error)) return;
     console.error('Library document read error:', error);
     return res.status(500).json({ error: 'Kandoo couldn’t read that page just now. Please try again.' });
+  }
+});
+
+const ELITE_RESEARCH = {
+  code: 'elite_required',
+  error: 'Research with Mr. Kandoo is part of Kandoo Elite.',
+} as const;
+
+const RESEARCH_BUSY = {
+  code: 'ai_busy',
+  error: 'Mr. Kandoo’s research is busy right now. Try again in a moment.',
+} as const;
+
+const MAX_QUESTION = 500;
+
+/** A source as the phone sends it back to be written up: re-validated, never trusted. */
+const sourceSchema = z.object({
+  title: z.string().min(1).max(400),
+  url: z.string().url().max(1000).refine((u) => /^https?:\/\//i.test(u), 'http(s) only'),
+  publisher: z.string().max(200).nullable(),
+  authors: z.string().max(200).nullable(),
+  year: z.number().int().min(1000).max(3000).nullable(),
+  excerpt: z.string().max(2000).default(''),
+  kind: z.enum(['encyclopedia', 'paper']),
+});
+
+const writeBodySchema = z.object({
+  question: z.string().trim().min(1).max(MAX_QUESTION),
+  findings: z.string().trim().min(1).max(8000),
+  sources: z.array(sourceSchema).max(10),
+  format: z.enum(['points', 'structured', 'summary', 'report']).default('structured'),
+});
+
+/**
+ * Elite, through Mr. Kandoo: research a question — optionally in the light of
+ * one of the user's categories ("my Kandoo Project") — from real, citable
+ * sources. Saves nothing; the phone keeps the result for the write-up.
+ */
+router.post('/library/research', authenticateRequest, aiRateLimit, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).user.id;
+  const question = typeof req.body?.question === 'string' ? req.body.question.trim().slice(0, MAX_QUESTION) : '';
+  if (!question) return res.status(400).json({ error: 'What should Mr. Kandoo research?' });
+  try {
+    if ((await getUserTier(userId)) !== 'elite') return res.status(402).json(ELITE_RESEARCH);
+
+    let categoryId = typeof req.body?.categoryId === 'string' ? req.body.categoryId : null;
+    if (!categoryId && typeof req.body?.categoryName === 'string' && req.body.categoryName.trim()) {
+      categoryId = (await findCategoryByName(userId, cleanCategoryName(req.body.categoryName)))?.id ?? null;
+    }
+
+    try {
+      const result = await runResearch(userId, { question, categoryId });
+      return res.status(200).json(result);
+    } catch (aiError) {
+      if (aiError instanceof AiUnavailableError || aiError instanceof z.ZodError) {
+        if (aiError instanceof z.ZodError) console.error('Research output failed validation:', aiError.message);
+        return res.status(502).json(RESEARCH_BUSY);
+      }
+      throw aiError;
+    }
+  } catch (error) {
+    if (inputError(res, error)) return;
+    console.error('Research error:', error);
+    return res.status(500).json({ error: 'Mr. Kandoo couldn’t finish that research just now.' });
+  }
+});
+
+/** Write research findings up as a Library note, in the format asked for. Saves nothing. */
+router.post('/library/research/write', authenticateRequest, aiRateLimit, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).user.id;
+  const parsed = writeBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: 'There are no research findings to write up yet.' });
+  try {
+    if ((await getUserTier(userId)) !== 'elite') return res.status(402).json(ELITE_RESEARCH);
+    try {
+      const note = await writeResearchNote(parsed.data);
+      return res.status(200).json(note);
+    } catch (aiError) {
+      if (aiError instanceof AiUnavailableError || aiError instanceof z.ZodError) {
+        if (aiError instanceof z.ZodError) console.error('Research note failed validation:', aiError.message);
+        return res.status(502).json(RESEARCH_BUSY);
+      }
+      throw aiError;
+    }
+  } catch (error) {
+    console.error('Research write-up error:', error);
+    return res.status(500).json({ error: 'Mr. Kandoo couldn’t write that up just now.' });
   }
 });
 

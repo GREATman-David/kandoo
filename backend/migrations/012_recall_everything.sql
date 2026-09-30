@@ -9,6 +9,12 @@
 -- Run once in the Supabase SQL editor, after 011_library.sql. Safe to run
 -- again. Until it runs, recall keeps working exactly as before.
 
+-- 0. Library notes can also be Mr. Kandoo's research write-ups (Elite).
+alter table public.library_notes drop constraint if exists library_notes_source_check;
+alter table public.library_notes
+  add constraint library_notes_source_check
+  check (source in ('manual', 'document', 'research'));
+
 -- 1. Embeddings for the two new sources, in the same 1536-dim space.
 alter table public.captures
   add column if not exists note_embedding vector(1536);

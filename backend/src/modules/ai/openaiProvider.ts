@@ -153,6 +153,17 @@ export class OpenAIProvider implements AIProvider {
     return parsed.data;
   }
 
+  async generateJson(system: string, user: string, maxOutputTokens: number): Promise<unknown> {
+    const { value } = await this.completeJson(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      maxOutputTokens
+    );
+    return value;
+  }
+
   async writeNote(text: string): Promise<KandooNote> {
     const { value } = await this.completeJson([
       { role: 'system', content: NOTE_SYSTEM_PROMPT },
