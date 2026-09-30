@@ -1,115 +1,106 @@
-# Kandoo — handoff (30 Sep 2026, evening)
+# Kandoo — handoff (30 Sep 2026, night)
 
 Read `AGENTS.md` first, then this. Submission (Shipaton Next Gen) closes **30 Sep 2026** —
 the demo video + public repo are the deliverables.
 
 ## Where things stand
 
-**Local commits NOT pushed yet** (the user asked not to push until Show Kandoo is done):
+**Local commits NOT pushed** (the user decides when). Everything after
+`b8bab02 Polish: Free/Pro/Elite pills…` is local:
 
 ```
+7f5cbdb Research with Mr. Kandoo (Elite): real sources, written up with references
+87ec7fe Recall reaches everything: capture notes and the Library, not just memories
+73707e4 Onboarding: the plans card scrolls, so Elite is never cut off
+d745492 Mr. Kandoo reads a page into the Library (Elite)
+8323f72 Library: categories of your own notes, inside Memory
+d04d1e9 Camera: Open Settings when permission is permanently denied; paywall says Mr. Kandoo
+b268de6 Add HANDOFF.md …
 85f32e7 Keep RECORD_AUDIO: the image-picker plugin removed it app-wide
 6ef065c Show Kandoo: photos as captures, a private photo library, watermarked sharing
 ```
 
-Everything before those is on `origin/master` (last pushed: "Polish: Free/Pro/Elite pills,
-Mr. Kandoo, satellite for Agent maps…"). `Kandoo-final.apk` on the Desktop is that older
-pushed build — it does NOT have Show Kandoo.
+`Kandoo-final.apk` on the Desktop is the OLD pushed build — none of the above.
 
-## Show Kandoo (the new feature) — what it is
+Migrations **010, 011 and 012 have all been run** in Supabase. 012 was edited after it
+was first written (it now also allows library note `source = 'research'`); it is safe
+to run again — do so if saving a research note fails.
 
-Photo → the same capture loop as speech (CAPTURE → EXTRACT → LINK → SURFACE).
+## What was added tonight
 
-- **Server** (`backend/`):
-  - `POST /interpret/photo` (`src/routes/photos.ts`): Gemini reads the JPEG with
-    `photoExtractionPrompt` (`modules/ai/prompts.ts`) → same actions contract +
-    `description`. Recall is never produced from a photo (`withoutRecall`).
-    Reminders come back `pending` for the review card.
-  - Photo kept only for Pro/Elite (`getUserTier`); Free gets `photoNeedsPro: true`.
-  - `modules/photos/photoService.ts`: private bucket `photos/<userId>/<uuid>.jpg`,
-    signed URLs (1 h), `photo_entities` links to people/places + the drawn place the
-    phone is in. Every query filters `user_id`.
-  - `GET /photos?entityId|q|limit`, `POST /photos` (add to person/place, Pro),
-    `POST /photos/:id/links`, `DELETE /photos/:id`.
-  - Recall results carry `photos`; `GET /captures` adds `photoUrl` for photo captures.
-  - JSON body limit is 8 MB only for `/interpret/photo` and `/photos` (`server.ts`).
-  - Migration `backend/migrations/010_photos.sql` — **already run** in Supabase.
-    The `photos` bucket was created via the storage API (private, JPEG, 5 MB).
-- **App**:
-  - `src/services/photos.ts`: pick (camera/gallery) + re-encode ≤1600px JPEG
-    (strips EXIF GPS) + `currentPlaceIds()`.
-  - Home (`src/app/index.tsx`, `features/Home/useHome.ts` → `showPhoto`): camera
-    button in the input, "Reading your photo", photo on the understood card,
-    "Photo kept with … · Open · Share" or Pro nudge, Recently thumbnails, recall
-    "From your photos".
-  - `PhotoViewer.tsx`: photo card with watermark (mark + "Kandoo" beneath), Share
-    via react-native-view-shot + expo-sharing (shares exactly the card).
-  - `PhotoStrip.tsx` on `PersonDetail` and `PlaceDetail` (album + "Add photo").
-  - `PlaceHomeCards.tsx`: "At <place>" card shows the place's last photo.
-  - Mr. Kandoo: `find_photos` client tool (`services/agent/agentTools.ts`,
-    `agentShown.ts`, photos row in `KandooAgent.tsx` timeline).
-- **ElevenLabs agent** `agent_1601m3r68w2gfnq8azxfe9hjts88` — ALREADY LIVE:
-  `find_photos` tool (`tool_4001m3st39xpf4mtqnkdfbr8qycc`) attached (33 tools),
-  prompt has a `# Photos` section, turn_timeout 20, "digits stay digits" rule.
-  If you edit via MCP: send `body` and `prompt` in SEPARATE `agents_update` calls.
+- **Library** (all plans): Memory screen has a `Memories | Library` switch. Categories
+  (`library_categories`) hold notes (`library_notes`), shown two to a row in the note
+  colours. Routes in `backend/src/routes/library.ts`; UI in `src/components/library/`.
+- **read_document** (Elite, Mr. Kandoo only): camera → `POST /library/read` → an
+  editable card → filed on yes. The photo is never stored.
+- **Research** (Elite, Mr. Kandoo only): `research_topic` → `POST /library/research`;
+  `write_research_note` → `POST /library/research/write` (format: points / structured /
+  summary / report) → card → filed on yes, with numbered citations and a References
+  list. Sources are Wikipedia + OpenAlex papers (`modules/research/sources.ts`); the
+  model writes ONLY from them and references are built by code
+  (`modules/research/citations.ts`). Gemini search grounding and OpenAI web search
+  both need billing this account doesn't have — that is why.
+- **Recall reaches everything** (012): `match_context` ranks memories, reminders,
+  capture notes and Library notes together. Notes embed on write; older ones backfill
+  on the owner's next ask (`modules/memories/noteEmbeddings.ts`, guarded to one pass
+  per user per 10 min). The user's account is fully embedded.
+- **Onboarding** plans card scrolls (Elite was cut off on short screens); Elite is a
+  bullet list now — add a line per new Elite feature (`src/components/Onboarding.tsx`).
+- ElevenLabs agent renamed **Mr. Kandoo**; 39 tools. New client tools:
+  `read_document`, `list_library`, `read_library_category`, `research_topic`,
+  `write_research_note`, `write_library_note`. Prompt has `# Library` and
+  `# Research (Elite)` sections. Send `body` and `prompt` in SEPARATE `agents_update` calls.
 
-## Verified on the emulator (debug build, local backend)
+## Verified
 
-Flyer from gallery → "I understood" (Pastor Kwame Mensah chip, reminder Sat Oct 3
-10:00) → Remember → photo kept with person + place → photo card → shared JPEG has
-the watermark → person page Photos album → Recently thumbnail. Server: signed URL
-200, other users see 0, delete works, recall memory → its photo. 38 backend tests,
-35 app tests pass; both typecheck.
+- Emulator (debug build, local backend): Library create category → note → search →
+  counts; onboarding scroll (forced overflow); camera "Open Settings" typechecks only.
+- Server, live: `readDocument` on the flyer (3 s); research end to end (~6 s + ~2 s,
+  two peer-reviewed papers with DOIs, honest about gaps); recall ranks the Library
+  note #1 with its category after 012.
+- 50 backend tests, 35 app tests; both typecheck.
+- NOT yet: any Mr. Kandoo voice flow — the emulator account is Free and the agent is
+  Elite-gated. Needs an Elite account (RevenueCat Test Store) on the device.
 
 ## Remaining steps (in order)
 
-1. **Finish the debug rebuild** (was running: `debug6.log`), install, open
-   Mr. Kandoo, TYPE "show me the outreach flyer" → photos appear in the timeline.
-   (The previous build lacked RECORD_AUDIO — fixed in 85f32e7; needs the rebuild.)
-   On first open Android asks for the mic — allow it.
-2. Optional checks: Add photo on a place page; Free-tier nudge.
-3. `npx tsc --noEmit` (root + backend), `npm test` (root + backend).
-4. Secret scan, then push (Render auto-deploys the backend from master):
+1. Secret scan, then push (Render auto-deploys the backend from master):
    ```
    git log -p origin/master..HEAD | grep -iE "sk-[a-zA-Z0-9]|AQ\.|service_role|SUPABASE_SERVICE|eyJ"
    git push origin master
    ```
-   Then confirm `https://kandoo-toow.onrender.com/interpret/photo` answers 401 (not 404).
-5. **Full phone build** (~80 min, all 4 ABIs; release always talks to Render):
+   Then `https://kandoo-toow.onrender.com/library/research` must answer 401 (not 404).
+2. Full phone build (~80 min, all 4 ABIs; release always talks to Render):
    ```
    cd android && ./gradlew assembleRelease -x lint -x test --no-parallel
    ```
    Copy `android/app/build/outputs/apk/release/app-release.apk` to the Desktop as
-   `Kandoo-final.apk`. Test on the phone: camera capture, voice, Mr. Kandoo.
-6. Film the demo. Suggested Show Kandoo beat: photograph a real flyer → chips →
-   Remember → open the person → share the watermarked card → ask Mr. Kandoo for it.
+   `Kandoo-final.apk`.
+3. On the phone, as Elite: "research how to price a subscription app for my Kandoo
+   Project" → "write it up in points" → yes → open the note → tap a link.
+   "Read this page into my Kandoo Project" with a real page. Ask Home "when am I filming?".
+4. Film.
 
-## Gotchas learned today
+## Gotchas learned
 
-- `expo-image-picker` with `microphonePermission: false` REMOVES RECORD_AUDIO
-  app-wide. Never set it.
+- Gemini free tier: plain calls work, `googleSearch` grounding is 429 on all 5 keys.
+  Key 1 hit its per-day quota tonight; `withKeyFailover` moved to key 2.
+- Driving the dev build over adb: a long `adb shell input text` can lose field focus
+  and stray letters hit RN dev shortcuts (r = reload, perf monitor). Tap the field,
+  type short chunks. The perf monitor overlay is on in the emulator's dev menu.
+- Shell edits: backticks and `\n` inside `node -e "…"` or sed get mangled. Use the
+  editor, or a script file with a quoted heredoc; convert CRLF files carefully.
+- `expo-image-picker` with `microphonePermission: false` REMOVES RECORD_AUDIO app-wide.
 - `expo prebuild` wipes `android/local.properties` — restore
   `sdk.dir=C:/Users/DONEX/AppData/Local/Android/Sdk`.
-- Release builds ignore `EXPO_PUBLIC_API_URL` and always hit Render, so new routes
-  must be pushed before a release APK can use them. Test unpushed server code with a
-  debug build + `adb reverse tcp:3000 tcp:3000` + `adb reverse tcp:8081 tcp:8081`.
-- Git Bash mangles device paths (`/sdcard/...`): prefix adb commands with
-  `MSYS_NO_PATHCONV=1`.
-- Python edit scripts: write them to a file first; heredocs with `'\n'` inside TS
-  strings get turned into real newlines.
-- A head-only Supabase count (`{ head: true }`) hides "table missing" errors — use
-  `select('*').limit(1)` to check a table exists.
-- Emulator: data was cleared for the onboarding walkthrough; the user signed in
-  again. No app passcode is set now. Test flyer is in the gallery
-  (`/sdcard/Pictures/outreach-flyer.jpg`).
-- Metro wedges: `curl http://127.0.0.1:8081/status` must say `packager-status:running`;
-  otherwise kill it and `npx expo start --clear` in its own window.
+- Release builds ignore `EXPO_PUBLIC_API_URL` and always hit Render.
+- Git Bash mangles device paths: prefix adb with `MSYS_NO_PATHCONV=1`.
+- Onboarding only shows signed-out; to see it on a signed-in device, force it
+  temporarily in `src/app/index.tsx` and revert.
 
-## Known small gaps (not blocking)
+## Known small gaps
 
-- A flyer naming "Church Premises, Obuasi" creates a new place rather than matching
-  an existing "church premises" — can be merged from the place page.
-- Photo capture takes ~30 s end to end on the free Gemini tier (reading itself ~5 s).
-- Android "Open Settings" button when a permission is permanently denied (the message
-  says so, but there's no button).
-- Remove `HANDOFF.md` (or keep it) before the repo goes public — it has no secrets.
+- Research sources are encyclopedic/scholarly; for today's news or product how-tos
+  they are thin (the write-up says so rather than guessing).
+- A flyer naming "Church Premises, Obuasi" makes a new place instead of matching one.
+- Remove or keep this file before the repo goes public — it has no secrets.
