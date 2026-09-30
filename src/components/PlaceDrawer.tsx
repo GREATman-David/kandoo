@@ -131,7 +131,9 @@ export function PlaceDrawer({
   onShape,
 }: PlaceDrawerProps) {
   const insets = useSafeAreaInsets();
-  const [look, setLook] = useState<MapLook>('map');
+  // Adjusting a place for Kandoo Agent starts on satellite: shaping around a
+  // real building is easier on imagery. The toggle still switches back.
+  const [look, setLook] = useState<MapLook>(onShape ? 'satellite' : 'map');
   const mapStyle = useKandooMapStyle(look);
   // Edge-to-edge Android doesn't resize for the keyboard: lift the name card.
   const keyboard = useKeyboardLift({ inModal: true });

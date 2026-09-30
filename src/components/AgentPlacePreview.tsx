@@ -16,7 +16,9 @@ import { colors, radius, spacing, text } from '@/theme/theme';
 /**
  * The place a Kandoo Agent card is about, on a small still map — a place is
  * spatial, and "is this the right shape for school?" can't be judged from a
- * line of text. Amber while it waits for the user's eye, olive once saved.
+ * line of text. Shown on satellite imagery, where a real building or campus
+ * is recognisable at a glance. Amber while it waits for the user's eye, olive
+ * once saved.
  */
 
 let previews = 0;
@@ -31,11 +33,12 @@ export function AgentPlacePreview({
   saved?: boolean;
   onAdjust?: () => void;
 }) {
-  const mapStyle = useKandooMapStyle();
+  const mapStyle = useKandooMapStyle('satellite');
   // Each preview needs its own source/layer ids on the native side.
   const id = useRef(`agent-place-${(previews += 1)}`).current;
   const geometry = { center: shape.center, radiusM: shape.radiusM, area: shape.area ?? null };
-  const tint = saved ? colors.settledFill : colors.accent;
+  // Brighter mark colours read over imagery; state is still amber → olive.
+  const tint = saved ? colors.settledFill : colors.markCore;
 
   return (
     <View style={styles.frame}>
@@ -52,7 +55,7 @@ export function AgentPlacePreview({
         logo={false}
         attribution
         attributionPosition={{ bottom: 6, right: 6 }}
-        tintColor={colors.inkMuted}
+        tintColor={colors.surface}
       >
         <Camera
           initialViewState={{
@@ -61,7 +64,7 @@ export function AgentPlacePreview({
           }}
         />
         <GeoJSONSource id={id} data={placeFeature(geometry)}>
-          <Layer id={`${id}-fill`} type="fill" style={{ fillColor: tint, fillOpacity: 0.18 }} />
+          <Layer id={`${id}-fill`} type="fill" style={{ fillColor: tint, fillOpacity: 0.3 }} />
           <Layer id={`${id}-edge`} type="line" style={{ lineColor: tint, lineWidth: 2.5 }} />
         </GeoJSONSource>
       </MapView>

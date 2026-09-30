@@ -31,7 +31,7 @@ export function AgentButton({ active, onPress }: Props) {
       hitSlop={8}
       style={styles.wrap}
       accessibilityRole="button"
-      accessibilityLabel="Talk to Kandoo Agent"
+      accessibilityLabel="Talk to Mr. Kandoo"
       accessibilityState={{ selected: active }}
     >
       <View style={[styles.disc, lit && styles.discLit]}>
@@ -41,7 +41,7 @@ export function AgentButton({ active, onPress }: Props) {
           resizeMode="contain"
         />
       </View>
-      <Text style={[styles.label, lit && styles.labelLit]}>Agent</Text>
+      <Text style={[styles.label, lit && styles.labelLit]}>Mr. Kandoo</Text>
     </Pressable>
   );
 }

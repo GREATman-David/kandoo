@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { KandooSymbol } from '@/components/Symbol';
@@ -36,6 +36,12 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'] as co
 
 export function PasscodeScreen({ visible, mode, userId, onDone, onCancel, intro }: PasscodeScreenProps) {
   const insets = useSafeAreaInsets();
+  // The keypad scales with the phone so its last row (0 and delete) never
+  // runs into the system navigation bar on a shorter screen.
+  const { height } = useWindowDimensions();
+  const keyGap = height < 760 ? spacing.space4 : spacing.space5;
+  const keySize = Math.max(56, Math.min(72, Math.floor((height - 460) / 4) - keyGap));
+  const keyBox = { width: keySize, height: keySize };
   const [entry, setEntry] = useState('');
   const [first, setFirst] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -154,7 +160,14 @@ export function PasscodeScreen({ visible, mode, userId, onDone, onCancel, intro 
 
   return (
     <Modal visible={visible} animationType="fade" onRequestClose={() => onCancel?.()}>
-      <View style={[styles.screen, { paddingTop: insets.top + spacing.space7, paddingBottom: insets.bottom + spacing.space5 }]}>
+      {/* A Modal can report no bottom inset over Android's navigation bar, so
+          keep at least a bar's height clear below the keypad. */}
+      <View
+        style={[
+          styles.screen,
+          { paddingTop: insets.top + spacing.space5, paddingBottom: Math.max(insets.bottom, 48) + spacing.space4 },
+        ]}
+      >
         <View style={styles.head}>
           <KandooSymbol state={message && !waiting ? 'alarm' : 'idle'} size={56} />
           <Text style={styles.title}>{title}</Text>
@@ -171,11 +184,11 @@ export function PasscodeScreen({ visible, mode, userId, onDone, onCancel, intro 
           <Text style={styles.message}>{waiting ? `Try again in ${seconds}s` : message ?? ' '}</Text>
         </View>
 
-        <View style={styles.pad}>
+        <View style={[styles.pad, { width: keySize * 3 + keyGap * 2, gap: keyGap }]}>
           {KEYS.map((key, i) => (
             <Pressable
               key={i}
-              style={({ pressed }) => [styles.key, !key && styles.keyEmpty, pressed && key && styles.keyPressed]}
+              style={({ pressed }) => [styles.key, keyBox, !key && styles.keyEmpty, pressed && key && styles.keyPressed]}
               onPress={() => press(key)}
               disabled={!key}
               accessibilityRole={key ? 'button' : undefined}
@@ -203,8 +216,6 @@ export function PasscodeScreen({ visible, mode, userId, onDone, onCancel, intro 
   );
 }
 
-const KEY_SIZE = 72;
-
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.base, alignItems: 'center', justifyContent: 'space-between' },
   head: { alignItems: 'center', gap: spacing.space3, paddingHorizontal: spacing.space5 },
@@ -214,10 +225,8 @@ const styles = StyleSheet.create({
   dot: { width: 16, height: 16, borderRadius: 8, borderWidth: 1.5, borderColor: colors.markRing },
   dotFilled: { backgroundColor: colors.markRing },
   message: { ...text.caption, color: colors.alarmText, minHeight: 20, textAlign: 'center' },
-  pad: { flexDirection: 'row', flexWrap: 'wrap', width: KEY_SIZE * 3 + spacing.space5 * 2, gap: spacing.space5, justifyContent: 'center' },
+  pad: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
   key: {
-    width: KEY_SIZE,
-    height: KEY_SIZE,
     borderRadius: radius.full,
     backgroundColor: colors.surface,
     borderWidth: 1,

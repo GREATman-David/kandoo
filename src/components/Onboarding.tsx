@@ -50,6 +50,27 @@ export type OnboardingProps = {
   onDone: () => void;
 };
 
+function CardContent({ card }: { card: Card }) {
+  return (
+    <>
+      <KandooSymbol state="idle" size={card.plans ? 64 : 96} />
+      <Text style={styles.headline}>{card.headline}</Text>
+      {card.plans ? (
+        <View style={styles.plans}>
+          {PLANS.map((plan) => (
+            <View key={plan.name} style={[styles.plan, plan.name === 'Kandoo Elite' && styles.planElite]}>
+              <Text style={styles.planName}>{plan.name}</Text>
+              <Text style={styles.planLine}>{plan.line}</Text>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <Text style={styles.body}>{card.body}</Text>
+      )}
+    </>
+  );
+}
+
 /**
  * First-launch onboarding, shown once before sign-up. Horizontal paging, dots, a
  * Skip link, and a button that reads "Next" until the last card, where it becomes
@@ -95,24 +116,25 @@ export function Onboarding({ onDone }: OnboardingProps) {
         scrollEventThrottle={16}
         style={styles.pager}
       >
-        {CARDS.map((card) => (
-          <View key={card.headline} style={[styles.card, { width }]}>
-            <KandooSymbol state="idle" size={card.plans ? 64 : 96} />
-            <Text style={styles.headline}>{card.headline}</Text>
-            {card.plans ? (
-              <View style={styles.plans}>
-                {PLANS.map((plan) => (
-                  <View key={plan.name} style={[styles.plan, plan.name === 'Kandoo Elite' && styles.planElite]}>
-                    <Text style={styles.planName}>{plan.name}</Text>
-                    <Text style={styles.planLine}>{plan.line}</Text>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.body}>{card.body}</Text>
-            )}
-          </View>
-        ))}
+        {CARDS.map((card) =>
+          card.plans ? (
+            // The plans card can be taller than a small phone: it scrolls
+            // up and down, while the pager still swipes sideways.
+            <ScrollView
+              key={card.headline}
+              style={{ width }}
+              contentContainerStyle={[styles.card, styles.cardScroll]}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+            >
+              <CardContent card={card} />
+            </ScrollView>
+          ) : (
+            <View key={card.headline} style={[styles.card, { width }]}>
+              <CardContent card={card} />
+            </View>
+          )
+        )}
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.space5 }]}>
@@ -158,6 +180,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.space6,
     gap: spacing.space5,
   },
+  cardScroll: { flexGrow: 1, paddingVertical: spacing.space5 },
   headline: {
     ...text.displayXl,
     color: colors.ink,

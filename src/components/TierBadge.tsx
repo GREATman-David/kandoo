@@ -14,7 +14,7 @@ type Props = { tier: Tier; onPress: () => void };
 
 export function TierBadge({ tier, onPress }: Props) {
   const elite = tier === 'elite';
-  const label = elite ? 'Kandoo Elite' : tier === 'pro' ? 'Kandoo Pro' : 'Free';
+  const label = elite ? 'Elite' : tier === 'pro' ? 'Pro' : 'Free';
 
   return (
     <Pressable
@@ -22,7 +22,7 @@ export function TierBadge({ tier, onPress }: Props) {
       onPress={onPress}
       hitSlop={10}
       accessibilityRole="button"
-      accessibilityLabel={`Account, ${label}`}
+      accessibilityLabel={`Account, Kandoo ${label}`}
     >
       <Text style={elite ? styles.eliteText : styles.text} numberOfLines={1}>
         {label}
