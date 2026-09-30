@@ -9,6 +9,7 @@ import {
   clearPlaceArea,
   createLibraryCategory,
   createLibraryNote,
+  deleteLibraryNote,
   createManualCapture,
   createManualReminder,
   createPlace,
@@ -34,12 +35,14 @@ import {
   researchTopic,
   setPlaceStarred,
   updateCaptureNote,
+  updateLibraryNote,
   updateMemory,
   updatePlace,
   updateReminder,
   userMessage,
   writeResearch,
   type CreatedReminder,
+  type LibraryNote,
   type ResearchResult,
 } from '@/services/interpretationService';
 import { cancelReminder, scheduleReminder, snoozeRepeatingOnce } from '@/services/localNotifications';
@@ -180,6 +183,9 @@ function compactReminder(r: CreatedReminder) {
 // Cast: typed routes regenerate only when Metro runs.
 const go = (pathname: string, params?: Record<string, string>) =>
   router.navigate({ pathname: pathname as never, params });
+
+/** Library notes Mr. Kandoo has read, by id, so an edit or delete card can show them. */
+const libraryNotes = new Map<string, LibraryNote>();
 
 /** Research kept for this conversation, so a write-up quotes the exact sources. */
 const research = new Map<string, ResearchResult>();
@@ -688,9 +694,14 @@ export const kandooTools: Record<string, Tool> = {
     const shelf = await findShelf(name);
     if (!shelf) return fail(`There is no category called ${name}. list_library shows the ones they have.`);
     const { notes } = await fetchLibraryCategory(shelf.id);
+    notes.forEach((n) => {
+      remember(n.id, n.title ?? n.body.slice(0, 60));
+      libraryNotes.set(n.id, n);
+    });
     return ok({
       category: shelf.name,
       notes: notes.slice(0, 15).map((n) => ({
+        id: n.id,
         title: n.title,
         text: n.body.length > 1200 ? `${n.body.slice(0, 1200)}…` : n.body,
         kind: n.source,
@@ -698,6 +709,49 @@ export const kandooTools: Record<string, Tool> = {
       })),
       more: Math.max(0, notes.length - 15),
     });
+  }),
+
+  /** Change a Library note's title or text (a card; saved on the user's yes). */
+  edit_library_note: guard(async (p) => {
+    const id = str(p.note_id);
+    const note = id ? libraryNotes.get(id) : undefined;
+    if (!id || !note) return fail('Find the note first with read_library_category, then use its id.');
+    const body = str(p.body) ?? note.body;
+    const title = p.title === undefined ? note.title : str(p.title);
+    return propose(
+      'edit_library_note',
+      'Change library note',
+      [
+        shown('was', 'Was', note.title ?? note.body.slice(0, 80)),
+        field('title', 'Title', title),
+        field('body', 'Note', body, 'long'),
+      ],
+      async (v) => {
+        const text = v.body?.trim();
+        if (!text) throw new Error('empty');
+        const updated = await updateLibraryNote(id, { title: v.title?.trim() || null, body: text });
+        libraryNotes.set(id, updated);
+        return { result: { updated: id }, open: { pathname: '/memory', params: { view: 'library' } } };
+      }
+    );
+  }),
+
+  /** Remove a Library note (a card; deleted only on the user's yes). */
+  delete_library_note: guard(async (p) => {
+    const id = str(p.note_id);
+    const note = id ? libraryNotes.get(id) : undefined;
+    if (!id || !note) return fail('Find the note first with read_library_category, then use its id.');
+    return propose(
+      'delete_library_note',
+      'Delete library note',
+      [shown('note', 'Note', note.title ?? note.body.slice(0, 120))],
+      async () => {
+        await deleteLibraryNote(id);
+        libraryNotes.delete(id);
+        return { result: { deleted: id } };
+      },
+      { destructive: true }
+    );
   }),
 
   /**
@@ -961,12 +1015,13 @@ export const kandooTools: Record<string, Tool> = {
     switch (screen) {
       case 'home': go('/'); break;
       case 'memory': go('/memory'); break;
+      case 'library': go('/memory', { view: 'library' }); break;
       case 'people': go('/people'); break;
       case 'reminders': go('/reminders'); break;
       case 'places': go('/places', id ? { open: id } : undefined); break;
       case 'draw_place': go('/places', { draw: str(p.place_name) ?? '' }); break;
       case 'recap': go('/places', { recap: monthWindow(new Date()).key }); break;
-      default: return fail('Screens: home, memory, people, reminders, places, draw_place, recap.');
+      default: return fail('Screens: home, memory, library, people, reminders, places, draw_place, recap.');
     }
     return ok({ opened: screen });
   }),
