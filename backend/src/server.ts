@@ -8,6 +8,7 @@ import agentRouter from './routes/agent';
 import insightsRouter from './routes/insights';
 import placesRouter from './routes/places';
 import photosRouter from './routes/photos';
+import libraryRouter from './routes/library';
 
 const app = express();
 
@@ -57,6 +58,9 @@ app.use('/', placesRouter);
 
 // /interpret/photo, /photos — Show Kandoo and the photo library.
 app.use('/', photosRouter);
+
+// /library/... — categories of the user's own notes.
+app.use('/', libraryRouter);
 
 // /insights/month — the monthly recap's server half (counts only).
 app.use('/', insightsRouter);

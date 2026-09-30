@@ -1311,3 +1311,128 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   }
   return out;
 }
+
+// ── The Library: categories of the user's own notes ─────────────────────────
+
+export type LibraryCategory = {
+  id: string;
+  name: string;
+  noteCount: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LibraryNote = {
+  id: string;
+  category_id: string;
+  title: string | null;
+  body: string;
+  /** 'document': read off a photographed page by Mr. Kandoo. */
+  source: 'manual' | 'document';
+  created_at: string;
+  updated_at: string;
+};
+
+async function libraryCall<T>(
+  path: string,
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  fallback: string,
+  body?: unknown
+): Promise<T> {
+  const accessToken = await getAccessTokenOrThrow();
+  return apiFetch<T>(
+    path,
+    {
+      method,
+      headers: {
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        Authorization: `Bearer ${accessToken}`,
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    },
+    fallback
+  );
+}
+
+function withQuery(path: string, query?: string): string {
+  const q = query?.trim();
+  return q ? `${path}?q=${encodeURIComponent(q)}` : path;
+}
+
+export async function fetchLibrary(query?: string): Promise<LibraryCategory[]> {
+  const data = await libraryCall<{ categories: LibraryCategory[] }>(
+    withQuery('/library/categories', query),
+    'GET',
+    'Your library couldn’t load.'
+  );
+  return data.categories;
+}
+
+export async function createLibraryCategory(name: string): Promise<LibraryCategory> {
+  const data = await libraryCall<{ category: LibraryCategory }>(
+    '/library/categories',
+    'POST',
+    'That category couldn’t be made.',
+    { name }
+  );
+  return data.category;
+}
+
+export async function fetchLibraryCategory(
+  id: string,
+  query?: string
+): Promise<{ category: LibraryCategory; notes: LibraryNote[] }> {
+  return libraryCall(
+    withQuery(`/library/categories/${encodeURIComponent(id)}`, query),
+    'GET',
+    'That category couldn’t load.'
+  );
+}
+
+export async function renameLibraryCategory(id: string, name: string): Promise<LibraryCategory> {
+  const data = await libraryCall<{ category: LibraryCategory }>(
+    `/library/categories/${encodeURIComponent(id)}`,
+    'PATCH',
+    'That category couldn’t be renamed.',
+    { name }
+  );
+  return data.category;
+}
+
+export async function deleteLibraryCategory(id: string): Promise<void> {
+  await libraryCall(
+    `/library/categories/${encodeURIComponent(id)}`,
+    'DELETE',
+    'That category couldn’t be deleted.'
+  );
+}
+
+export async function createLibraryNote(
+  categoryId: string,
+  note: { title: string | null; body: string }
+): Promise<LibraryNote> {
+  const data = await libraryCall<{ note: LibraryNote }>(
+    `/library/categories/${encodeURIComponent(categoryId)}/notes`,
+    'POST',
+    'That note couldn’t be saved.',
+    note
+  );
+  return data.note;
+}
+
+export async function updateLibraryNote(
+  id: string,
+  note: { title: string | null; body: string; categoryId?: string }
+): Promise<LibraryNote> {
+  const data = await libraryCall<{ note: LibraryNote }>(
+    `/library/notes/${encodeURIComponent(id)}`,
+    'PATCH',
+    'That note couldn’t be saved.',
+    note
+  );
+  return data.note;
+}
+
+export async function deleteLibraryNote(id: string): Promise<void> {
+  await libraryCall(`/library/notes/${encodeURIComponent(id)}`, 'DELETE', 'That note couldn’t be deleted.');
+}

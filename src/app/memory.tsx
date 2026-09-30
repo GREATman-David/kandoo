@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ActionSheet, type SheetAction } from '@/components/ActionSheet';
 import { EmptyState } from '@/components/EmptyState';
+import { LibraryView } from '@/components/library/LibraryView';
 import { LockedRow } from '@/components/LockedRow';
 import { ManualEntry, type ManualEntryProps } from '@/components/ManualEntry';
 import { ManualReminder } from '@/components/ManualReminder';
@@ -102,6 +103,9 @@ export default function MemoryScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Memories (what you told Kandoo) or the Library (your own notes, by category).
+  const [view, setView] = useState<'memories' | 'library'>('memories');
+  const [libraryRefresh, setLibraryRefresh] = useState(0);
   const [query, setQuery] = useState('');
   // Typing filters the cards instantly on the device; pressing search also
   // asks Kandoo for a written answer. Both can show at once.
@@ -175,6 +179,8 @@ export default function MemoryScreen() {
     useCallback(() => {
       if (isAuthenticated) load();
       else setLoading(false);
+      // Notes Mr. Kandoo filed while away show up on return to the Library.
+      setLibraryRefresh((n) => n + 1);
     }, [isAuthenticated, load])
   );
 
@@ -378,6 +384,30 @@ export default function MemoryScreen() {
       <Text style={styles.heading}>Memory</Text>
       <OfflineNote />
 
+      <View style={styles.switch} accessibilityRole="tablist">
+        {(['memories', 'library'] as const).map((option) => (
+          <Pressable
+            key={option}
+            style={[styles.switchOption, view === option && styles.switchOptionOn]}
+            onPress={() => setView(option)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: view === option }}
+          >
+            <Text style={[styles.switchText, view === option && styles.switchTextOn]}>
+              {option === 'memories' ? 'Memories' : 'Library'}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {view === 'library' ? (
+        isAuthenticated ? (
+          <LibraryView refreshKey={libraryRefresh} />
+        ) : (
+          <Text style={styles.empty}>Sign in to see your library.</Text>
+        )
+      ) : (
+      <>
       <View style={styles.askRow}>
         <TextInput
           style={styles.ask}
@@ -518,6 +548,8 @@ export default function MemoryScreen() {
           </Pressable>
         </View>
       ) : null}
+      </>
+      )}
 
       <ManualEntry
         visible={manualOpen}
@@ -689,6 +721,27 @@ const styles = StyleSheet.create({
     color: colors.ink,
     marginBottom: spacing.space4,
   },
+  // Memories | Library: two quiet segments, the chosen one raised.
+  switch: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    padding: 3,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+    marginBottom: spacing.space4,
+  },
+  switchOption: {
+    minHeight: 36,
+    paddingHorizontal: spacing.space5,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  switchOptionOn: { backgroundColor: colors.surfaceRaised },
+  switchText: { ...text.bodyStrong, color: colors.inkMuted },
+  switchTextOn: { color: colors.ink },
   askRow: {
     flexDirection: 'row',
     alignItems: 'center',
