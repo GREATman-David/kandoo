@@ -98,7 +98,8 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
     onConnect: () => setPhase('live'),
     onDisconnect: () => setPhase((p) => (p === 'error' ? p : 'ended')),
     onMessage: ({ message, source }) => {
-      if (!message?.trim()) return;
+      // A silent mic can come through as "..." — only lines with words count.
+      if (!/[\p{L}\p{N}]/u.test(message ?? '')) return;
       setLines((l) => [...l, { who: source === 'user' ? 'you' : 'kandoo', text: message.trim() }]);
     },
     onError: (message) => {
