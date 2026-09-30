@@ -21,6 +21,8 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AccountSheet } from '@/components/AccountSheet';
+import { ActionSheet } from '@/components/ActionSheet';
+import { PhotoViewer } from '@/components/PhotoViewer';
 import { EmptyState } from '@/components/EmptyState';
 import { PlaceHomeCards } from '@/components/PlaceHomeCards';
 import { OfflineNote } from '@/components/OfflineNote';
@@ -52,6 +54,7 @@ import {
   type InterpretResult,
   type InterpretationResponse,
   logFailure,
+  type Photo,
 } from '@/services/interpretationService';
 import {
   colors,
@@ -151,6 +154,7 @@ const CHIP_ICONS: Record<ChipKind, ImageSourcePropType> = {
 };
 const MIC_ICON = require('@/assets/images/icons/mic.png');
 const CHECK_ICON = require('@/assets/images/icons/check.png');
+const CAMERA_ICON = require('@/assets/images/icons/camera.png');
 const CHIP_LIMIT = 6;
 const CHIP_TEXT_LIMIT = 48;
 
@@ -171,6 +175,10 @@ function KandooHome() {
   const entitlement = useEntitlement();
   const insets = useSafeAreaInsets();
   const [sheetOpen, setSheetOpen] = useState(false);
+  // Show Kandoo: the Take photo / Choose from gallery sheet, and a kept photo
+  // opened as a card (from the understood screen, an answer or Recently).
+  const [photoMenu, setPhotoMenu] = useState(false);
+  const [viewerPhoto, setViewerPhoto] = useState<Photo | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   // Which tier the paywall opens on, and why (e.g. Agent minutes used up).
@@ -304,6 +312,7 @@ function KandooHome() {
           {home.state === 'understanding' ? (
             <Understanding
               transcript={home.submittedText}
+              photoUri={home.photo?.uri ?? null}
               response={home.response}
               error={home.error}
               busy={home.busy}
@@ -317,12 +326,17 @@ function KandooHome() {
               response={home.response}
               onDone={home.done}
               onOpenNote={setNoteId}
+              onOpenPhoto={setViewerPhoto}
+              onKeepPhotos={() =>
+                openPaywallFor('pro', 'Kandoo Pro keeps your photos with the people and places in them.')
+              }
             />
           ) : null}
 
           {home.state === 'answered' && home.response ? (
             <Answered
               response={home.response}
+              onOpenPhoto={setViewerPhoto}
               onDone={home.done}
               voiceSupported={home.voiceSupported}
               onAskAgain={home.startVoice}
@@ -452,6 +466,18 @@ function KandooHome() {
               // Matches the server's MAX_CAPTURE_CHARS.
               maxLength={4000}
             />
+            {/* Show Kandoo: a photo instead of words. Anything typed first
+                goes with it as its caption. */}
+            <Pressable
+              style={styles.micBtn}
+              onPress={() => setPhotoMenu(true)}
+              disabled={home.busy}
+              accessibilityRole="button"
+              accessibilityLabel="Show Kandoo a photo"
+              hitSlop={8}
+            >
+              <Image source={CAMERA_ICON} style={styles.micIcon} />
+            </Pressable>
             {/* Mic at the right edge of the field is the standard, primary way
                 to start voice. The mark stays tappable as a shortcut. Toggling
                 this sibling never remounts the TextInput beside it. */}
@@ -503,6 +529,19 @@ function KandooHome() {
           if (!chosenName(account)) setAskName(true);
         }}
       />
+
+      <ActionSheet
+        visible={photoMenu}
+        title="Show Kandoo a photo"
+        onClose={() => setPhotoMenu(false)}
+        actions={[
+          // The sheet closes first; the picker opens once it has gone.
+          { label: 'Take photo', onPress: () => setTimeout(() => void home.showPhoto('camera'), 250) },
+          { label: 'Choose from gallery', onPress: () => setTimeout(() => void home.showPhoto('library'), 250) },
+        ]}
+      />
+
+      <PhotoViewer photo={viewerPhoto} onClose={() => setViewerPhoto(null)} />
 
       <NameSheet
         visible={askName}
@@ -575,19 +614,31 @@ function Idle({ recent, loaded, failed, onRetry, onSelect }: IdleProps) {
       {recent.map((item) => (
         <Pressable
           key={item.id}
-          style={styles.recentRow}
+          style={[styles.recentRow, item.photoUrl ? styles.recentRowPhoto : null]}
           onPress={() => onSelect(item)}
         >
-          <Text style={styles.recentSummary} numberOfLines={2}>
-            {item.summary}
-          </Text>
-          <Text style={styles.recentMeta}>
-            {timeAgo(item.createdAt)} · {describeCounts(item)}
-          </Text>
+          {item.photoUrl ? <Image source={{ uri: item.photoUrl }} style={styles.recentThumb} /> : null}
+          <View style={styles.recentText}>
+            <Text style={styles.recentSummary} numberOfLines={2}>
+              {item.summary}
+            </Text>
+            <Text style={styles.recentMeta}>
+              {timeAgo(item.createdAt)} · {describeCounts(item)}
+            </Text>
+          </View>
         </Pressable>
       ))}
     </View>
   );
+}
+
+/** "Photo kept with Pastor Mensah and AGA School" — or just "Photo kept". */
+function keptWith(photo: Photo): string {
+  const names = [...photo.people, ...photo.places].map((e) => e.name);
+  if (names.length === 0) return 'Photo kept';
+  const list =
+    names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `Photo kept with ${list}`;
 }
 
 function greeting(): string {
@@ -812,6 +863,8 @@ function VoiceListening({
 
 type UnderstandingProps = {
   transcript: string;
+  /** Show Kandoo: the photo being read (local file), shown above the words. */
+  photoUri: string | null;
   response: InterpretationResponse | null;
   error: string | null;
   busy: boolean;
@@ -821,6 +874,7 @@ type UnderstandingProps = {
 
 function Understanding({
   transcript,
+  photoUri,
   response,
   error,
   busy,
@@ -833,14 +887,18 @@ function Understanding({
   const nothingActionable = response ? !hasActions(response) : false;
 
   const label = !response
-    ? 'Working it out'
+    ? photoUri
+      ? 'Reading your photo'
+      : 'Working it out'
     : nothingActionable
       ? 'Saved what you said'
       : 'I understood';
+  // A photo with no caption has no words of its own until Kandoo has read it.
+  const said = photoUri && transcript === 'A photo' ? '' : transcript;
   const title =
     !response || nothingActionable
-      ? transcript
-      : (response.summary ?? transcript);
+      ? said
+      : (response.summary ?? response.description ?? said);
 
   return (
     <>
@@ -851,9 +909,19 @@ function Understanding({
         <Text style={styles.understoodLabel}>{label}</Text>
 
         <View style={styles.card}>
-          <Text style={[styles.cardTitle, !response && styles.cardTitleHeld]}>
-            {title}
-          </Text>
+          {photoUri ? (
+            <Image
+              source={{ uri: photoUri }}
+              style={[styles.shownPhoto, !response && styles.shownPhotoHeld]}
+              resizeMode="cover"
+              accessibilityLabel="The photo you showed Kandoo"
+            />
+          ) : null}
+          {title ? (
+            <Text style={[styles.cardTitle, !response && styles.cardTitleHeld]}>
+              {title}
+            </Text>
+          ) : null}
           {chips.length > 0 ? (
             <View style={styles.chips}>
               {chips.map((chip, index) => (
@@ -1006,6 +1074,10 @@ type RememberedProps = {
   onDone: () => void;
   /** Opens the capture's note (the same NoteDetail the Memory tab uses). */
   onOpenNote: (captureId: string) => void;
+  /** Show Kandoo: open the kept photo as a shareable card. */
+  onOpenPhoto: (photo: Photo) => void;
+  /** Free: the photo was read, not kept — offer Pro. */
+  onKeepPhotos: () => void;
 };
 
 type NoteStatus = 'idle' | 'taking' | 'failed';
@@ -1017,7 +1089,7 @@ type NoteStatus = 'idle' | 'taking' | 'failed';
  * lands it becomes one more tick — "Note taken · <title>" — that opens the note.
  * A capture Kandoo already wrote up shows that tick from the start.
  */
-function Remembered({ response, onDone, onOpenNote }: RememberedProps) {
+function Remembered({ response, onDone, onOpenNote, onOpenPhoto, onKeepPhotos }: RememberedProps) {
   const ticks = useMemo(() => buildTicks(response.results), [response.results]);
   const [note, setNote] = useState<{ title: string } | null>(
     response.note ?? null
@@ -1076,6 +1148,28 @@ function Remembered({ response, onDone, onOpenNote }: RememberedProps) {
                 Taking note…
               </Text>
             </View>
+          ) : null}
+
+          {response.photo?.url ? (
+            <Pressable
+              style={styles.keptPhotoRow}
+              onPress={() => response.photo && onOpenPhoto(response.photo)}
+              accessibilityRole="button"
+              accessibilityLabel="Open the photo"
+            >
+              <Image source={{ uri: response.photo.url }} style={styles.keptPhoto} />
+              <Text style={styles.tickText}>
+                {keptWith(response.photo)} · <Text style={styles.tickLink}>Open · Share</Text>
+              </Text>
+            </Pressable>
+          ) : response.photoNeedsPro ? (
+            <Pressable style={styles.tickRow} onPress={onKeepPhotos} accessibilityRole="button">
+              <View style={styles.tickIconWrap} />
+              <Text style={styles.tickText}>
+                Keep this photo with the people and places in it ·{' '}
+                <Text style={styles.tickLink}>Kandoo Pro</Text>
+              </Text>
+            </Pressable>
           ) : null}
         </View>
 
@@ -1141,6 +1235,8 @@ function recallAnswer(response: InterpretationResponse): string {
 type AnsweredProps = {
   response: InterpretationResponse;
   onDone: () => void;
+  /** Open a photo an answer came from. */
+  onOpenPhoto: (photo: Photo) => void;
   /** MuMu and other recogniser-less devices hide the mic; speech still works. */
   voiceSupported: boolean;
   /** Stop speaking and start listening for the next question (no state carries). */
@@ -1158,11 +1254,16 @@ type AnsweredProps = {
  */
 function Answered({
   response,
+  onOpenPhoto,
   onDone,
   voiceSupported,
   onAskAgain,
 }: AnsweredProps) {
   const answer = recallAnswer(response);
+  // Photos the matched memories came from (Show Kandoo), with a live link.
+  const sourcePhotos = (response?.results ?? []).flatMap((r) =>
+    r.kind === 'recall' && r.status === 'ok' ? (r.photos ?? []).filter((p) => p.url) : []
+  );
   const fromLocation = !!response?.results.some(
     (r) => r.kind === 'recall' && r.status === 'ok' && r.fromLocation
   );
@@ -1273,6 +1374,24 @@ function Answered({
         <Animated.Text style={[styles.spoken, style]} selectable>
           {answer}
         </Animated.Text>
+
+        {sourcePhotos.length > 0 ? (
+          <View style={styles.sourcePhotos}>
+            <Text style={styles.immersiveLabel}>From your photos</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sourcePhotoRow}>
+              {sourcePhotos.map((photo) => (
+                <Pressable
+                  key={photo.id}
+                  onPress={() => onOpenPhoto(photo)}
+                  accessibilityRole="imagebutton"
+                  accessibilityLabel={photo.description ?? 'Photo'}
+                >
+                  <Image source={{ uri: photo.url ?? undefined }} style={styles.sourcePhoto} />
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={styles.dockActions}>
@@ -1532,6 +1651,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.line,
   },
+  recentRowPhoto: { flexDirection: 'row', alignItems: 'center', gap: spacing.space3 },
+  recentThumb: { width: 48, height: 48, borderRadius: radius.sm, backgroundColor: colors.surfaceRaised },
+  recentText: { flex: 1, gap: spacing.space1 },
   recentSummary: {
     fontFamily: fontFamily.displaySemiBold,
     fontSize: 17,
@@ -1584,6 +1706,19 @@ const styles = StyleSheet.create({
   cardTitleHeld: {
     color: colors.inkMuted,
   },
+  // The photo Kandoo is reading; faint until it has been understood.
+  shownPhoto: {
+    width: '100%',
+    height: 190,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceRaised,
+  },
+  shownPhotoHeld: { opacity: 0.55 },
+  keptPhotoRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.space3 },
+  keptPhoto: { width: 56, height: 56, borderRadius: radius.sm, backgroundColor: colors.surfaceRaised },
+  sourcePhotos: { marginTop: spacing.space6, gap: spacing.space2 },
+  sourcePhotoRow: { gap: spacing.space2 },
+  sourcePhoto: { width: 96, height: 96, borderRadius: radius.sm, backgroundColor: colors.surfaceRaised },
   chips: {
     flexDirection: 'row',
     flexWrap: 'wrap',

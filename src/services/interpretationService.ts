@@ -340,6 +340,8 @@ export type InterpretResult =
       proBoundaryHit: boolean;
       /** Answered on the phone from where the user is ("where am I?"), not from memories. */
       fromLocation?: boolean;
+      /** Photos the matched memories came from ("from this flyer"). */
+      photos?: Photo[];
     }
   | {
       kind: 'reminder' | 'memory' | 'recall';
@@ -355,6 +357,25 @@ export type InterpretationResponse = {
   /** Set when extraction judged the capture substantial enough to write up. */
   note?: { title: string; body: string } | null;
   results: InterpretResult[];
+  /** Show Kandoo only: what the photo was, and the kept photo (Pro). */
+  description?: string;
+  photo?: Photo | null;
+  photoKept?: boolean;
+  /** Free: the photo was read but not kept; keeping photos is Pro. */
+  photoNeedsPro?: boolean;
+};
+
+/** A kept photo. `url` is a signed link that works for about an hour. */
+export type Photo = {
+  id: string;
+  captureId: string | null;
+  url: string | null;
+  width: number | null;
+  height: number | null;
+  description: string | null;
+  createdAt: string;
+  people: { id: string; name: string }[];
+  places: { id: string; name: string }[];
 };
 
 export type CaptureNoteMemory = {
@@ -390,6 +411,8 @@ export type CaptureNote = {
   reminders: CaptureNoteReminder[];
   /** Saved on this phone and not yet on the server (src/services/outbox.ts). */
   pending?: boolean;
+  /** A capture shown as a photo: its thumbnail (signed link, Pro). */
+  photoUrl?: string;
 };
 
 async function getAccessTokenOrThrow(): Promise<string> {
@@ -446,6 +469,89 @@ export async function interpretText(
     },
     'Failed to interpret text.',
     { timeoutMs: AI_TIMEOUT_MS }
+  );
+}
+
+/**
+ * Show Kandoo: send a prepared photo (and anything said with it) to be read.
+ * The reply has the same shape as a spoken capture — reminders arrive pending
+ * for the review card — plus the kept photo on Pro.
+ */
+export async function interpretPhoto(
+  photo: { base64: string; width: number; height: number },
+  opts: { caption?: string | null; placeIds?: string[] } = {}
+): Promise<InterpretationResponse> {
+  const accessToken = await getAccessTokenOrThrow();
+  return apiFetch<InterpretationResponse>(
+    '/interpret/photo',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        image: photo.base64,
+        width: photo.width,
+        height: photo.height,
+        caption: opts.caption ?? null,
+        placeIds: opts.placeIds ?? [],
+        clientTime: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
+    },
+    'Kandoo couldn’t read that photo.',
+    { timeoutMs: AI_TIMEOUT_MS }
+  );
+}
+
+/** A person's or place's album, a search, or every photo (newest first). */
+export async function fetchPhotos(
+  filter: { entityId?: string; query?: string; limit?: number } = {}
+): Promise<Photo[]> {
+  const accessToken = await getAccessTokenOrThrow();
+  const params = new URLSearchParams();
+  if (filter.entityId) params.set('entityId', filter.entityId);
+  if (filter.query) params.set('q', filter.query);
+  if (filter.limit) params.set('limit', String(filter.limit));
+  const qs = params.toString();
+  const data = await apiFetch<{ photos: Photo[] }>(
+    `/photos${qs ? `?${qs}` : ''}`,
+    { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } },
+    'Photos couldn’t load.'
+  );
+  return data.photos;
+}
+
+/** Add a photo straight to people/places (Pro; 402 `pro_required` on Free). */
+export async function addPhoto(
+  photo: { base64: string; width: number; height: number },
+  entityIds: string[],
+  description?: string | null
+): Promise<Photo> {
+  const accessToken = await getAccessTokenOrThrow();
+  const data = await apiFetch<{ photo: Photo }>(
+    '/photos',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        image: photo.base64,
+        width: photo.width,
+        height: photo.height,
+        entityIds,
+        description: description ?? null,
+      }),
+    },
+    'That photo couldn’t be saved.',
+    { timeoutMs: AI_TIMEOUT_MS }
+  );
+  return data.photo;
+}
+
+export async function deletePhoto(id: string): Promise<void> {
+  const accessToken = await getAccessTokenOrThrow();
+  await apiFetch<{ success: true }>(
+    `/photos/${encodeURIComponent(id)}`,
+    { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } },
+    'That photo couldn’t be deleted.'
   );
 }
 

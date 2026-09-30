@@ -33,6 +33,7 @@ import {
   updateMemory,
 } from '../modules/memories/memoryService';
 import { answerRecall } from '../modules/memories/recallService';
+import { photoUrlsForCaptures, photosForMemories } from '../modules/photos/photoService';
 import {
   confirmReminder,
   createManualReminder,
@@ -72,6 +73,8 @@ type ActionResult =
       answer: string;
       memories: unknown[];
       proBoundaryHit: boolean;
+      /** Photos the matched memories came from ("from this flyer"). */
+      photos: unknown[];
     }
   | { kind: KandooAction['kind']; status: 'failed'; reason: string };
 
@@ -212,12 +215,19 @@ router.post('/interpret', authenticateRequest, aiRateLimit, async (req, res) => 
               pro,
               { noModel: modelsDown }
             );
+            // The photos behind the matched memories, so the answer can show
+            // the flyer it came from. Best-effort: an answer never waits on it.
+            const photos = await photosForMemories(
+              userId,
+              memories.filter((m) => m.source === 'memory').map((m) => m.id)
+            );
             results.push({
               kind: 'recall',
               status: 'ok',
               answer,
               memories,
               proBoundaryHit,
+              photos,
             });
             break;
           }
@@ -472,7 +482,13 @@ router.get('/captures', authenticateRequest, async (req, res) => {
       requireActions,
       before,
     });
-    return res.json({ success: true, captures });
+    // A capture shown as a photo carries its thumbnail (Pro keeps photos).
+    const photoCaptures = captures.filter((c) => c.source === 'photo').map((c) => c.id);
+    const thumbs = await photoUrlsForCaptures(userId, photoCaptures);
+    return res.json({
+      success: true,
+      captures: captures.map((c) => (thumbs.has(c.id) ? { ...c, photoUrl: thumbs.get(c.id) } : c)),
+    });
   } catch (error) {
     console.error('List captures failed:', error);
     return res.status(500).json({ error: 'Could not load your notes.' });

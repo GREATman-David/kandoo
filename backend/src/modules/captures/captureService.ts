@@ -6,7 +6,7 @@ export type CaptureInput = {
   text: string;
   clientTime: string;
   timezone: string;
-  source?: 'text' | 'voice' | 'manual';
+  source?: 'text' | 'voice' | 'manual' | 'photo';
   transcriptConfidence?: number | null;
 };
 

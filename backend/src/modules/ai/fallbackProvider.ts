@@ -1,5 +1,5 @@
-import type { AIProvider, EmbedTaskType, InterpretContext, RecallMemory } from './aiProvider';
-import type { KandooInterpretation, KandooNote } from './interpretationSchema';
+import type { AIProvider, EmbedTaskType, InterpretContext, PhotoInput, RecallMemory } from './aiProvider';
+import type { KandooInterpretation, KandooNote, PhotoInterpretation } from './interpretationSchema';
 
 /**
  * Every model we use failed or ran out of time. Routes turn this into a clear
@@ -118,6 +118,10 @@ export class FallbackAIProvider implements AIProvider {
 
   writeNote(text: string): Promise<KandooNote> {
     return this.run('note', (p) => p.writeNote(text));
+  }
+
+  interpretPhoto(photo: PhotoInput, context: InterpretContext): Promise<PhotoInterpretation> {
+    return this.run('photo', (p) => p.interpretPhoto(photo, context));
   }
 
   async generateRecallAnswer(question: string, memories: RecallMemory[]): Promise<string> {

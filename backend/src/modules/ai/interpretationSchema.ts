@@ -95,12 +95,22 @@ export const kandooInterpretationSchema = z
   })
   .strict();
 
+/**
+ * A photo the user SHOWED Kandoo (a flyer, a business card, a whiteboard):
+ * the same contract, plus one line naming what the photo is. That line
+ * becomes the capture's text and the photo's caption in its library.
+ */
+export const photoInterpretationSchema = kandooInterpretationSchema.extend({
+  description: z.string().min(1).max(160),
+});
+
 export type ReminderAction = z.infer<typeof reminderActionSchema>;
 export type MemoryAction = z.infer<typeof memoryActionSchema>;
 export type RecallAction = z.infer<typeof recallActionSchema>;
 export type KandooAction = z.infer<typeof kandooActionSchema>;
 export type KandooNote = z.infer<typeof noteSchema>;
 export type KandooInterpretation = z.infer<typeof kandooInterpretationSchema>;
+export type PhotoInterpretation = z.infer<typeof photoInterpretationSchema>;
 
 /**
  * The JSON Schema we hand to the model. Kept beside the Zod schema so the two

@@ -4,13 +4,14 @@ import {
   useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { Alert, AppState } from 'react-native';
 
 import {
   AiBusyError,
   confirmReminder,
   degradedReason,
   fetchCaptureNotes,
+  interpretPhoto,
   interpretText,
   isNetworkError,
   type CaptureNote,
@@ -24,6 +25,13 @@ import { scheduleReminder } from '@/services/localNotifications';
 import { answerWhereAmI } from '@/features/places/whereAmI';
 import { answerOffline, isLikelyQuestion } from '@/services/offlineRecall';
 import { onOutboxChange, pendingCaptures, saveManual, withPendingEdits } from '@/services/outbox';
+import {
+  PhotoPermissionError,
+  currentPlaceIds,
+  pickPhoto,
+  type PhotoSource,
+  type PreparedPhoto,
+} from '@/services/photos';
 
 /**
  * Home is one route with four states, not four screens. This hook owns the
@@ -47,6 +55,8 @@ export type RecentItem = {
   memories: number;
   /** Capture time, so an older-than-boundary row opens the paywall on tap. */
   createdAt: string;
+  /** A capture shown as a photo: its thumbnail (Pro keeps photos). */
+  photoUrl?: string;
 };
 
 const RECENT_LIMIT = 3;
@@ -63,6 +73,7 @@ function toRecentItem(capture: CaptureNote): RecentItem {
     reminders: capture.reminders.length,
     memories: capture.memories.length,
     createdAt: capture.created_at,
+    photoUrl: capture.photoUrl,
   };
 }
 
@@ -127,6 +138,9 @@ export function useHome() {
   // Raised when a recall answer reaches past the free 10-day window. The paywall
   // appears at that boundary and nowhere else — never on launch.
   const [paywallVisible, setPaywallVisible] = useState(false);
+  // Show Kandoo: the photo being read (a local file), shown in place of the
+  // spoken words while Kandoo works and on the understood card after.
+  const [photo, setPhoto] = useState<PreparedPhoto | null>(null);
 
   // The transcript that produced the current response, kept for the review
   // sheet's "Saved what you said" fallback and for retry after a failure.
@@ -323,6 +337,65 @@ export function useHome() {
       );
       // Back to listening with the words intact, so nothing is lost.
       setState('listening');
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }, []);
+
+  /**
+   * Show Kandoo: take or choose a photo, then read it exactly like a spoken
+   * capture — UNDERSTANDING with chips, Remember confirms the reminders. The
+   * photo's own words never leave the phone except to be read (AGENTS §3.1:
+   * the model only proposes; nothing is scheduled until the user says yes).
+   */
+  const showPhoto = useCallback(async (source: PhotoSource) => {
+    if (busyRef.current) return;
+    let prepared: PreparedPhoto | null;
+    try {
+      prepared = await pickPhoto(source);
+    } catch (caught) {
+      if (caught instanceof PhotoPermissionError) {
+        Alert.alert('Camera is off', caught.message);
+      } else {
+        logFailure('Taking a photo failed:', caught);
+        Alert.alert('That photo didn’t open', 'Try another photo, or take it again.');
+      }
+      return;
+    }
+    if (!prepared) return;
+
+    // Any words typed with it are its caption ("remind me about this Friday").
+    const caption = latest.current.trim() || null;
+    submittedText.current = caption ?? 'A photo';
+    busyRef.current = true;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    setResponse(null);
+    setPhoto(prepared);
+    setState('understanding');
+    haptic(Haptics.ImpactFeedbackStyle.Light);
+
+    try {
+      const result = await interpretPhoto(prepared, {
+        caption,
+        placeIds: await currentPlaceIds(),
+      });
+      if (!result.results.some((r) => r.status === 'ok')) {
+        throw new Error('Kandoo found nothing to keep in that photo.');
+      }
+      setResponse(result);
+    } catch (caught) {
+      logFailure('Reading a photo failed:', caught);
+      setPhoto(null);
+      setState(latest.current.trim() ? 'listening' : 'idle');
+      Alert.alert(
+        'Kandoo couldn’t read that photo',
+        caught instanceof AiBusyError
+          ? caught.message
+          : userMessage(caught, 'Try again in a moment, or tell Kandoo in words.')
+      );
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -673,6 +746,7 @@ export function useHome() {
     setError(null);
     setNotice(null);
     setPaywallVisible(false);
+    setPhoto(null);
     submittedText.current = '';
     setState('idle');
     void loadRecent();
@@ -711,5 +785,8 @@ export function useHome() {
     editVoiceTranscript,
     remember,
     done,
+    /** Show Kandoo: the photo being read or just read (local file). */
+    photo,
+    showPhoto,
   };
 }

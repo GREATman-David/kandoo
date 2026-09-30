@@ -25,6 +25,7 @@ import { timeAgo } from '@/utils/timeAgo';
 import { LockedRow } from './LockedRow';
 import { NoteDetail } from './NoteDetail';
 import { Paywall } from './Paywall';
+import { PhotoStrip } from './PhotoStrip';
 import { ReminderDetail } from './ReminderDetail';
 
 const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000;
@@ -167,6 +168,13 @@ export function PersonDetail({
                   )}
                 </Text>
               </View>
+
+              <PhotoStrip
+                entityId={person.id}
+                entityName={person.name}
+                isPro={isPro}
+                onNeedPro={() => setPaywall(true)}
+              />
 
               {person.memories.length > 0 ? (
                 <View style={styles.section}>

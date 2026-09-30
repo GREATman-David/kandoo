@@ -88,6 +88,19 @@ const config: ExpoConfig = {
     // WebRTC. RECORD_AUDIO is already declared by expo-speech-recognition.
     '@livekit/react-native-expo-plugin',
     '@config-plugins/react-native-webrtc',
+    // Show Kandoo: a photo taken or chosen becomes reminders, people and
+    // places. The gallery uses Android's photo picker (no storage permission);
+    // the camera needs CAMERA. No microphone: photos only.
+    [
+      'expo-image-picker',
+      {
+        cameraPermission: 'Kandoo uses the camera so you can show it a flyer, a card or a whiteboard.',
+        photosPermission: 'Kandoo reads the photo you choose and keeps what matters from it.',
+        microphonePermission: false,
+      },
+    ],
+    // Sharing a watermarked Kandoo photo card.
+    'expo-sharing',
   ],
   experiments: {
     typedRoutes: true,

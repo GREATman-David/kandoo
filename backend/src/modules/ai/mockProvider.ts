@@ -1,6 +1,7 @@
 import type {
   AIProvider,
   InterpretContext,
+  PhotoInput,
   RecallMemory,
 } from './aiProvider';
 
@@ -8,6 +9,7 @@ import type {
   KandooAction,
   KandooInterpretation,
   KandooNote,
+  PhotoInterpretation,
 } from './interpretationSchema';
 
 import { EMBEDDING_DIMENSIONS } from './openaiProvider';
@@ -22,6 +24,18 @@ import { EMBEDDING_DIMENSIONS } from './openaiProvider';
  * more specific than a statement.
  */
 export class MockAIProvider implements AIProvider {
+  /** No vision here: the caption (if any) becomes one memory about the photo. */
+  async interpretPhoto(photo: PhotoInput, _context: InterpretContext): Promise<PhotoInterpretation> {
+    const content = photo.caption?.trim() || 'A photo the user showed Kandoo.';
+    return {
+      summary: null,
+      confidence: 'low',
+      note: null,
+      description: 'A photo',
+      actions: [{ kind: 'memory', content, people: [], placeHint: null, topics: [] }],
+    };
+  }
+
   async interpret(
     text: string,
     context: InterpretContext

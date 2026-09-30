@@ -180,6 +180,49 @@ Utterance: "Where should I get lunch near work?"
 `.trim();
 }
 
+/**
+ * Show Kandoo: the user SHOWED a photo instead of speaking. The extraction
+ * rules are identical (so a flyer's time resolves exactly like a spoken one);
+ * this adds how to read a photo and the one extra field it returns.
+ */
+export function photoExtractionPrompt(context: InterpretContext): string {
+  return `
+${extractionPrompt(context)}
+
+PHOTO INPUT — THIS TIME THE USER IS SHOWING YOU A PHOTO
+
+The user took or chose a photo and showed it to Kandoo, sometimes with a
+caption they typed. Treat what the photo SAYS and SHOWS as if the user had told
+you it, and the caption as their instruction about it.
+
+- Read everything useful: printed and handwritten text, dates, times, names,
+  organisations, addresses, phone numbers, emails, prices, room numbers.
+- Write numbers, codes, phone numbers, dates and amounts exactly as printed,
+  in digits.
+- A business card → a memory about that person (who they are, organisation,
+  role, phone, email), with "people" set to their name.
+- A flyer, invitation or poster for an event → a reminder at the event's time
+  (dueAt resolved against the current local time; a date with no year is the
+  next such date), placeHint set to the venue, plus a memory with the details
+  worth keeping (what to bring, who is organising, the cost).
+- A whiteboard, handwritten note or slide → the memories and reminders it
+  contains, exactly as for a spoken meeting recap.
+- A receipt, label, prescription, timetable or ticket → the facts worth keeping
+  as memories, and a reminder for any date on it that matters (a dose time, a
+  departure, a return deadline).
+- A plain photo with no text (a place, an object, a person) → one memory saying
+  what it shows, using the caption for meaning ("where I parked", "Esi's gift").
+- If the caption asks for something ("remind me about this on Friday"), do it.
+- A photo never produces a "recall" action.
+- If nothing in the photo is worth keeping, return one memory describing it.
+
+Add ONE extra top-level field to the JSON:
+  "description": a short line (under 12 words) naming what the photo is, e.g.
+  "Flyer for the Foundation outreach at the church premises" or
+  "Business card — Pastor Kwame Mensah". No phone numbers or codes in it.
+`.trim();
+}
+
 /** Returned without calling a model: there is nothing to summarise. */
 export const EMPTY_RECALL_ANSWER = "I don't have anything saved about that yet.";
 

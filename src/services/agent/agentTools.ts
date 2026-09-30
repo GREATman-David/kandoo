@@ -21,6 +21,7 @@ import {
   fetchPeople,
   fetchPerson,
   fetchPlace,
+  fetchPhotos,
   fetchPlaces,
   isProRequired,
   mergePeople,
@@ -38,6 +39,8 @@ import { isRepeating } from '@/utils/repeat';
 import { requestPlaceResync } from '@/services/places/placeStore';
 import { MIN_RADIUS_M, placeGeometry, type LatLng } from '@/utils/geo';
 import * as Location from 'expo-location';
+
+import { showPhotos } from './agentShown';
 
 import {
   describeDraft,
@@ -524,6 +527,39 @@ export const kandooTools: Record<string, Tool> = {
       },
       { destructive: true }
     );
+  }),
+
+  // ---------------------------------------------------------------- photos
+  /**
+   * Show Kandoo's photo library: find photos by what they are ("the flyer"),
+   * or everyone/everywhere they belong to. The photos appear in the
+   * conversation, where the user can open and share them.
+   */
+  find_photos: guard(async (p) => {
+    const entityId = str(p.person_id) ?? str(p.place_id);
+    const query = str(p.query);
+    let photos = await fetchPhotos({ entityId: entityId ?? undefined, query: query ?? undefined, limit: 8 });
+    // A description rarely uses the user's exact words: with nothing matched
+    // for a search, show the newest photos and let Kandoo say so.
+    let matched = true;
+    if (photos.length === 0 && query && !entityId) {
+      photos = await fetchPhotos({ limit: 6 });
+      matched = false;
+    }
+    const shown = photos.filter((photo) => photo.url);
+    showPhotos(shown);
+    shown.forEach((photo) => remember(photo.id, photo.description ?? 'a photo'));
+    return ok({
+      matched,
+      shownOnScreen: shown.length,
+      photos: shown.map((photo) => ({
+        id: photo.id,
+        description: photo.description,
+        people: photo.people.map((x) => x.name),
+        places: photo.places.map((x) => x.name),
+        keptAt: photo.createdAt,
+      })),
+    });
   }),
 
   // ---------------------------------------------------------------- places

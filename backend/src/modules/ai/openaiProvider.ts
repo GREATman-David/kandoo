@@ -3,8 +3,10 @@ import OpenAI from 'openai';
 import {
     kandooInterpretationSchema,
     noteSchema,
+    photoInterpretationSchema,
     type KandooInterpretation,
     type KandooNote,
+    type PhotoInterpretation,
 } from './interpretationSchema';
 
 import {
@@ -12,12 +14,14 @@ import {
     NOTE_SYSTEM_PROMPT,
     RECALL_SYSTEM_PROMPT,
     extractionPrompt,
+    photoExtractionPrompt,
     recallUserPrompt,
 } from './prompts';
 
 import type {
     AIProvider,
     InterpretContext,
+    PhotoInput,
     RecallMemory,
 } from './aiProvider';
 
@@ -99,6 +103,28 @@ export class OpenAIProvider implements AIProvider {
     throw new Error(
       `Interpretation failed validation after repair: ${second.error.message}`
     );
+  }
+
+  /** The same photo contract, through OpenAI's vision input (a data URL). */
+  async interpretPhoto(
+    photo: PhotoInput,
+    context: InterpretContext
+  ): Promise<PhotoInterpretation> {
+    const { value } = await this.completeJson([
+      { role: 'system', content: photoExtractionPrompt(context) },
+      {
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: `data:${photo.mimeType};base64,${photo.base64}` } },
+          { type: 'text', text: photo.caption ? `Caption: ${photo.caption}` : 'No caption.' },
+        ],
+      },
+    ]);
+    const parsed = photoInterpretationSchema.safeParse(value);
+    if (!parsed.success) {
+      throw new Error(`Photo interpretation failed validation: ${parsed.error.message}`);
+    }
+    return { ...parsed.data, actions: parsed.data.actions.filter((a) => a.kind !== 'recall') };
   }
 
   async writeNote(text: string): Promise<KandooNote> {

@@ -7,6 +7,7 @@ import interpretRouter from './routes/interpret';
 import agentRouter from './routes/agent';
 import insightsRouter from './routes/insights';
 import placesRouter from './routes/places';
+import photosRouter from './routes/photos';
 
 const app = express();
 
@@ -26,7 +27,15 @@ if (!isProduction) {
 // header and aren't subject to CORS anyway. `{ origin: false }` disables the
 // CORS headers entirely, which blocks every browser-based cross-origin caller.
 app.use(cors({ origin: false }));
-app.use(express.json({ limit: '1mb' }));
+// Photos (Show Kandoo, the library) carry a JPEG of a few hundred KB as
+// base64; everything else stays under the tight 1 MB limit.
+const jsonSmall = express.json({ limit: '1mb' });
+const jsonPhoto = express.json({ limit: '8mb' });
+app.use((req, res, next) =>
+  req.path === '/interpret/photo' || req.path === '/photos'
+    ? jsonPhoto(req, res, next)
+    : jsonSmall(req, res, next)
+);
 
 app.get('/', (_req, res) => {
   res.json({ message: 'Kandoo backend is running' });
@@ -45,6 +54,9 @@ app.use('/', interpretRouter);
 
 // /places — the areas the phone watches (it, not the server, does the watching).
 app.use('/', placesRouter);
+
+// /interpret/photo, /photos — Show Kandoo and the photo library.
+app.use('/', photosRouter);
 
 // /insights/month — the monthly recap's server half (counts only).
 app.use('/', insightsRouter);

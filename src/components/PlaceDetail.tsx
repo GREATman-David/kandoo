@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PhotoStrip } from '@/components/PhotoStrip';
 import { useKandooMapStyle } from '@/features/places/mapStyle';
 import { placeBounds, placeFeature } from '@/features/places/placeShapes';
 import { useEntitlement } from '@/hooks/useEntitlement';
@@ -365,6 +366,8 @@ export function PlaceDetail({
                         : 'Kandoo will notice when you arrive'}
                 </Text>
               </View>
+
+              <PhotoStrip entityId={place.id} entityName={place.name} isPro={isPro} onNeedPro={onNeedPro} />
 
               {!geometry && drawnPlaces.length > 0 ? (
                 <View style={styles.section}>

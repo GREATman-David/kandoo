@@ -3,8 +3,10 @@ import { GoogleGenAI } from '@google/genai';
 import {
   kandooInterpretationSchema,
   noteSchema,
+  photoInterpretationSchema,
   type KandooInterpretation,
   type KandooNote,
+  type PhotoInterpretation,
 } from './interpretationSchema';
 
 import {
@@ -12,6 +14,7 @@ import {
   NOTE_SYSTEM_PROMPT,
   RECALL_SYSTEM_PROMPT,
   extractionPrompt,
+  photoExtractionPrompt,
   recallUserPrompt,
 } from './prompts';
 
@@ -19,8 +22,13 @@ import type {
   AIProvider,
   EmbedTaskType,
   InterpretContext,
+  PhotoInput,
   RecallMemory,
 } from './aiProvider';
+
+/** A Gemini content part: text, or an image sent inline as base64. */
+type Part = { text: string } | { inlineData: { mimeType: string; data: string } };
+type Content = { role: string; parts: Part[] };
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -254,6 +262,11 @@ function normalise(vector: number[]): number[] {
   return vector.map((value) => value / magnitude);
 }
 
+/** A photo is shown, not asked about: any recall the model slips in is dropped. */
+export function withoutRecall(result: PhotoInterpretation): PhotoInterpretation {
+  return { ...result, actions: result.actions.filter((a) => a.kind !== 'recall') };
+}
+
 export class GeminiProvider implements AIProvider {
   /** `model` overrides GEMINI_MODEL — the lighter fallback model uses this. */
   constructor(private readonly modelOverride?: string) {}
@@ -307,6 +320,47 @@ export class GeminiProvider implements AIProvider {
     );
   }
 
+  async interpretPhoto(
+    photo: PhotoInput,
+    context: InterpretContext
+  ): Promise<PhotoInterpretation> {
+    const system = photoExtractionPrompt(context);
+    const shown: Content = {
+      role: 'user',
+      parts: [
+        { inlineData: { mimeType: photo.mimeType, data: photo.base64 } },
+        { text: photo.caption ? `Caption: ${photo.caption}` : 'No caption.' },
+      ],
+    };
+
+    const first = await this.completeJson(system, [shown]);
+    const parsed = photoInterpretationSchema.safeParse(first.value);
+    if (parsed.success) return withoutRecall(parsed.data);
+
+    // One repair attempt, as for spoken captures.
+    const repaired = await this.completeJson(system, [
+      shown,
+      { role: 'model', parts: [{ text: first.raw }] },
+      {
+        role: 'user',
+        parts: [
+          {
+            text: [
+              'That JSON failed validation with the following errors:',
+              JSON.stringify(parsed.error.issues, null, 2),
+              '',
+              'Return corrected JSON only, including "description". No prose, no markdown fences.',
+            ].join('\n'),
+          },
+        ],
+      },
+    ]);
+    const second = photoInterpretationSchema.safeParse(repaired.value);
+    if (second.success) return withoutRecall(second.data);
+
+    throw new Error(`Photo interpretation failed validation after repair: ${second.error.message}`);
+  }
+
   async writeNote(text: string): Promise<KandooNote> {
     const { value } = await this.completeJson(NOTE_SYSTEM_PROMPT, [
       { role: 'user', parts: [{ text }] },
@@ -320,7 +374,7 @@ export class GeminiProvider implements AIProvider {
 
   private async completeJson(
     system: string,
-    contents: { role: string; parts: { text: string }[] }[]
+    contents: Content[]
   ): Promise<{ raw: string; value: unknown }> {
     const response = await withKeyFailover(() =>
       activeClient().models.generateContent({

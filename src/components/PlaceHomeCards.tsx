@@ -5,7 +5,7 @@ import { AppState, Image, Pressable, StyleSheet, Text, View } from 'react-native
 
 import { monthWindow, nextRecapTime, previousMonth, type MonthWindow } from '@/features/places/monthRecap';
 import { useEntitlement } from '@/hooks/useEntitlement';
-import { logFailure } from '@/services/interpretationService';
+import { fetchPhotos, logFailure, type Photo } from '@/services/interpretationService';
 import { ensureMonthlyRecapScheduled } from '@/services/localNotifications';
 import { placesInside } from '@/services/places/placeRules';
 import { readPlaceState, type WatchedPlace } from '@/services/places/placeStore';
@@ -16,7 +16,8 @@ import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
  * state, not a screen):
  *   - "At School · 2 things waiting" while the phone knows you're inside a place;
  *   - "Your September is ready" in the first week of a month.
- * Both read only what is on the phone; neither makes a network call.
+ * Both read what is on the phone. The one network call is the place's latest
+ * photo (Show Kandoo): "last time here" shown as a picture, not a sentence.
  */
 
 const PIN = require('@/assets/images/tabIcons/places.png');
@@ -34,6 +35,24 @@ export function PlaceHomeCards() {
   const { isPro } = useEntitlement();
   const [here, setHere] = useState<Here>(null);
   const [recap, setRecap] = useState<MonthWindow | null>(null);
+  const [lastPhoto, setLastPhoto] = useState<Photo | null>(null);
+  const herePlaceId = here?.place.id ?? null;
+
+  // The newest photo from this place, if there is one. Best-effort: offline or
+  // failing, the card is simply the words it always was.
+  useEffect(() => {
+    setLastPhoto(null);
+    if (!herePlaceId) return;
+    let active = true;
+    fetchPhotos({ entityId: herePlaceId, limit: 1 })
+      .then((photos) => {
+        if (active) setLastPhoto(photos.find((p) => p.url) ?? null);
+      })
+      .catch((error) => logFailure('Loading the photo for this place failed:', error));
+    return () => {
+      active = false;
+    };
+  }, [herePlaceId]);
 
   const refresh = useCallback(() => {
     void (async () => {
@@ -79,17 +98,23 @@ export function PlaceHomeCards() {
     <View style={styles.wrap}>
       {here ? (
         <Pressable style={styles.card} onPress={() => openPlaces({ open: here.place.id })} accessibilityRole="button">
-          <View style={styles.pin}>
-            <Image source={PIN} style={styles.pinIcon} />
-          </View>
+          {lastPhoto?.url ? (
+            <Image source={{ uri: lastPhoto.url }} style={styles.photo} accessibilityLabel="Last photo from here" />
+          ) : (
+            <View style={styles.pin}>
+              <Image source={PIN} style={styles.pinIcon} />
+            </View>
+          )}
           <View style={styles.main}>
             <Text style={styles.title}>At {here.place.name}</Text>
             <Text style={styles.body} numberOfLines={2}>
               {here.waiting > 0
                 ? `${here.waiting} ${here.waiting === 1 ? 'thing' : 'things'} waiting for you here`
-                : here.place.latestMemory
-                  ? here.place.latestMemory.content
-                  : 'Anything to remember about this place?'}
+                : lastPhoto?.description
+                  ? `Last time here: ${lastPhoto.description}`
+                  : here.place.latestMemory
+                    ? here.place.latestMemory.content
+                    : 'Anything to remember about this place?'}
             </Text>
           </View>
         </Pressable>
@@ -141,6 +166,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pinIcon: { width: 18, height: 18, tintColor: colors.settled },
+  photo: { width: 52, height: 52, borderRadius: radius.sm, backgroundColor: colors.surfaceRaised },
   main: { flex: 1 },
   eyebrow: { ...text.label, letterSpacing: 1.5, color: colors.markRing, marginBottom: 2 },
   title: { fontFamily: fontFamily.displaySemiBold, fontSize: 17, lineHeight: 22, color: colors.ink },

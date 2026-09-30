@@ -2,6 +2,7 @@ import { useConversation } from '@elevenlabs/react-native';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
+  Image,
   KeyboardAvoidingView,
   Modal,
   PermissionsAndroid,
@@ -16,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AgentDraftCard } from '@/components/AgentDraftCard';
 import { AgentPlacePreview } from '@/components/AgentPlacePreview';
+import { PhotoViewer } from '@/components/PhotoViewer';
 import { PlaceDrawer } from '@/components/PlaceDrawer';
 import { KandooSymbol, type SymbolState } from '@/components/Symbol';
 import {
@@ -29,8 +31,9 @@ import {
   type Draft,
   type DraftField,
 } from '@/services/agent/agentDrafts';
+import { resetShown, subscribeShown, type Shown } from '@/services/agent/agentShown';
 import { kandooTools } from '@/services/agent/agentTools';
-import { fetchAgentToken, isProRequired, logFailure, userMessage } from '@/services/interpretationService';
+import { fetchAgentToken, isProRequired, logFailure, userMessage, type Photo } from '@/services/interpretationService';
 import { preferredName } from '@/services/profile';
 import { stopSpeaking } from '@/services/speech';
 import { supabase } from '@/services/supabase';
@@ -107,6 +110,11 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
       }),
     []
   );
+
+  // Photos Mr. Kandoo found (find_photos), shown in the conversation.
+  const [shown, setShown] = useState<Shown[]>([]);
+  const [openPhoto, setOpenPhoto] = useState<Photo | null>(null);
+  useEffect(() => subscribeShown(setShown), []);
 
   const conversation = useConversation({
     clientTools: kandooTools,
@@ -209,6 +217,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
     if (!visible) return;
     setLines([]);
     resetDrafts();
+    resetShown();
     void start();
     return () => {
       if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -340,9 +349,11 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
           : '';
 
   // One timeline: what was said and what Kandoo proposed, in order.
-  const timeline = [...lines, ...drafts.map((d) => ({ kind: 'draft' as const, draft: d, at: d.createdAt }))].sort(
-    (a, b) => a.at - b.at
-  );
+  const timeline = [
+    ...lines,
+    ...drafts.map((d) => ({ kind: 'draft' as const, draft: d, at: d.createdAt })),
+    ...shown.map((s) => ({ kind: 'photos' as const, shown: s, at: s.at })),
+  ].sort((a, b) => a.at - b.at);
 
   return (
     <Modal visible={visible} animationType="fade" onRequestClose={() => finish()}>
@@ -366,7 +377,25 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
           keyboardShouldPersistTaps="handled"
         >
           {timeline.map((item) =>
-            item.kind === 'draft' ? (
+            item.kind === 'photos' ? (
+              <ScrollView
+                key={item.shown.id}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.photoRow}
+              >
+                {item.shown.photos.map((photo) => (
+                  <Pressable
+                    key={photo.id}
+                    onPress={() => setOpenPhoto(photo)}
+                    accessibilityRole="imagebutton"
+                    accessibilityLabel={photo.description ?? 'Photo'}
+                  >
+                    <Image source={{ uri: photo.url ?? undefined }} style={styles.photo} />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : item.kind === 'draft' ? (
               <AgentDraftCard
                 key={item.draft.id}
                 draft={item.draft}
@@ -476,6 +505,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
         onNeedPro={() => endAdjust()}
       />
       </KeyboardAvoidingView>
+      <PhotoViewer photo={openPhoto} onClose={() => setOpenPhoto(null)} />
     </Modal>
   );
 }
@@ -497,6 +527,8 @@ const styles = StyleSheet.create({
   status: { ...text.label, letterSpacing: 1.5, color: colors.markRing },
   allowance: { ...text.caption, color: colors.inkMuted },
   lines: { gap: spacing.space4, paddingBottom: spacing.space5 },
+  photoRow: { gap: spacing.space2 },
+  photo: { width: 120, height: 120, borderRadius: radius.md, backgroundColor: colors.surfaceRaised },
   // Kandoo's words and answers are Fraunces (AGENTS §7).
   kandoo: { ...text.answer, color: colors.ink },
   you: { ...text.body, color: colors.inkMuted, textAlign: 'right' },

@@ -1,4 +1,4 @@
-import type { KandooInterpretation, KandooNote } from './interpretationSchema';
+import type { KandooInterpretation, KandooNote, PhotoInterpretation } from './interpretationSchema';
 
 /**
  * A hit from recall. Despite the name it may be a saved memory OR a scheduled
@@ -33,11 +33,28 @@ export type InterpretContext = {
  */
 export type EmbedTaskType = 'document' | 'query';
 
+/** A photo for the model: JPEG bytes as base64 (re-encoded on the phone). */
+export type PhotoInput = {
+  base64: string;
+  mimeType: 'image/jpeg';
+  /** What the user typed or said with it, if anything. */
+  caption: string | null;
+};
+
 export interface AIProvider {
   interpret(
     text: string,
     context: InterpretContext
   ): Promise<KandooInterpretation>;
+
+  /**
+   * Read a photo the user showed Kandoo and propose actions from it — the same
+   * contract as interpret(), plus a one-line description. Never recall.
+   */
+  interpretPhoto(
+    photo: PhotoInput,
+    context: InterpretContext
+  ): Promise<PhotoInterpretation>;
 
   generateRecallAnswer(
     question: string,

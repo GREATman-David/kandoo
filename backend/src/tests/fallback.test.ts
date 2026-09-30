@@ -22,6 +22,7 @@ function stub(overrides: Partial<AIProvider>): AIProvider {
   const fail = () => Promise.reject(new Error('503 high demand'));
   return {
     interpret: fail,
+    interpretPhoto: fail,
     writeNote: fail,
     generateRecallAnswer: fail,
     embed: fail,
@@ -31,6 +32,19 @@ function stub(overrides: Partial<AIProvider>): AIProvider {
 
 
 describe('FallbackAIProvider', () => {
+  it('fails a photo over to the next model too', async () => {
+    const photo = { ...OK, description: 'A flyer' };
+    const provider = new FallbackAIProvider([
+      { name: 'Primary', provider: stub({}) },
+      { name: 'Backup', provider: stub({ interpretPhoto: async () => photo }) },
+    ]);
+    const result = await provider.interpretPhoto(
+      { base64: '', mimeType: 'image/jpeg', caption: null },
+      { clientTime: '', timezone: 'UTC' }
+    );
+    assert.equal(result.description, 'A flyer');
+  });
+
   it('uses the primary when it answers', async () => {
     const provider = new FallbackAIProvider([
       { name: 'Primary', provider: stub({ interpret: async () => ({ ...OK, summary: 'primary' }) }) },
