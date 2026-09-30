@@ -62,18 +62,81 @@ async function load(): Promise<StyleSpecification | null> {
   return inflight;
 }
 
-/** The cream map style, or the plain style URL until (or unless) it loads. */
-export function useKandooMapStyle(): string | StyleSpecification {
-  const [style, setStyle] = useState<string | StyleSpecification>(cached ?? MAP_STYLE_URL);
+/**
+ * Satellite imagery (Esri World Imagery — free to use with attribution, no
+ * key). Where streets have no names and homes have no addresses, people find
+ * their compound, school or market by how it LOOKS. OpenStreetMap place and
+ * road names are laid over it, white on a dark halo so they read on any photo.
+ */
+const SATELLITE_TILES =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const SATELLITE_ATTRIBUTION = 'Imagery © Esri, Maxar, Earthstar Geographics';
+
+const satelliteSource = {
+  type: 'raster' as const,
+  tiles: [SATELLITE_TILES],
+  tileSize: 256,
+  // Beyond this the imagery is stretched rather than missing.
+  maxzoom: 19,
+  attribution: SATELLITE_ATTRIBUTION,
+};
+
+/** Imagery alone — used until (or unless) the label style loads. */
+const SATELLITE_PLAIN: StyleSpecification = {
+  version: 8,
+  sources: { satellite: satelliteSource },
+  layers: [{ id: 'satellite', type: 'raster', source: 'satellite' }],
+};
+
+let satelliteCached: StyleSpecification | null = null;
+
+function satelliteWithLabels(base: StyleSpecification): StyleSpecification {
+  const labels = base.layers
+    .filter((layer) => layer.type === 'symbol')
+    .map((layer) => {
+      const paint = { ...((layer as { paint?: Record<string, unknown> }).paint ?? {}) };
+      paint['text-color'] = colors.surface;
+      paint['text-halo-color'] = colors.ink;
+      paint['text-halo-width'] = 1.4;
+      return { ...layer, paint } as typeof layer;
+    });
+  return {
+    ...base,
+    sources: { ...base.sources, satellite: satelliteSource },
+    layers: [{ id: 'satellite', type: 'raster', source: 'satellite' }, ...labels],
+  };
+}
+
+export type MapLook = 'map' | 'satellite';
+
+/**
+ * The map style for a look: the cream map, or satellite with names. Each falls
+ * back to a plain version until its full style has loaded.
+ */
+export function useKandooMapStyle(look: MapLook = 'map'): string | StyleSpecification {
+  const current = () =>
+    look === 'satellite' ? (satelliteCached ?? SATELLITE_PLAIN) : (cached ?? MAP_STYLE_URL);
+  const [style, setStyle] = useState<string | StyleSpecification>(current);
+
   useEffect(() => {
-    if (cached) return;
+    setStyle(current());
+    if (look === 'map' ? cached : satelliteCached) return;
     let active = true;
-    void load().then((s) => {
-      if (active && s) setStyle(s);
+    void load().then((base) => {
+      if (!base) return;
+      if (look === 'satellite') {
+        // Built from the original label layers' positions, recoloured for imagery.
+        satelliteCached ??= satelliteWithLabels(base);
+        if (active) setStyle(satelliteCached);
+      } else if (active) {
+        setStyle(base);
+      }
     });
     return () => {
       active = false;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [look]);
+
   return style;
 }

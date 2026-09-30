@@ -14,8 +14,13 @@
 export type LatLng = { lat: number; lng: number };
 export type Circle = { center: LatLng; radiusM: number };
 
-/** Below this, GPS noise is bigger than the place: it is treated as a circle. */
-export const MIN_AREA_RADIUS_M = 60;
+/**
+ * A trace smaller than this was really a tap: it becomes a plain circle. Any
+ * shape above it — a house, a classroom block — is kept exactly as drawn; only
+ * the circle the phone WATCHES is floored at MIN_RADIUS_M, because GPS can't
+ * reliably tell arrival at anything smaller.
+ */
+export const MIN_AREA_RADIUS_M = 5;
 /** The smallest circle worth monitoring — Android is unreliable under ~100 m. */
 export const MIN_RADIUS_M = 100;
 /** A place, not a city. Bigger areas are refused rather than silently shrunk. */
@@ -209,7 +214,7 @@ export function placeGeometry(input: {
       return { error: 'That area is too big. Draw around one place.' };
     }
     if (circle.radiusM < MIN_AREA_RADIUS_M) {
-      // Too small to tell apart from GPS noise: keep its centre as a circle.
+      // A tap that wobbled: a plain circle at that spot.
       return { center: circle.center, radiusM: MIN_RADIUS_M, area: null };
     }
     return { center: circle.center, radiusM: Math.max(circle.radiusM, MIN_RADIUS_M), area };

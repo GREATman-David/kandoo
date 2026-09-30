@@ -183,6 +183,13 @@ export default function PlacesScreen() {
         place={drawing?.place ?? null}
         suggestedName={drawing?.suggestedName ?? null}
         knownNames={known.map((p) => p.name)}
+        otherPlaces={drawn.map((p) => ({
+          id: p.id,
+          name: p.name,
+          center: p.center!,
+          radiusM: p.radiusM ?? 100,
+          area: p.area,
+        }))}
         onClose={() => setDrawing(null)}
         onNeedPro={() => {
           setDrawing(null);

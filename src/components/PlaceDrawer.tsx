@@ -26,7 +26,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useKandooMapStyle } from '@/features/places/mapStyle';
+import { useKandooMapStyle, type MapLook } from '@/features/places/mapStyle';
 import { useKeyboardLift } from '@/hooks/useKeyboardLift';
 import { placeBounds, placeFeature } from '@/features/places/placeShapes';
 import { searchPlaces, type SearchResult } from '@/features/places/searchPlaces';
@@ -43,12 +43,14 @@ import {
 import { requestMapPermission } from '@/services/places/placePermissions';
 import { requestPlaceResync } from '@/services/places/placeStore';
 import { colors, fontFamily, radius, spacing, text, withOpacity } from '@/theme/theme';
-import { placeGeometry, type LatLng, type PlaceGeometry } from '@/utils/geo';
+import { MIN_RADIUS_M, placeGeometry, type LatLng, type PlaceGeometry } from '@/utils/geo';
 
 /**
  * Drawing a place: find it, freeze the map, trace around it with a finger,
  * name it. Any shape — the phone covers it with circles to watch (geo.ts).
- * A tap instead of a trace drops a plain circle there.
+ * A tap instead of a trace drops a plain circle there. "Save where I am"
+ * skips the map entirely: the most reliable way to capture a place that has
+ * no address — be there once.
  *
  *   browse → trace → review → name → saved
  */
@@ -57,7 +59,28 @@ const ICONS = {
   back: require('@/assets/images/icons/chevron-left.png'),
   search: require('@/assets/images/icons/search.png'),
   clear: require('@/assets/images/icons/x.png'),
+  locate: require('@/assets/images/icons/locate.png'),
+  plus: require('@/assets/images/icons/plus.png'),
+  minus: require('@/assets/images/icons/minus.png'),
 };
+
+/** Close enough to draw a single building. */
+const MAX_ZOOM = 20;
+/** How long to wait for a GPS fix before saying so. */
+const LOCATE_TIMEOUT_MS = 15_000;
+
+/** A fresh fix if one comes in time, else the last known one, else null. */
+async function currentPosition(): Promise<Location.LocationObject | null> {
+  const fresh = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), LOCATE_TIMEOUT_MS));
+  try {
+    const fix = await Promise.race([fresh, timeout]);
+    if (fix) return fix;
+  } catch (error) {
+    console.warn('Current position unavailable; trying the last known one:', error);
+  }
+  return Location.getLastKnownPositionAsync().catch(() => null);
+}
 
 /** A trace shorter than this (px) was a tap: drop a circle there. */
 const TAP_PX = 24;
@@ -83,6 +106,8 @@ export type PlaceDrawerProps = {
   suggestedName?: string | null;
   /** Places Kandoo has heard of but that aren't drawn yet: offered as names. */
   knownNames?: string[];
+  /** The user's other drawn places, shown faintly so one can be drawn inside another. */
+  otherPlaces?: (PlaceGeometry & { id: string; name: string })[];
 };
 
 export function PlaceDrawer({
@@ -93,9 +118,11 @@ export function PlaceDrawer({
   place,
   suggestedName,
   knownNames = [],
+  otherPlaces = [],
 }: PlaceDrawerProps) {
   const insets = useSafeAreaInsets();
-  const mapStyle = useKandooMapStyle();
+  const [look, setLook] = useState<MapLook>('map');
+  const mapStyle = useKandooMapStyle(look);
   // Edge-to-edge Android doesn't resize for the keyboard: lift the name card.
   const keyboard = useKeyboardLift({ inModal: true });
   const mapRef = useRef<MapRef>(null);
@@ -106,6 +133,7 @@ export function PlaceDrawer({
   const [drawn, setDrawn] = useState<PlaceGeometry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [here, setHere] = useState<LatLng | null>(null);
+  const [locating, setLocating] = useState(false);
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -134,8 +162,8 @@ export function PlaceDrawer({
       // While-in-use is enough to show the dot and centre on it; declining
       // still leaves search.
       if (!(await requestMapPermission())) return;
-      const last = await Location.getLastKnownPositionAsync().catch(() => null);
-      const position = last ?? (await Location.getCurrentPositionAsync().catch(() => null));
+      const position =
+        (await Location.getLastKnownPositionAsync().catch(() => null)) ?? (await currentPosition());
       if (!active || !position) return;
       const at = { lat: position.coords.latitude, lng: position.coords.longitude };
       setHere(at);
@@ -161,7 +189,13 @@ export function PlaceDrawer({
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const found = await searchPlaces(q, here);
+        // Short Plus Codes and search bias need a point: the user, else the map.
+        let near = here;
+        if (!near) {
+          const center = await mapRef.current?.getCenter().catch(() => null);
+          if (center) near = { lat: center[1], lng: center[0] };
+        }
+        const found = await searchPlaces(q, near);
         if (active) setResults(found);
       } catch (caught) {
         logFailure('Place search failed:', caught);
@@ -180,7 +214,8 @@ export function PlaceDrawer({
     Keyboard.dismiss();
     setResults([]);
     setQuery(result.name);
-    if (!name.trim() && !place) setName(result.name);
+    // A landmark's name is a fair suggestion; a Plus Code or coordinates is not.
+    if (!name.trim() && !place && result.named) setName(result.name);
     if (result.bounds) {
       cameraRef.current?.fitBounds(result.bounds, {
         padding: { top: 140, bottom: 200, left: 40, right: 40 },
@@ -191,8 +226,51 @@ export function PlaceDrawer({
     }
   };
 
-  const goHere = () => {
-    if (here) cameraRef.current?.flyTo({ center: [here.lng, here.lat], zoom: 17, duration: 700 });
+  /**
+   * Find the user now: asks for location if needed, waits for a real fix, and
+   * says so plainly if there isn't one. Resolves to where they are, or null.
+   */
+  const locate = async (): Promise<LatLng | null> => {
+    if (locating) return null;
+    setLocating(true);
+    setError(null);
+    try {
+      if (!(await requestMapPermission())) {
+        setError('Kandoo needs your location for this. You can still search or draw.');
+        return null;
+      }
+      const position = await currentPosition();
+      if (!position) {
+        setError('Couldn’t find where you are. Check that location is on, or search instead.');
+        return null;
+      }
+      const at = { lat: position.coords.latitude, lng: position.coords.longitude };
+      setHere(at);
+      cameraRef.current?.flyTo({ center: [at.lng, at.lat], zoom: 18, duration: 700 });
+      return at;
+    } catch (caught) {
+      logFailure('Locating the user failed:', caught);
+      setError('Couldn’t find where you are. Try again, or search instead.');
+      return null;
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  /** "I'm here now": a circle where the user stands, straight to naming. */
+  const saveWhereIAm = async () => {
+    const at = await locate();
+    if (!at) return;
+    const geometry = placeGeometry({ center: at, radiusM: MIN_RADIUS_M });
+    if ('error' in geometry) return setError(geometry.error);
+    setDrawn(geometry);
+    setStep('review');
+  };
+
+  const zoom = async (by: number) => {
+    const current = await mapRef.current?.getZoom().catch(() => null);
+    if (current == null) return;
+    cameraRef.current?.zoomTo(Math.max(1, Math.min(MAX_ZOOM, current + by)), { duration: 250 });
   };
 
   // ---- tracing --------------------------------------------------------------
@@ -303,6 +381,12 @@ export function PlaceDrawer({
   // ---- render ---------------------------------------------------------------
 
   const frozen = step !== 'browse';
+  const others: GeoJSON.FeatureCollection = {
+    type: 'FeatureCollection',
+    features: otherPlaces
+      .filter((p) => p.id !== place?.id)
+      .map((p) => ({ ...placeFeature(p), properties: { name: p.name } })),
+  };
   const shown = drawn ?? (step === 'browse' ? existing : null);
   const initialBounds = existing ? placeBounds(existing) : null;
   const unnamedSuggestions = knownNames.filter(
@@ -330,6 +414,7 @@ export function PlaceDrawer({
         >
           <Camera
             ref={cameraRef}
+            maxZoom={MAX_ZOOM}
             initialViewState={
               initialBounds
                 ? { bounds: initialBounds, padding: { top: 160, bottom: 220, left: 48, right: 48 } }
@@ -337,17 +422,28 @@ export function PlaceDrawer({
             }
           />
           <UserLocation />
+          {others.features.length > 0 ? (
+            // The user's other places, faint, so one can be drawn inside another.
+            <GeoJSONSource id="kandoo-other-places" data={others}>
+              <Layer id="kandoo-other-fill" type="fill" style={{ fillColor: colors.markRing, fillOpacity: 0.06 }} />
+              <Layer
+                id="kandoo-other-edge"
+                type="line"
+                style={{ lineColor: look === 'satellite' ? colors.surface : colors.inkMuted, lineWidth: 1.5, lineDasharray: [2, 2] }}
+              />
+            </GeoJSONSource>
+          ) : null}
           {shown ? (
             <GeoJSONSource id="kandoo-place" data={placeFeature(shown)}>
               <Layer
                 id="kandoo-place-fill"
                 type="fill"
-                style={{ fillColor: colors.settledFill, fillOpacity: 0.16 }}
+                style={{ fillColor: look === 'satellite' ? colors.markCore : colors.settledFill, fillOpacity: look === 'satellite' ? 0.28 : 0.16 }}
               />
               <Layer
                 id="kandoo-place-edge"
                 type="line"
-                style={{ lineColor: colors.settledFill, lineWidth: 2.5 }}
+                style={{ lineColor: look === 'satellite' ? colors.markCore : colors.settledFill, lineWidth: 2.5 }}
               />
             </GeoJSONSource>
           ) : null}
@@ -399,7 +495,9 @@ export function PlaceDrawer({
                   {step === 'trace'
                     ? 'Trace around the place with your finger. Tap for a small circle.'
                     : step === 'review'
-                      ? 'Kandoo will remind you when you’re inside this area.'
+                      ? drawn?.area
+                        ? 'Kandoo will remind you when you’re inside this area.'
+                        : 'Kandoo will remind you when you’re around this spot.'
                       : 'Name this place.'}
                 </Text>
               </View>
@@ -422,6 +520,36 @@ export function PlaceDrawer({
           ) : null}
         </View>
 
+        {/* Right: map or satellite, zoom, and (browsing) find me. */}
+        {(step === 'browse' && results.length === 0 && !searching) || step === 'trace' ? (
+          <View style={[styles.controls, { top: insets.top + spacing.space2 + 44 + spacing.space3 }]} pointerEvents="box-none">
+            <Pressable
+              style={styles.lookButton}
+              onPress={() => setLook(look === 'map' ? 'satellite' : 'map')}
+              accessibilityRole="button"
+              accessibilityLabel={look === 'map' ? 'Show satellite view' : 'Show map view'}
+            >
+              <Text style={styles.lookText}>{look === 'map' ? 'Satellite' : 'Map'}</Text>
+            </Pressable>
+            <Pressable style={styles.roundButton} onPress={() => void zoom(1)} accessibilityLabel="Zoom in">
+              <Image source={ICONS.plus} style={styles.icon} />
+            </Pressable>
+            <Pressable style={styles.roundButton} onPress={() => void zoom(-1)} accessibilityLabel="Zoom out">
+              <Image source={ICONS.minus} style={styles.icon} />
+            </Pressable>
+            {step === 'browse' ? (
+              <Pressable
+                style={[styles.roundButton, locating && styles.busy]}
+                onPress={() => void locate()}
+                disabled={locating}
+                accessibilityLabel="Show where I am"
+              >
+                <Image source={ICONS.locate} style={[styles.icon, here ? styles.iconLive : null]} />
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
         {/* Bottom: the one action for this step. */}
         <View
           style={[
@@ -434,9 +562,15 @@ export function PlaceDrawer({
 
           {step === 'browse' ? (
             <View style={styles.row}>
-              {here ? (
-                <Pressable style={styles.secondary} onPress={goHere} accessibilityRole="button">
-                  <Text style={styles.secondaryText}>Where I am</Text>
+              {!place ? (
+                <Pressable
+                  style={[styles.secondary, locating && styles.busy]}
+                  onPress={() => void saveWhereIAm()}
+                  disabled={locating}
+                  accessibilityRole="button"
+                  accessibilityHint="Saves the spot you are standing on"
+                >
+                  <Text style={styles.secondaryText}>{locating ? 'Finding you…' : 'I’m here'}</Text>
                 </Pressable>
               ) : null}
               <Pressable style={[styles.cta, styles.flex]} onPress={() => setStep('trace')} accessibilityRole="button">
@@ -521,6 +655,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   icon: { width: 20, height: 20, tintColor: colors.ink },
+  iconLive: { tintColor: colors.markRing },
+  busy: { opacity: 0.6 },
+  controls: { position: 'absolute', right: spacing.space4, gap: spacing.space2, alignItems: 'flex-end' },
+  lookButton: {
+    height: 36,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: spacing.space3,
+    justifyContent: 'center',
+  },
+  lookText: { ...text.caption, fontFamily: fontFamily.textSemiBold, color: colors.ink },
   searchBox: {
     flex: 1,
     height: 44,

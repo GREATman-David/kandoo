@@ -2,11 +2,16 @@ import * as Location from 'expo-location';
 
 import type { LatLng } from '@/utils/geo';
 
+import { parseLocationQuery } from './locationCodes';
+
 /**
  * Finding a place to draw. Photon (OpenStreetMap's search, run by Komoot) knows
  * landmarks by name — "University of Ghana", "Korle Bu" — and is free with no
  * key. Results are biased towards where the user is. If Photon can't be
  * reached, Android's own geocoder still resolves a plain address.
+ *
+ * Plus Codes and coordinates are resolved on the phone (locationCodes.ts) —
+ * they work where there is no street address at all.
  *
  * Only the typed search text (and a rough position, for bias) leaves the phone.
  */
@@ -19,6 +24,8 @@ export type SearchResult = {
   center: LatLng;
   /** [west, south, east, north] when the result is an area (a campus, a park). */
   bounds: [number, number, number, number] | null;
+  /** A real place name — worth suggesting as the place's name. */
+  named: boolean;
 };
 
 const PHOTON_URL = 'https://photon.komoot.io/api/';
@@ -75,6 +82,7 @@ async function photon(query: string, near: LatLng | null): Promise<SearchResult[
         detail: describe(p),
         center: { lat, lng },
         bounds: e ? [e[0], e[3], e[2], e[1]] : null,
+        named: !!p.name,
       });
     }
     return results.slice(0, 6);
@@ -91,6 +99,7 @@ async function androidGeocoder(query: string): Promise<SearchResult[]> {
     detail: '',
     center: { lat: h.latitude, lng: h.longitude },
     bounds: null,
+    named: false,
   }));
 }
 
@@ -98,6 +107,13 @@ async function androidGeocoder(query: string): Promise<SearchResult[]> {
 export async function searchPlaces(query: string, near: LatLng | null): Promise<SearchResult[]> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
+
+  // A Plus Code or coordinates: no network needed, and exact.
+  const exact = parseLocationQuery(trimmed, near);
+  if (exact) {
+    return [{ id: `exact-${exact.label}`, name: exact.label, detail: 'Exact location', center: exact.center, bounds: null, named: false }];
+  }
+
   try {
     return await photon(trimmed, near);
   } catch (error) {

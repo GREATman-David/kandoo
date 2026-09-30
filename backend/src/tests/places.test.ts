@@ -124,13 +124,31 @@ describe('place geometry', () => {
     assert.ok(!('error' in drawn));
     assert.ok(drawn.area && drawn.area.length === 6);
 
-    // A tiny scribble is smaller than GPS noise: it becomes a minimum circle.
+    // A wobbling tap (a few metres) becomes a plain circle.
     const scribble = placeGeometry({
-      area: [offset(0, 0), offset(0, 10), offset(10, 10)],
+      area: [offset(0, 0), offset(0, 3), offset(3, 3)],
     });
     assert.ok(!('error' in scribble));
     assert.equal(scribble.area, null);
     assert.equal(scribble.radiusM, MIN_RADIUS_M);
+
+    // A small building (about 30 m across) is kept exactly as drawn, while the
+    // circle the phone watches is floored at what GPS can detect.
+    const building = placeGeometry({
+      area: [offset(0, 0), offset(0, 30), offset(20, 30), offset(20, 0)],
+    });
+    assert.ok(!('error' in building));
+    assert.equal(building.area?.length, 4);
+    assert.equal(building.radiusM, MIN_RADIUS_M);
+    assert.equal(coverCircles(building).length, 1);
+
+    // A place drawn inside another is its own place, watched on its own.
+    const campus = placeGeometry({ area: L_SHAPE.map((p) => [p.lat, p.lng]) });
+    const library = placeGeometry({
+      area: [offset(20, 20), offset(20, 60), offset(60, 60), offset(60, 20)],
+    });
+    assert.ok(!('error' in campus) && !('error' in library));
+    assert.ok(library.area && library.area.every((p) => pointInArea(p, campus.area!)));
 
     // A plain circle is floored at the minimum Android watches reliably.
     const small = placeGeometry({ center: ORIGIN, radiusM: 20 });

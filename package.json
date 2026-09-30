@@ -57,7 +57,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "tsx --test src/services/places/placeRules.test.ts"
+    "test": "tsx --test src/services/places/placeRules.test.ts src/features/places/locationCodes.test.ts"
   },
   "private": true,
   "expo": {
