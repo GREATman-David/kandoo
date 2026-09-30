@@ -341,6 +341,22 @@ function KandooHome() {
       <View
         style={[styles.symbol, keyboard.keyboardOpen && styles.symbolTyping]}
       >
+        {/* Kandoo Agent (Pro): a spoken conversation that can act across the
+            app. Its door rests on the right edge beside the mark — a spot no
+            card or list ever reaches. Hidden while typing. */}
+        {keyboard.keyboardOpen ? null : (
+          <View style={styles.agentDoor} pointerEvents="box-none">
+            <AgentButton
+              active={agentOpen}
+              onPress={() => {
+                stopSpeaking();
+                // Pro gets a five-minute taste each month; Elite the full allowance.
+                if (entitlement.isPro) setAgentOpen(true);
+                else openPaywallFor('elite');
+              }}
+            />
+          </View>
+        )}
         <Pressable
           onPress={
             home.state === 'idle'
@@ -492,22 +508,6 @@ function KandooHome() {
         visible={askName}
         welcome={entitlement.isElite ? 'Kandoo Elite' : 'Kandoo Pro'}
         onClose={() => setAskName(false)} />
-
-      {/* Kandoo Agent (Pro): a spoken conversation that can act across the app.
-          Its door rests on the right edge of Home, clear of the typing bar. */}
-      {keyboard.keyboardOpen ? null : (
-        <View style={styles.agentDoor} pointerEvents="box-none">
-          <AgentButton
-            active={agentOpen}
-            onPress={() => {
-              stopSpeaking();
-              // Pro gets a five-minute taste each month; Elite the full allowance.
-              if (entitlement.isPro) setAgentOpen(true);
-              else openPaywallFor('elite');
-            }}
-          />
-        </View>
-      )}
 
       <KandooAgent
         visible={agentOpen}
@@ -1330,7 +1330,7 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   topActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.space2 },
-  agentDoor: { position: 'absolute', right: spacing.space4, top: '44%' },
+  agentDoor: { position: 'absolute', right: spacing.space4, top: 0, bottom: 0, justifyContent: 'center' },
   answerText: {
     ...text.answer,
     color: colors.ink,
