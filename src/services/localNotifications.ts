@@ -34,6 +34,14 @@ const CHANNEL_DEFAULT = 'kandoo-reminders';
  */
 const SCHEDULE_VERSION = 2;
 const CHANNEL_INSISTENT = 'kandoo-alarms';
+/**
+ * Kandoo Moments get their own channel: quiet, hidden on a secure lock screen
+ * (they quote the user's own memories), and something a user can mute in
+ * Android settings without silencing their reminders.
+ */
+const CHANNEL_MOMENTS = 'kandoo-moments';
+/** Marks notifications the place engine owns, so the launch sweep leaves them. */
+const PLACE_FLAG = 'kandooPlace';
 
 let channelsReady = false;
 
@@ -78,6 +86,14 @@ async function ensureChannels(): Promise<void> {
     vibrationPattern: [0, 500, 250, 500],
     enableVibrate: true,
     bypassDnd: true,
+  });
+
+  await Notifications.setNotificationChannelAsync(CHANNEL_MOMENTS, {
+    name: 'Kandoo Moments',
+    description: 'What happened at a place, when you are back there after a while.',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    enableVibrate: false,
   });
 
   channelsReady = true;
@@ -137,38 +153,59 @@ function reminderContent(reminder: ReminderLike, body: string, repeating: boolea
 }
 
 /**
- * Fire a place reminder NOW — called from the geofence task the moment the
- * phone decides the user arrived (or left). Same content as a timed reminder,
- * so it wakes the phone full screen the same way. Never scheduled, so the
- * launch sweep in reconcileReminders has nothing to cancel.
+ * A place reminder, shown `afterSeconds` from now (0 = at once). Called from
+ * the geofence task. The delay is the dwell: arriving schedules it, and leaving
+ * again before it shows cancels it — so driving past school doesn't fire
+ * "when I get to school". Same content as a timed reminder, so it wakes the
+ * phone full screen the same way. Returns the OS id, to cancel it by.
  */
-export async function presentReminderNow(reminder: ReminderLike, body: string): Promise<void> {
+export async function schedulePlaceReminder(
+  reminder: ReminderLike,
+  body: string,
+  afterSeconds: number
+): Promise<string> {
   await ensureChannels();
-  await Notifications.scheduleNotificationAsync({
-    content: reminderContent(reminder, body, false),
-    trigger: { channelId: reminder.insistent ? CHANNEL_INSISTENT : CHANNEL_DEFAULT },
+  const content = reminderContent(reminder, body, false);
+  const channelId = reminder.insistent ? CHANNEL_INSISTENT : CHANNEL_DEFAULT;
+  return Notifications.scheduleNotificationAsync({
+    content: { ...content, data: { ...content.data, [PLACE_FLAG]: true } },
+    trigger:
+      afterSeconds > 0
+        ? { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: afterSeconds, channelId }
+        : { channelId },
   });
 }
 
 /**
  * A Kandoo Moment: not a reminder, a memory handed back where it happened.
- * No full-screen alert — it is a quiet banner. Tapping opens the place.
+ * Quiet, on its own channel; tapping opens the place. Also dwell-delayed.
  */
-export async function presentMomentNow(moment: {
-  placeId: string;
-  title: string;
-  body: string;
-}): Promise<void> {
+export async function scheduleMoment(
+  moment: { placeId: string; title: string; body: string },
+  afterSeconds: number
+): Promise<string> {
   await ensureChannels();
-  await Notifications.scheduleNotificationAsync({
+  return Notifications.scheduleNotificationAsync({
     content: {
       title: moment.title,
       body: moment.body,
       sound: false,
-      data: { kandooMoment: true, placeId: moment.placeId },
+      data: { kandooMoment: true, placeId: moment.placeId, [PLACE_FLAG]: true },
     },
-    trigger: { channelId: CHANNEL_DEFAULT },
+    trigger:
+      afterSeconds > 0
+        ? {
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: afterSeconds,
+            channelId: CHANNEL_MOMENTS,
+          }
+        : { channelId: CHANNEL_MOMENTS },
   });
+}
+
+/** Cancel a place notification that hasn't shown yet. Safe if it already has. */
+export async function cancelPlaceNotice(notificationId: string): Promise<void> {
+  await Notifications.cancelScheduledNotificationAsync(notificationId);
 }
 
 /**
@@ -402,6 +439,9 @@ export async function reconcileReminders(
   const known = new Set(Object.values(await getAllTriggers()).flatMap(entryIds));
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   for (const request of scheduled) {
+    // Place notices (dwell-delayed) and the monthly recap are owned elsewhere.
+    const data = request.content.data;
+    if (data?.[PLACE_FLAG] === true || data?.kandooRecap === true) continue;
     if (!known.has(request.identifier)) {
       try {
         await Notifications.cancelScheduledNotificationAsync(request.identifier);

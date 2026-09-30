@@ -13,8 +13,10 @@ import {
   deletePlace,
   getPlace,
   listPlaces,
+  mergePlaceInto,
   renamePlace,
   setPlaceArea,
+  setPlaceStarred,
 } from '../modules/places/placeService';
 
 /**
@@ -101,16 +103,31 @@ router.post('/places', authenticateRequest, async (req, res) => {
   }
 });
 
-/** Rename and/or redraw. Any geometry field present means a redraw. */
+/**
+ * Rename, redraw and/or star. Any geometry field present means a redraw.
+ * Starring alone is free — it organises, it doesn't make the phone watch.
+ */
 router.patch('/places/:id', authenticateRequest, async (req, res) => {
   const userId = (req as AuthenticatedRequest).user.id;
   const placeId = String(req.params.id);
   const name = typeof req.body?.name === 'string' ? req.body.name : undefined;
+  const starred = typeof req.body?.starred === 'boolean' ? req.body.starred : undefined;
   const redraw =
     req.body?.area !== undefined || req.body?.center !== undefined;
 
-  if (name === undefined && !redraw) {
+  if (name === undefined && !redraw && starred === undefined) {
     return res.status(400).json({ code: 'invalid', error: 'Nothing to change.' });
+  }
+
+  if (name === undefined && !redraw) {
+    try {
+      await setPlaceStarred(userId, placeId, starred!);
+      const place = await getPlace(userId, placeId);
+      if (!place) return res.status(404).json({ error: 'Place not found.' });
+      return res.json({ success: true, place });
+    } catch (error) {
+      return placeError(res, error, 'Star place failed:', 'Could not update that place.');
+    }
   }
   if (name !== undefined && name.trim().length > 60) {
     return res.status(400).json({ code: 'invalid', error: 'That name is a little long.' });
@@ -123,11 +140,29 @@ router.patch('/places/:id', authenticateRequest, async (req, res) => {
   try {
     if (name !== undefined) await renamePlace(userId, placeId, name);
     if (geometry) await setPlaceArea(userId, placeId, geometry);
+    if (starred !== undefined) await setPlaceStarred(userId, placeId, starred);
     const place = await getPlace(userId, placeId);
     if (!place) return res.status(404).json({ error: 'Place not found.' });
     return res.json({ success: true, place });
   } catch (error) {
     return placeError(res, error, 'Update place failed:', 'Could not update that place.');
+  }
+});
+
+/**
+ * "This is the same place as …": fold :id into `intoId`, keeping :id's name as
+ * another way of saying it. Free — it only organises what the user has.
+ */
+router.post('/places/:id/merge', authenticateRequest, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).user.id;
+  const intoId = typeof req.body?.intoId === 'string' ? req.body.intoId : '';
+  if (!intoId) return res.status(400).json({ code: 'invalid', error: 'Choose a place.' });
+  try {
+    await mergePlaceInto(userId, String(req.params.id), intoId);
+    const place = await getPlace(userId, intoId);
+    return res.json({ success: true, place });
+  } catch (error) {
+    return placeError(res, error, 'Merge place failed:', 'Could not merge those places.');
   }
 });
 

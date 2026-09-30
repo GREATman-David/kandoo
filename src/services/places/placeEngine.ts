@@ -1,16 +1,26 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 
-import { presentMomentNow, presentReminderNow } from '@/services/localNotifications';
+import {
+  cancelPlaceNotice,
+  scheduleMoment,
+  schedulePlaceReminder,
+} from '@/services/localNotifications';
 
-import { applyGeofenceEvent, type PlaceEvent } from './placeRules';
-import { GEOFENCE_TASK, clearPlaceState, updatePlaceState } from './placeStore';
+import {
+  MOMENT_DWELL_S,
+  REMINDER_DWELL_S,
+  applyGeofenceEvent,
+  localDay,
+  type PlaceEvent,
+} from './placeRules';
+import { GEOFENCE_TASK, clearPlaceState, updatePlaceState, type PendingNotice } from './placeStore';
 
 /**
  * What happens when the phone crosses a place's edge. Runs inside the geofence
  * task — headless, often with the app closed and no connection — so it reads
  * only the on-device state and never calls the server. The decisions are in
- * placeRules (pure, tested); this file only shows what they decide.
+ * placeRules (pure, tested); this file only carries them out.
  */
 
 export async function handleGeofenceEvent(event: PlaceEvent, regionId: string): Promise<void> {
@@ -19,29 +29,57 @@ export async function handleGeofenceEvent(event: PlaceEvent, regionId: string): 
     const outcome = applyGeofenceEvent(state, event, regionId, now);
     if (outcome.kind === 'ignored') return outcome.why;
 
-    const body = `${outcome.kind === 'arrive' ? 'At' : 'Leaving'} ${outcome.place.name}`;
-    let fired = 0;
+    const place = outcome.place;
+
+    if (outcome.kind === 'leave') {
+      // A drive-by: what arrival scheduled hasn't shown yet — take it back.
+      for (const notice of outcome.cancel) {
+        try {
+          await cancelPlaceNotice(notice.notificationId);
+        } catch (error) {
+          console.warn('Cancelling a place notice failed:', error);
+        }
+      }
+      let fired = 0;
+      for (const reminder of outcome.reminders) {
+        try {
+          await schedulePlaceReminder(reminder, `Leaving ${place.name}`, 0);
+          state.delivered[reminder.id] = now;
+          fired++;
+        } catch (error) {
+          // Not marked delivered, so the next departure tries again.
+          console.error('Place reminder notification failed:', error);
+        }
+      }
+      return `leave, ${fired} reminder(s), ${outcome.cancel.length} cancelled`;
+    }
+
+    // Arrive: schedule after the dwell; leaving first cancels (placeRules).
+    const pending: PendingNotice[] = [];
     for (const reminder of outcome.reminders) {
       try {
-        await presentReminderNow(reminder, body);
+        const id = await schedulePlaceReminder(reminder, `At ${place.name}`, REMINDER_DWELL_S);
         state.delivered[reminder.id] = now;
-        fired++;
+        pending.push({ notificationId: id, fireAt: now + REMINDER_DWELL_S * 1000, reminderId: reminder.id, moment: null });
       } catch (error) {
-        // Not marked delivered, so the next arrival tries again.
         console.error('Place reminder notification failed:', error);
       }
     }
-
     if (outcome.moment) {
       try {
-        await presentMomentNow(outcome.moment);
-        state.lastMoment[outcome.moment.placeId] = now;
+        const id = await scheduleMoment(outcome.moment, MOMENT_DWELL_S);
+        const prev = state.lastMoment[place.id] ?? null;
+        state.lastMoment[place.id] = now;
+        const day = localDay(now);
+        state.momentDay = { day, count: (state.momentDay.day === day ? state.momentDay.count : 0) + 1 };
+        pending.push({ notificationId: id, fireAt: now + MOMENT_DWELL_S * 1000, reminderId: null, moment: { prevLastMoment: prev } });
       } catch (error) {
         console.error('Kandoo Moment notification failed:', error);
       }
     }
+    state.pending[place.id] = pending;
 
-    return `${outcome.kind}, ${fired} reminder(s)${outcome.moment ? ', moment' : ''}`;
+    return `arrive, ${outcome.reminders.length} reminder(s)${outcome.moment ? ', moment' : ''}`;
   });
 
   // Ids and counts only — never place names or memory content (AGENTS §10).

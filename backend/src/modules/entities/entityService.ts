@@ -13,8 +13,32 @@ export type Entity = {
   radius_m: number | null;
   /** Places only: the traced shape, [[lat, lng], ...] (migration 007). */
   area?: [number, number][] | null;
+  /** Places only: this name is another way of saying that place (migration 008). */
+  alias_of?: string | null;
+  starred?: boolean;
   created_at: string;
 };
+
+/**
+ * A place name the user has said means another place ("school" → "UG Campus")
+ * resolves to that place, so what they say lands where it can be watched. One
+ * hop only: merging always points an alias at a place that is not one itself.
+ */
+async function followAlias(entity: Entity): Promise<Entity> {
+  if (!entity.alias_of) return entity;
+  const target = await supabase
+    .from('entities')
+    .select('*')
+    .eq('user_id', entity.user_id)
+    .eq('id', entity.alias_of)
+    .maybeSingle();
+  if (target.error) {
+    // Still a valid place; only the alias hop is lost for this one save.
+    console.error('Place alias lookup failed:', target.error);
+    return entity;
+  }
+  return (target.data as Entity | null) ?? entity;
+}
 
 /**
  * Resolve a spoken name to a stable entity row.
@@ -42,7 +66,7 @@ export async function resolveEntity(
     .eq('normalized', normalized)
     .maybeSingle();
 
-  if (existing.data) return existing.data as Entity;
+  if (existing.data) return followAlias(existing.data as Entity);
 
   const inserted = await supabase
     .from('entities')

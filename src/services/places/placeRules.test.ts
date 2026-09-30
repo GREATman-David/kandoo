@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { MOMENT_AFTER_MS, MOMENT_COOLDOWN_MS, applyGeofenceEvent } from './placeRules';
+import {
+  MAX_MOMENTS_PER_DAY,
+  MOMENT_AFTER_MS,
+  MOMENT_COOLDOWN_MS,
+  STARRED_MOMENT_AFTER_MS,
+  applyGeofenceEvent,
+  localDay,
+  placesInside,
+} from './placeRules';
 import type { ArmedReminder, PlaceState, WatchedPlace } from './placeStore';
 
 /**
@@ -41,6 +49,13 @@ function state(places: WatchedPlace[], reminders: ArmedReminder[] = []): PlaceSt
     delivered: {},
     lastArrived: {},
     lastMoment: {},
+    registeredAt: 0,
+    servicesWereOff: false,
+    pending: {},
+    visits: {},
+    names: {},
+    momentDay: { day: '', count: 0 },
+    lastSync: null,
   };
 }
 
@@ -147,3 +162,78 @@ describe('Kandoo Moments', () => {
     assert.equal(out.kind === 'arrive' && out.moment, null);
   });
 });
+
+describe('passing through is not arriving', () => {
+  it('cancels what arrival scheduled when you leave inside the dwell (a drive-by)', () => {
+    const s = state([place('school', 'School')], [reminder('r1', 'school')]);
+    applyGeofenceEvent(s, 'enter', 'school:0', NOW);
+    // The engine marks it delivered and records the pending notice.
+    s.delivered.r1 = NOW;
+    s.pending.school = [{ notificationId: 'n1', fireAt: NOW + 60_000, reminderId: 'r1', moment: null }];
+
+    const left = applyGeofenceEvent(s, 'exit', 'school:0', NOW + 30_000);
+    assert.equal(left.kind, 'leave');
+    assert.deepEqual(left.kind === 'leave' && left.cancel.map((c) => c.notificationId), ['n1']);
+    // Not delivered after all: it will fire on the next real arrival.
+    assert.equal(s.delivered.r1, undefined);
+    const back = applyGeofenceEvent(s, 'enter', 'school:0', NOW + 3_600_000);
+    assert.deepEqual(back.kind === 'arrive' && back.reminders.map((r) => r.id), ['r1']);
+  });
+
+  it('leaves alone what already showed when you leave after the dwell', () => {
+    const s = state([place('school', 'School')], [reminder('r1', 'school')]);
+    applyGeofenceEvent(s, 'enter', 'school:0', NOW);
+    s.delivered.r1 = NOW;
+    s.pending.school = [{ notificationId: 'n1', fireAt: NOW + 60_000, reminderId: 'r1', moment: null }];
+    const left = applyGeofenceEvent(s, 'exit', 'school:0', NOW + 3_600_000);
+    assert.equal(left.kind === 'leave' && left.cancel.length, 0);
+    assert.equal(s.delivered.r1, NOW);
+  });
+
+  it('gives back the Moment allowance when a Moment is cancelled', () => {
+    const s = state([place('clinic', 'the clinic', 1, 30)]);
+    s.momentDay = { day: localDay(NOW), count: 1 };
+    s.lastMoment.clinic = NOW;
+    s.pending.clinic = [{ notificationId: 'm1', fireAt: NOW + 180_000, reminderId: null, moment: { prevLastMoment: null } }];
+    s.regionInside['clinic:0'] = true;
+    applyGeofenceEvent(s, 'exit', 'clinic:0', NOW + 10_000);
+    assert.equal(s.momentDay.count, 0);
+    assert.equal(s.lastMoment.clinic, undefined);
+  });
+});
+
+describe('Moments stay rare and personal', () => {
+  it('never shows more than the daily allowance across places', () => {
+    const s = state([place('clinic', 'the clinic', 1, 30)]);
+    s.momentDay = { day: localDay(NOW), count: MAX_MOMENTS_PER_DAY };
+    const out = applyGeofenceEvent(s, 'enter', 'clinic:0', NOW);
+    assert.equal(out.kind === 'arrive' && out.moment, null);
+  });
+
+  it('comes back sooner for a starred place', () => {
+    const days = Math.round((STARRED_MOMENT_AFTER_MS + MOMENT_AFTER_MS) / 2 / DAY); // between 7 and 14
+    const plain = state([place('gym', 'the gym', 1, days)]);
+    const starred = state([{ ...place('gym', 'the gym', 1, days), starred: true }]);
+    assert.equal((applyGeofenceEvent(plain, 'enter', 'gym:0', NOW) as { moment: unknown }).moment, null);
+    assert.ok((applyGeofenceEvent(starred, 'enter', 'gym:0', NOW) as { moment: unknown }).moment);
+  });
+});
+
+describe('the visit log (device-only, for the monthly recap)', () => {
+  it('records each stay with when you arrived and left', () => {
+    const s = state([place('home', 'Home')]);
+    applyGeofenceEvent(s, 'enter', 'home:0', NOW);
+    assert.deepEqual(placesInside(s).map((p) => p.id), ['home']);
+    applyGeofenceEvent(s, 'exit', 'home:0', NOW + 7_200_000);
+    assert.deepEqual(s.visits.home, [{ a: NOW, l: NOW + 7_200_000 }]);
+    assert.deepEqual(placesInside(s), []);
+  });
+
+  it('counts where you already were when watching started as a stay', () => {
+    const s = state([place('home', 'Home')]);
+    s.settleUntil = NOW + 120_000;
+    applyGeofenceEvent(s, 'enter', 'home:0', NOW);
+    assert.equal(s.visits.home?.length, 1);
+  });
+});
+

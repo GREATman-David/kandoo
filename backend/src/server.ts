@@ -4,6 +4,7 @@ import express from 'express';
 
 import authPagesRouter from './routes/authPages';
 import interpretRouter from './routes/interpret';
+import insightsRouter from './routes/insights';
 import placesRouter from './routes/places';
 
 const app = express();
@@ -43,6 +44,9 @@ app.use('/', interpretRouter);
 
 // /places — the areas the phone watches (it, not the server, does the watching).
 app.use('/', placesRouter);
+
+// /insights/month — the monthly recap's server half (counts only).
+app.use('/', insightsRouter);
 
 /**
  * The 30-second setInterval scheduler is gone.

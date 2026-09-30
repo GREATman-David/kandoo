@@ -33,6 +33,7 @@ type PlaceRow = {
   lng: number | null;
   radius_m: number | null;
   area: unknown;
+  starred: boolean | null;
   created_at: string;
 };
 
@@ -50,6 +51,9 @@ export type PlaceSummary = {
   /** The newest memory here — what a Kandoo Moment says on arrival. */
   latestMemory: { id: string; content: string; created_at: string } | null;
   lastMentionedAt: string;
+  starred: boolean;
+  /** Other names the user has said mean this place ("school" for "UG Campus"). */
+  aliases: string[];
 };
 
 export type PlaceDetail = PlaceSummary & {
@@ -68,7 +72,7 @@ export class PlaceInputError extends Error {
   }
 }
 
-const PLACE_COLUMNS = 'id, name, lat, lng, radius_m, area, created_at';
+const PLACE_COLUMNS = 'id, name, lat, lng, radius_m, area, starred, created_at';
 const PLACE_REMINDER_COLUMNS =
   'id, task, person, status, due_at, not_before, place_trigger, insistent, created_at, capture_id, place_id';
 
@@ -103,10 +107,56 @@ async function remindersForPlaces(
   return byPlace;
 }
 
+/** Alias names pointing at each place: "school" → UG Campus. */
+async function aliasesFor(userId: string, placeIds: string[]): Promise<Map<string, string[]>> {
+  const byPlace = new Map<string, string[]>();
+  if (placeIds.length === 0) return byPlace;
+  const { data, error } = await supabase
+    .from('entities')
+    .select('name, alias_of')
+    .eq('user_id', userId)
+    .eq('kind', 'place')
+    .in('alias_of', placeIds);
+  if (error) {
+    // Places still list; only the "also called" line is missing.
+    console.error('Place aliases query failed:', error);
+    return byPlace;
+  }
+  for (const row of (data ?? []) as { name: string; alias_of: string }[]) {
+    byPlace.set(row.alias_of, [...(byPlace.get(row.alias_of) ?? []), row.name]);
+  }
+  return byPlace;
+}
+
+/** % and _ are wildcards to ILIKE; a place name must match literally. */
+function literal(name: string): string {
+  return name.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/**
+ * Re-attach reminders that name this place but lost (or never had) their link
+ * — a place deleted and drawn again, or a name resolved before the place
+ * existed. Without this they wait forever on a place that can never fire.
+ * Best-effort: reported, never fatal to the draw that triggered it.
+ */
+async function reattachReminders(userId: string, placeId: string, names: string[]): Promise<void> {
+  for (const name of new Set(names.map((n) => n.trim()).filter(Boolean))) {
+    const { error } = await supabase
+      .from('reminders')
+      .update({ place_id: placeId })
+      .eq('user_id', userId)
+      .is('place_id', null)
+      .in('status', ['pending', 'confirmed'])
+      .ilike('place_hint', literal(name));
+    if (error) console.error('Re-attaching place reminders failed:', error);
+  }
+}
+
 function summarize(
   row: PlaceRow,
   memories: { id: string; content: string; created_at: string }[],
-  reminders: ReminderRow[]
+  reminders: ReminderRow[],
+  aliases: string[] = []
 ): PlaceSummary {
   const newest = [...memories].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
   const drawn = row.lat !== null && row.lng !== null && row.radius_m !== null;
@@ -128,6 +178,8 @@ function summarize(
       ? { id: newest.id, content: newest.content, created_at: newest.created_at }
       : null,
     lastMentionedAt: times.at(-1) ?? row.created_at,
+    starred: row.starred === true,
+    aliases,
   };
 }
 
@@ -137,7 +189,8 @@ export async function listPlaces(userId: string): Promise<PlaceSummary[]> {
     .from('entities')
     .select(PLACE_COLUMNS)
     .eq('user_id', userId)
-    .eq('kind', 'place');
+    .eq('kind', 'place')
+    .is('alias_of', null);
 
   if (error) {
     console.error('List places failed:', error);
@@ -148,13 +201,14 @@ export async function listPlaces(userId: string): Promise<PlaceSummary[]> {
   if (rows.length === 0) return [];
 
   const ids = rows.map((r) => r.id);
-  const [mems, rems] = await Promise.all([
+  const [mems, rems, aliases] = await Promise.all([
     memoriesForEntities(userId, ids),
     remindersForPlaces(userId, ids),
+    aliasesFor(userId, ids),
   ]);
 
   return rows
-    .map((row) => summarize(row, mems.get(row.id) ?? [], rems.get(row.id) ?? []))
+    .map((row) => summarize(row, mems.get(row.id) ?? [], rems.get(row.id) ?? [], aliases.get(row.id) ?? []))
     .sort((a, b) => b.lastMentionedAt.localeCompare(a.lastMentionedAt));
 }
 
@@ -178,16 +232,17 @@ export async function getPlace(userId: string, placeId: string): Promise<PlaceDe
   const row = await getPlaceRow(userId, placeId);
   if (!row) return null;
 
-  const [mems, rems] = await Promise.all([
+  const [mems, rems, aliases] = await Promise.all([
     memoriesForEntities(userId, [row.id]),
     remindersForPlaces(userId, [row.id]),
+    aliasesFor(userId, [row.id]),
   ]);
   const memories = (mems.get(row.id) ?? [])
     .map((m) => ({ id: m.id, content: m.content, created_at: m.created_at, capture_id: m.capture_id }))
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   const reminders = rems.get(row.id) ?? [];
 
-  return { ...summarize(row, memories, reminders), memories, reminders };
+  return { ...summarize(row, memories, reminders, aliases.get(row.id) ?? []), memories, reminders };
 }
 
 function geometryColumns(geometry: PlaceGeometry) {
@@ -244,6 +299,11 @@ export async function setPlaceArea(
     console.error('Set place area failed:', error);
     throw new Error('Failed to save that place.');
   }
+
+  const drawnRow = await getPlaceRow(userId, placeId);
+  if (!drawnRow) throw new PlaceInputError('That place no longer exists.', 'not_found');
+  const aliasNames = (await aliasesFor(userId, [placeId])).get(placeId) ?? [];
+  await reattachReminders(userId, placeId, [drawnRow.name, ...aliasNames]);
 
   const detail = await getPlace(userId, placeId);
   if (!detail) throw new PlaceInputError('That place no longer exists.', 'not_found');
@@ -321,4 +381,97 @@ export async function deletePlace(userId: string, placeId: string): Promise<void
     console.error('Delete place failed:', error);
     throw new Error('Failed to delete that place.');
   }
+}
+
+export async function setPlaceStarred(userId: string, placeId: string, starred: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('entities')
+    .update({ starred })
+    .eq('user_id', userId)
+    .eq('id', placeId)
+    .eq('kind', 'place');
+  if (error) {
+    console.error('Star place failed:', error);
+    throw new Error('Failed to update that place.');
+  }
+}
+
+/**
+ * "school" is my "UG Campus": fold a place into another. Everything said about
+ * the source moves to the target, and the source's name stays behind as an
+ * alias, so the next "when I get to school" lands on UG Campus by itself.
+ *
+ * Every move is checked before the next step (AGENTS §3.7): a link that failed
+ * to move must not be followed by the change that orphans it.
+ */
+export async function mergePlaceInto(userId: string, sourceId: string, targetId: string): Promise<void> {
+  if (sourceId === targetId) throw new PlaceInputError('That is the same place.', 'invalid');
+
+  const [source, target] = await Promise.all([getPlaceRow(userId, sourceId), getPlaceRow(userId, targetId)]);
+  if (!source || !target) throw new PlaceInputError('That place no longer exists.', 'not_found');
+
+  const fail = (step: string, error: unknown): never => {
+    console.error(`Merge place ${step} failed:`, error);
+    throw new Error('Failed to merge those places.');
+  };
+
+  const { data: targetRow, error: targetError } = await supabase
+    .from('entities')
+    .select('alias_of')
+    .eq('user_id', userId)
+    .eq('id', targetId)
+    .single();
+  if (targetError) fail('checking the target', targetError);
+  if ((targetRow as { alias_of: string | null }).alias_of) {
+    throw new PlaceInputError('Choose the place itself, not another name for it.', 'invalid');
+  }
+
+  // 1. Memory links -> target (scoped through the caller's own memories).
+  const { data: links, error: linksError } = await supabase
+    .from('memory_entities')
+    .select('memory_id, memories!inner(user_id)')
+    .eq('memories.user_id', userId)
+    .eq('entity_id', sourceId);
+  if (linksError) fail('reading memory links', linksError);
+  const memoryIds = ((links ?? []) as { memory_id: string }[]).map((l) => l.memory_id);
+  if (memoryIds.length > 0) {
+    const { error } = await supabase
+      .from('memory_entities')
+      .upsert(memoryIds.map((memory_id) => ({ memory_id, entity_id: targetId })), {
+        onConflict: 'memory_id,entity_id',
+        ignoreDuplicates: true,
+      });
+    if (error) fail('moving memory links', error);
+    const { error: dropError } = await supabase
+      .from('memory_entities')
+      .delete()
+      .eq('entity_id', sourceId)
+      .in('memory_id', memoryIds);
+    if (dropError) fail('clearing old memory links', dropError);
+  }
+
+  // 2. Reminders waiting on the source now wait on the target.
+  const { error: remError } = await supabase
+    .from('reminders')
+    .update({ place_id: targetId })
+    .eq('user_id', userId)
+    .eq('place_id', sourceId);
+  if (remError) fail('moving reminders', remError);
+
+  // 3. Names that already meant the source now mean the target (one hop).
+  const { error: chainError } = await supabase
+    .from('entities')
+    .update({ alias_of: targetId })
+    .eq('user_id', userId)
+    .eq('alias_of', sourceId);
+  if (chainError) fail('moving aliases', chainError);
+
+  // 4. The source becomes a name for the target: no shape, no star of its own.
+  const { error: aliasError } = await supabase
+    .from('entities')
+    .update({ alias_of: targetId, lat: null, lng: null, radius_m: null, area: null, starred: false })
+    .eq('user_id', userId)
+    .eq('id', sourceId)
+    .eq('kind', 'place');
+  if (aliasError) fail('marking the alias', aliasError);
 }

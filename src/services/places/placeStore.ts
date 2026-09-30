@@ -27,7 +27,27 @@ export type WatchedPlace = {
   latestMemory: { content: string; created_at: string } | null;
   /** Region ids registered with the OS for this place: `${placeId}:${n}`. */
   regions: string[];
+  /** The user's own important places: Moments come sooner (placeRules). */
+  starred?: boolean;
 };
+
+/**
+ * A place notification scheduled on arrival but not shown yet (the dwell).
+ * Leaving before `fireAt` cancels it — a drive-by is not an arrival.
+ */
+export type PendingNotice = {
+  notificationId: string;
+  fireAt: number;
+  /** Set for a reminder: un-marked as delivered if cancelled. */
+  reminderId: string | null;
+  /** Set for a Moment: the lastMoment to restore if cancelled. */
+  moment: { prevLastMoment: number | null } | null;
+};
+
+/** One stay at a place: arrived (a) and left (l, null while there). ms. */
+export type Visit = { a: number; l: number | null };
+
+export type SyncStatus = 'watching' | 'not-pro' | 'no-permission' | 'location-off' | 'error';
 
 export type ArmedReminder = {
   id: string;
@@ -60,6 +80,24 @@ export type PlaceState = {
   lastArrived: Record<string, number>;
   /** Place id → last Kandoo Moment shown, ms. */
   lastMoment: Record<string, number>;
+  /** When the current set of regions was handed to the OS, ms. */
+  registeredAt: number;
+  /**
+   * Location services were off at the last sync. Android DELETES every
+   * geofence when location is switched off, so the next sync with it back on
+   * must re-register even though nothing about the places changed.
+   */
+  servicesWereOff: boolean;
+  /** Place id → notices waiting out the dwell. */
+  pending: Record<string, PendingNotice[]>;
+  /** Place id → recent stays, newest last. Device-only (AGENTS §3.5). */
+  visits: Record<string, Visit[]>;
+  /** Place id → name, kept for the monthly recap after a place stops being watched. */
+  names: Record<string, string>;
+  /** Moments shown on a local day, to cap them across all places. */
+  momentDay: { day: string; count: number };
+  /** The last sync's outcome, for the Places tab to be honest about. */
+  lastSync: { at: number; status: SyncStatus; places: number } | null;
 };
 
 export function emptyPlaceState(): PlaceState {
@@ -72,6 +110,13 @@ export function emptyPlaceState(): PlaceState {
     delivered: {},
     lastArrived: {},
     lastMoment: {},
+    registeredAt: 0,
+    servicesWereOff: false,
+    pending: {},
+    visits: {},
+    names: {},
+    momentDay: { day: '', count: 0 },
+    lastSync: null,
   };
 }
 

@@ -919,6 +919,10 @@ export type PlaceSummary = {
   /** The newest memory here — what a Kandoo Moment says on arrival. */
   latestMemory: { id: string; content: string; created_at: string } | null;
   lastMentionedAt: string;
+  /** The user's own important places (optional until the server has migration 008). */
+  starred?: boolean;
+  /** Other names the user has said mean this place. */
+  aliases?: string[];
 };
 
 export type PlaceDetail = PlaceSummary & {
@@ -1018,6 +1022,50 @@ export async function updatePlace(
     'Could not update that place.'
   );
   return data.place;
+}
+
+export async function setPlaceStarred(id: string, starred: boolean): Promise<PlaceDetail> {
+  const data = await sendPlace<{ place: PlaceDetail }>(
+    `/places/${encodeURIComponent(id)}`,
+    'PATCH',
+    { starred },
+    'Could not update that place.'
+  );
+  return data.place;
+}
+
+/** "This is the same place as …": fold `id` into `intoId`, keeping its name as an alias. */
+export async function mergePlaceInto(id: string, intoId: string): Promise<PlaceDetail> {
+  const data = await sendPlace<{ place: PlaceDetail }>(
+    `/places/${encodeURIComponent(id)}/merge`,
+    'POST',
+    { intoId },
+    'Could not merge those places.'
+  );
+  return data.place;
+}
+
+export type MonthInsights = {
+  from: string;
+  to: string;
+  memories: number;
+  remindersSet: number;
+  remindersDone: number;
+  people: { id: string; name: string; count: number }[];
+  placesMentioned: { id: string; name: string; count: number }[];
+};
+
+/** The server half of the monthly recap: counts only. Cached for offline. */
+export async function fetchMonthInsights(from: Date, to: Date): Promise<MonthInsights> {
+  return withOfflineCache(`insights:${from.toISOString()}`, async () => {
+    const accessToken = await getAccessTokenOrThrow();
+    const data = await apiFetch<{ insights: MonthInsights }>(
+      `/insights/month?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+      'Could not put your month together.'
+    );
+    return data.insights;
+  }, isNetworkError);
 }
 
 /** Stop watching a place, keeping everything said about it. */

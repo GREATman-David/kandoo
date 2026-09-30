@@ -23,21 +23,22 @@ export function usePlaceSync(enabled: boolean): PlaceSyncResult | null {
     let active = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const run = () => {
-      void requestPlaceSync().then((r) => {
+    const run = (reason: 'foreground' | 'change') => {
+      void requestPlaceSync(reason).then((r) => {
         if (active && r) setResult(r);
       });
     };
     const soon = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(run, DEBOUNCE_MS);
+      timer = setTimeout(() => run('change'), DEBOUNCE_MS);
     };
 
-    run();
+    run('change');
     const unsubscribe = onPlaceResyncRequest(soon);
     const appState = AppState.addEventListener('change', (state) => {
-      // Back from Settings with "Allow all the time" granted, or from anywhere.
-      if (state === 'active') soon();
+      // Back to the front (from Settings, perhaps): throttled, so switching
+      // apps all day doesn't mean a network round trip every time.
+      if (state === 'active') run('foreground');
     });
 
     return () => {
