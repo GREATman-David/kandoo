@@ -223,6 +223,60 @@ Add ONE extra top-level field to the JSON:
 `.trim();
 }
 
+/**
+ * Read a photographed page into the user's Library (Elite, via Mr. Kandoo).
+ * Unlike a shown photo this proposes no reminders or memories: the output is
+ * ONE organised note for the user to review, and the category to file it in.
+ * The user's existing category names are passed so a page about an existing
+ * project lands on the same shelf instead of a near-duplicate one.
+ */
+export function documentReadingPrompt(
+  context: InterpretContext,
+  categories: string[],
+  hint: string | null
+): string {
+  const shelves = categories.length
+    ? categories.map((name) => `- ${name}`).join('\n')
+    : '(none yet)';
+  return `
+You are Kandoo's document reader. The user photographed a page — handwritten or
+printed notes, a document, a slide, a whiteboard, a textbook page, a form — and
+wants what matters on it kept as ONE note in their Library.
+
+Current local time: ${context.clientTime} (${context.timezone}).
+
+Read everything on the page, then write the note so that someone who never saw
+the page gets all of its value from the note alone:
+
+1. First line: one sentence saying what the page is and its main point.
+2. Then the insights, as short lines starting with "• ", grouped under plain
+   headings when the page has distinct parts ("Key points", "Dates and
+   deadlines", "Numbers", "People", "To do", "Definitions"). Use only the
+   headings the page actually needs.
+3. Keep every fact that matters: names, dates, times, amounts, figures, codes,
+   phone numbers, emails, addresses, formulas, definitions, decisions and action
+   items. Write numbers, codes and amounts exactly as on the page, in digits.
+4. Resolve relative dates against the current local time ("next Friday" → the
+   actual date), keeping the page's wording in brackets if it helps.
+5. Correct obvious spelling slips in handwriting; never invent a word you cannot
+   read — write "[unclear]" instead.
+6. No commentary about the photo itself (lighting, angle). No markdown other
+   than "• " bullets and headings on their own line ending in ":".
+
+Category: the user's existing Library categories are:
+${shelves}
+${hint ? `The user asked for this page to go in: "${hint}". Use that name, matching an existing category's exact spelling if it is the same shelf.` : 'Choose the existing category this page clearly belongs to, using its exact spelling. If none fits, propose a short new category name (1–4 words, Title Case), e.g. "Kandoo Project", "Biology Notes", "Receipts".'}
+
+Title: under 8 words, naming this page's content (not the category).
+
+If the photo is not a page with words on it, or nothing on it can be read,
+return readable=false with empty strings for the other fields.
+
+Return JSON only, exactly this shape:
+{"readable": true, "title": "...", "category": "...", "body": "..."}
+`.trim();
+}
+
 /** Returned without calling a model: there is nothing to summarise. */
 export const EMPTY_RECALL_ANSWER = "I don't have anything saved about that yet.";
 

@@ -4,6 +4,12 @@ import {
   authenticateRequest,
   type AuthenticatedRequest,
 } from '../middleware/authenticateRequest';
+import { aiRateLimit } from '../middleware/rateLimit';
+import { resolveTimezone } from '../utils/timezone';
+
+import { AiUnavailableError, aiProvider } from '../modules/ai';
+import { getUserTier } from '../modules/entitlements/entitlementService';
+import { PhotoInputError, decodeJpeg } from '../modules/photos/photoInput';
 
 import {
   LibraryInputError,
@@ -105,13 +111,97 @@ router.delete('/library/categories/:id', authenticateRequest, async (req, res) =
 router.post('/library/categories/:id/notes', authenticateRequest, async (req, res) => {
   const userId = (req as AuthenticatedRequest).user.id;
   try {
-    const note = await createNote(userId, String(req.params.id), cleanNote(req.body ?? {}));
+    // 'document': filed from a page Mr. Kandoo read (the card the user approved).
+    const source = req.body?.source === 'document' ? 'document' : 'manual';
+    const note = await createNote(userId, String(req.params.id), cleanNote(req.body ?? {}), source);
     if (!note) return res.status(404).json({ error: 'Category not found.' });
     return res.status(201).json({ note });
   } catch (error) {
     if (inputError(res, error)) return;
     console.error('Library note create error:', error);
     return res.status(500).json({ error: 'That note couldn’t be saved just now.' });
+  }
+});
+
+/**
+ * Elite, through Mr. Kandoo: read a photographed page into a proposed note.
+ * Saves NOTHING (AGENTS §3.3) — the app shows the note as a card, and only the
+ * user's yes files it (through the note route above, creating the category if
+ * it is new). The photo is read and discarded; it is never stored.
+ */
+router.post('/library/read', authenticateRequest, aiRateLimit, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).user.id;
+
+  let bytes: Buffer;
+  try {
+    bytes = decodeJpeg(req.body?.image);
+  } catch (error) {
+    if (error instanceof PhotoInputError) return res.status(400).json({ error: error.message });
+    throw error;
+  }
+
+  try {
+    if ((await getUserTier(userId)) !== 'elite') {
+      return res.status(402).json({
+        code: 'elite_required',
+        error: 'Reading pages into your Library is part of Kandoo Elite.',
+      });
+    }
+
+    const clientTime =
+      typeof req.body?.clientTime === 'string' && !Number.isNaN(Date.parse(req.body.clientTime))
+        ? req.body.clientTime
+        : new Date().toISOString();
+    const hint =
+      typeof req.body?.categoryName === 'string' && req.body.categoryName.trim()
+        ? cleanCategoryName(req.body.categoryName)
+        : null;
+    const existing = await listCategories(userId);
+
+    let reading;
+    try {
+      reading = await aiProvider.readDocument(
+        { base64: bytes.toString('base64'), mimeType: 'image/jpeg', caption: null },
+        {
+          clientTime,
+          timezone: resolveTimezone(req.body?.timezone),
+          categories: existing.map((c) => c.name),
+          categoryHint: hint,
+        }
+      );
+    } catch (aiError) {
+      if (aiError instanceof AiUnavailableError) {
+        return res.status(502).json({
+          code: 'ai_busy',
+          error: 'Kandoo’s AI is busy right now. Try that page again in a moment.',
+        });
+      }
+      throw aiError;
+    }
+
+    if (!reading.readable || !reading.body.trim()) {
+      return res.status(422).json({
+        code: 'unreadable',
+        error: 'Kandoo couldn’t read any words on that photo. Try again closer, with more light.',
+      });
+    }
+
+    // File it on the shelf the user named, else the model's choice; both are
+    // matched against existing categories ignoring case, so nothing duplicates.
+    const categoryName = cleanCategoryName(hint ?? (reading.category.trim() || 'Notes'));
+    const matched = existing.find((c) => c.name.toLowerCase() === categoryName.toLowerCase()) ?? null;
+    const note = cleanNote({ title: reading.title, body: reading.body });
+
+    return res.status(200).json({
+      title: note.title,
+      body: note.body,
+      categoryName: matched?.name ?? categoryName,
+      categoryId: matched?.id ?? null,
+    });
+  } catch (error) {
+    if (inputError(res, error)) return;
+    console.error('Library document read error:', error);
+    return res.status(500).json({ error: 'Kandoo couldn’t read that page just now. Please try again.' });
   }
 });
 

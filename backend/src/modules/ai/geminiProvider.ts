@@ -1,9 +1,11 @@
 import { GoogleGenAI } from '@google/genai';
 
 import {
+  documentReadingSchema,
   kandooInterpretationSchema,
   noteSchema,
   photoInterpretationSchema,
+  type DocumentReading,
   type KandooInterpretation,
   type KandooNote,
   type PhotoInterpretation,
@@ -13,6 +15,7 @@ import {
   EMPTY_RECALL_ANSWER,
   NOTE_SYSTEM_PROMPT,
   RECALL_SYSTEM_PROMPT,
+  documentReadingPrompt,
   extractionPrompt,
   photoExtractionPrompt,
   recallUserPrompt,
@@ -20,6 +23,7 @@ import {
 
 import type {
   AIProvider,
+  DocumentContext,
   EmbedTaskType,
   InterpretContext,
   PhotoInput,
@@ -53,6 +57,9 @@ const EMBEDDING_DIMENSIONS = 1536;
  * with it on the recall answer was being cut off mid-sentence.
  */
 const NO_THINKING = { thinkingBudget: 0 };
+
+/** Output ceiling for reading a whole page into a note (extraction keeps 2000). */
+const DOCUMENT_MAX_TOKENS = 4000;
 
 const TASK_TYPES: Record<EmbedTaskType, string> = {
   document: 'RETRIEVAL_DOCUMENT',
@@ -361,6 +368,24 @@ export class GeminiProvider implements AIProvider {
     throw new Error(`Photo interpretation failed validation after repair: ${second.error.message}`);
   }
 
+  async readDocument(photo: PhotoInput, context: DocumentContext): Promise<DocumentReading> {
+    const system = documentReadingPrompt(context, context.categories, context.categoryHint);
+    const shown: Content = {
+      role: 'user',
+      parts: [
+        { inlineData: { mimeType: photo.mimeType, data: photo.base64 } },
+        { text: photo.caption ? `The user said: ${photo.caption}` : 'Read this page.' },
+      ],
+    };
+    // A full page of notes is longer than any spoken capture.
+    const { value } = await this.completeJson(system, [shown], DOCUMENT_MAX_TOKENS);
+    const parsed = documentReadingSchema.safeParse(value);
+    if (!parsed.success) {
+      throw new Error(`Document reading failed validation: ${parsed.error.message}`);
+    }
+    return parsed.data;
+  }
+
   async writeNote(text: string): Promise<KandooNote> {
     const { value } = await this.completeJson(NOTE_SYSTEM_PROMPT, [
       { role: 'user', parts: [{ text }] },
@@ -374,7 +399,8 @@ export class GeminiProvider implements AIProvider {
 
   private async completeJson(
     system: string,
-    contents: Content[]
+    contents: Content[],
+    maxOutputTokens = 2000
   ): Promise<{ raw: string; value: unknown }> {
     const response = await withKeyFailover(() =>
       activeClient().models.generateContent({
@@ -386,7 +412,7 @@ export class GeminiProvider implements AIProvider {
           // prose to trip the parser.
           responseMimeType: 'application/json',
           temperature: 0,
-          maxOutputTokens: 2000,
+          maxOutputTokens,
           thinkingConfig: NO_THINKING,
         },
       })

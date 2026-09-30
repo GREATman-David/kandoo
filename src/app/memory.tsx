@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -106,6 +106,14 @@ export default function MemoryScreen() {
   // Memories (what you told Kandoo) or the Library (your own notes, by category).
   const [view, setView] = useState<'memories' | 'library'>('memories');
   const [libraryRefresh, setLibraryRefresh] = useState(0);
+  // Arrived from Mr. Kandoo's "Open" on a filed page: show the Library.
+  const params = useLocalSearchParams<{ view?: string }>();
+  useEffect(() => {
+    if (params.view === 'library') {
+      setView('library');
+      router.setParams({ view: undefined });
+    }
+  }, [params.view]);
   const [query, setQuery] = useState('');
   // Typing filters the cards instantly on the device; pressing search also
   // asks Kandoo for a written answer. Both can show at once.

@@ -1,9 +1,11 @@
 import OpenAI from 'openai';
 
 import {
+    documentReadingSchema,
     kandooInterpretationSchema,
     noteSchema,
     photoInterpretationSchema,
+    type DocumentReading,
     type KandooInterpretation,
     type KandooNote,
     type PhotoInterpretation,
@@ -13,6 +15,7 @@ import {
     EMPTY_RECALL_ANSWER,
     NOTE_SYSTEM_PROMPT,
     RECALL_SYSTEM_PROMPT,
+    documentReadingPrompt,
     extractionPrompt,
     photoExtractionPrompt,
     recallUserPrompt,
@@ -20,6 +23,7 @@ import {
 
 import type {
     AIProvider,
+    DocumentContext,
     InterpretContext,
     PhotoInput,
     RecallMemory,
@@ -127,6 +131,28 @@ export class OpenAIProvider implements AIProvider {
     return { ...parsed.data, actions: parsed.data.actions.filter((a) => a.kind !== 'recall') };
   }
 
+  /** A photographed page → one Library note, through OpenAI's vision input. */
+  async readDocument(photo: PhotoInput, context: DocumentContext): Promise<DocumentReading> {
+    const { value } = await this.completeJson(
+      [
+        { role: 'system', content: documentReadingPrompt(context, context.categories, context.categoryHint) },
+        {
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: `data:${photo.mimeType};base64,${photo.base64}` } },
+            { type: 'text', text: photo.caption ? `The user said: ${photo.caption}` : 'Read this page.' },
+          ],
+        },
+      ],
+      4000
+    );
+    const parsed = documentReadingSchema.safeParse(value);
+    if (!parsed.success) {
+      throw new Error(`Document reading failed validation: ${parsed.error.message}`);
+    }
+    return parsed.data;
+  }
+
   async writeNote(text: string): Promise<KandooNote> {
     const { value } = await this.completeJson([
       { role: 'system', content: NOTE_SYSTEM_PROMPT },
@@ -140,7 +166,8 @@ export class OpenAIProvider implements AIProvider {
   }
 
   private async completeJson(
-    messages: OpenAI.Chat.ChatCompletionMessageParam[]
+    messages: OpenAI.Chat.ChatCompletionMessageParam[],
+    maxTokens = 2000
   ): Promise<{ raw: string; value: unknown }> {
     const response = await client().chat.completions.create({
       model: this.model,
@@ -149,7 +176,7 @@ export class OpenAIProvider implements AIProvider {
       temperature: 0,
       // A 90-second meeting recap produces far more JSON than the old 500-token
       // ceiling allowed. Truncated JSON throws a raw SyntaxError.
-      max_completion_tokens: 2000,
+      max_completion_tokens: maxTokens,
     });
 
     const raw = response.choices[0]?.message?.content;

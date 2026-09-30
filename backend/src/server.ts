@@ -33,7 +33,7 @@ app.use(cors({ origin: false }));
 const jsonSmall = express.json({ limit: '1mb' });
 const jsonPhoto = express.json({ limit: '8mb' });
 app.use((req, res, next) =>
-  req.path === '/interpret/photo' || req.path === '/photos'
+  req.path === '/interpret/photo' || req.path === '/photos' || req.path === '/library/read'
     ? jsonPhoto(req, res, next)
     : jsonSmall(req, res, next)
 );

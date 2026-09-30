@@ -1,4 +1,9 @@
-import type { KandooInterpretation, KandooNote, PhotoInterpretation } from './interpretationSchema';
+import type {
+  DocumentReading,
+  KandooInterpretation,
+  KandooNote,
+  PhotoInterpretation,
+} from './interpretationSchema';
 
 /**
  * A hit from recall. Despite the name it may be a saved memory OR a scheduled
@@ -41,6 +46,14 @@ export type PhotoInput = {
   caption: string | null;
 };
 
+/** What reading a document needs beyond the clock: where it might be filed. */
+export type DocumentContext = InterpretContext & {
+  /** The user's existing Library category names. */
+  categories: string[];
+  /** A category the user asked for ("put it in Kandoo Project"), if any. */
+  categoryHint: string | null;
+};
+
 export interface AIProvider {
   interpret(
     text: string,
@@ -55,6 +68,12 @@ export interface AIProvider {
     photo: PhotoInput,
     context: InterpretContext
   ): Promise<PhotoInterpretation>;
+
+  /**
+   * Read a photographed page into ONE organised Library note (Elite). No
+   * actions; the caller proposes the note for review and saves nothing itself.
+   */
+  readDocument(photo: PhotoInput, context: DocumentContext): Promise<DocumentReading>;
 
   generateRecallAnswer(
     question: string,

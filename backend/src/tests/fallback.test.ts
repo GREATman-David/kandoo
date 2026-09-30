@@ -23,6 +23,7 @@ function stub(overrides: Partial<AIProvider>): AIProvider {
   return {
     interpret: fail,
     interpretPhoto: fail,
+    readDocument: fail,
     writeNote: fail,
     generateRecallAnswer: fail,
     embed: fail,
@@ -32,6 +33,19 @@ function stub(overrides: Partial<AIProvider>): AIProvider {
 
 
 describe('FallbackAIProvider', () => {
+  it('fails a document reading over to the next model too', async () => {
+    const reading = { readable: true, title: 'Lecture 4', category: 'Biology Notes', body: 'Cells.' };
+    const provider = new FallbackAIProvider([
+      { name: 'Primary', provider: stub({}) },
+      { name: 'Backup', provider: stub({ readDocument: async () => reading }) },
+    ]);
+    const result = await provider.readDocument(
+      { base64: '', mimeType: 'image/jpeg', caption: null },
+      { clientTime: '', timezone: 'UTC', categories: [], categoryHint: null }
+    );
+    assert.equal(result.category, 'Biology Notes');
+  });
+
   it('fails a photo over to the next model too', async () => {
     const photo = { ...OK, description: 'A flyer' };
     const provider = new FallbackAIProvider([

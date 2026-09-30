@@ -104,6 +104,23 @@ export const photoInterpretationSchema = kandooInterpretationSchema.extend({
   description: z.string().min(1).max(160),
 });
 
+/**
+ * A photographed page read INTO the Library (Elite, through Mr. Kandoo): notes,
+ * a document, slides, a whiteboard. Not actions — one organised note and the
+ * category it belongs in. `readable: false` when the photo is not a page with
+ * words on it (the other fields are then ignored). Limits match 011_library.sql.
+ */
+export const documentReadingSchema = z
+  .object({
+    readable: z.boolean(),
+    title: z.string().max(200),
+    category: z.string().max(80),
+    body: z.string().max(20000),
+  })
+  .strict();
+
+export type DocumentReading = z.infer<typeof documentReadingSchema>;
+
 export type ReminderAction = z.infer<typeof reminderActionSchema>;
 export type MemoryAction = z.infer<typeof memoryActionSchema>;
 export type RecallAction = z.infer<typeof recallActionSchema>;

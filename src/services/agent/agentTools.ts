@@ -7,6 +7,8 @@ import {
   addMemoryToCapture,
   agentSearch,
   clearPlaceArea,
+  createLibraryCategory,
+  createLibraryNote,
   createManualCapture,
   createManualReminder,
   createPlace,
@@ -17,6 +19,7 @@ import {
   fetchCaptureNote,
   fetchCaptureNotes,
   fetchGroupedReminders,
+  fetchLibrary,
   fetchMonthInsights,
   fetchPeople,
   fetchPerson,
@@ -26,6 +29,7 @@ import {
   isProRequired,
   mergePeople,
   mergePlaceInto,
+  readDocument,
   setPlaceStarred,
   updateCaptureNote,
   updateMemory,
@@ -35,6 +39,8 @@ import {
   type CreatedReminder,
 } from '@/services/interpretationService';
 import { cancelReminder, scheduleReminder, snoozeRepeatingOnce } from '@/services/localNotifications';
+import { PhotoPermissionError, pickPhoto } from '@/services/photos';
+import { readTier } from '@/services/purchases';
 import { isRepeating } from '@/utils/repeat';
 import { requestPlaceResync } from '@/services/places/placeStore';
 import { MIN_RADIUS_M, placeGeometry, type LatLng } from '@/utils/geo';
@@ -560,6 +566,75 @@ export const kandooTools: Record<string, Tool> = {
         keptAt: photo.createdAt,
       })),
     });
+  }),
+
+  // ---------------------------------------------------------------- library
+  /**
+   * Elite: photograph a page (notes, a document, slides, a whiteboard) and
+   * propose it as ONE Library note — the insights organised, filed in the
+   * category the user named or the one the page belongs in. Nothing is saved
+   * until the user says yes (or taps Save); a new category is made only then.
+   */
+  read_document: guard(async (p) => {
+    // A quick check on the phone so nobody photographs a page for nothing;
+    // the server enforces Elite either way (402), and an unknown tier (offline)
+    // is left to it.
+    const tier = await readTier().catch(() => null);
+    if (tier === 'free' || tier === 'pro') {
+      return fail('Reading pages into the Library is part of Kandoo Elite.');
+    }
+
+    const source = str(p.source) === 'gallery' ? 'library' : 'camera';
+    const asked = str(p.category_name);
+    let photo;
+    try {
+      photo = await pickPhoto(source);
+    } catch (error) {
+      if (error instanceof PhotoPermissionError) {
+        return fail('The camera is off for Kandoo. They can allow it in Settings, or choose the photo from the gallery instead.');
+      }
+      throw error;
+    }
+    if (!photo) return fail('No photo was taken, so there is nothing to read yet.');
+
+    let reading;
+    try {
+      reading = await readDocument(photo, asked);
+    } catch (error) {
+      if (isProRequired(error)) return fail('Reading pages into the Library is part of Kandoo Elite.');
+      throw error;
+    }
+
+    const isNew = !reading.categoryId;
+    return propose(
+      'read_document',
+      'New library note',
+      [
+        field('category', isNew ? 'Category (new)' : 'Category', reading.categoryName),
+        field('title', 'Title', reading.title),
+        field('body', 'Note', reading.body, 'long'),
+      ],
+      async (v) => {
+        const body = v.body?.trim();
+        const name = v.category?.trim();
+        if (!body || !name) throw new Error('empty');
+        // The user may have renamed the category on the card: file it on the
+        // shelf that name matches now, making it only if it doesn't exist.
+        const shelves = await fetchLibrary();
+        const shelf =
+          shelves.find((c) => c.name.toLowerCase() === name.toLowerCase()) ??
+          (await createLibraryCategory(name));
+        const note = await createLibraryNote(
+          shelf.id,
+          { title: v.title?.trim() || null, body },
+          'document'
+        );
+        return {
+          result: { filedIn: shelf.name, newCategory: !shelves.some((c) => c.id === shelf.id), noteId: note.id },
+          open: { pathname: '/memory', params: { view: 'library' } },
+        };
+      }
+    );
   }),
 
   // ---------------------------------------------------------------- places

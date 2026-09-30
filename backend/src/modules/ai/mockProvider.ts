@@ -1,11 +1,13 @@
 import type {
   AIProvider,
+  DocumentContext,
   InterpretContext,
   PhotoInput,
   RecallMemory,
 } from './aiProvider';
 
 import type {
+  DocumentReading,
   KandooAction,
   KandooInterpretation,
   KandooNote,
@@ -33,6 +35,16 @@ export class MockAIProvider implements AIProvider {
       note: null,
       description: 'A photo',
       actions: [{ kind: 'memory', content, people: [], placeHint: null, topics: [] }],
+    };
+  }
+
+  /** No vision here either: an honest placeholder note, filed where asked. */
+  async readDocument(photo: PhotoInput, context: DocumentContext): Promise<DocumentReading> {
+    return {
+      readable: true,
+      title: 'A photographed page',
+      category: context.categoryHint ?? context.categories[0] ?? 'Notes',
+      body: photo.caption?.trim() || 'A page the user photographed. (The mock provider cannot read images.)',
     };
   }
 

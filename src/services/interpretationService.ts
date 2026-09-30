@@ -1409,13 +1409,14 @@ export async function deleteLibraryCategory(id: string): Promise<void> {
 
 export async function createLibraryNote(
   categoryId: string,
-  note: { title: string | null; body: string }
+  note: { title: string | null; body: string },
+  source: LibraryNote['source'] = 'manual'
 ): Promise<LibraryNote> {
   const data = await libraryCall<{ note: LibraryNote }>(
     `/library/categories/${encodeURIComponent(categoryId)}/notes`,
     'POST',
     'That note couldn’t be saved.',
-    note
+    { ...note, source }
   );
   return data.note;
 }
@@ -1435,4 +1436,39 @@ export async function updateLibraryNote(
 
 export async function deleteLibraryNote(id: string): Promise<void> {
   await libraryCall(`/library/notes/${encodeURIComponent(id)}`, 'DELETE', 'That note couldn’t be deleted.');
+}
+
+/** A page Mr. Kandoo read: the proposed note and where it would be filed. */
+export type DocumentReading = {
+  title: string | null;
+  body: string;
+  categoryName: string;
+  /** Set when that category already exists; null means it would be new. */
+  categoryId: string | null;
+};
+
+/**
+ * Elite: read a photographed page into a PROPOSED Library note. Saves nothing;
+ * 402 on other plans, 422 when no words could be read.
+ */
+export async function readDocument(
+  photo: { base64: string },
+  categoryName: string | null
+): Promise<DocumentReading> {
+  const accessToken = await getAccessTokenOrThrow();
+  return apiFetch<DocumentReading>(
+    '/library/read',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        image: photo.base64,
+        categoryName,
+        clientTime: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
+    },
+    'Kandoo couldn’t read that page.',
+    { timeoutMs: AI_TIMEOUT_MS }
+  );
 }
