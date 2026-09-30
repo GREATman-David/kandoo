@@ -429,7 +429,8 @@ export async function addPerson(
   let memoriesAdded = 0;
   if (facts.length > 0) {
     const capture = await createCapture(userId, {
-      text: facts.join('\n'),
+      // Recently shows this line: say who it's about ("Esi — likes jollof").
+      text: `${person.name} — ${facts.join('; ')}`,
       clientTime: opts.clientTime,
       timezone: opts.timezone,
       source: 'manual',

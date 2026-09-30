@@ -1,7 +1,17 @@
 import { useConversation } from '@elevenlabs/react-native';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Modal, PermissionsAndroid, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  PermissionsAndroid,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AgentDraftCard } from '@/components/AgentDraftCard';
@@ -77,6 +87,8 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  /** A typed message — for when speaking out loud isn't possible (a library, a meeting). */
+  const [typed, setTyped] = useState('');
   /** Agent minutes left this month, from the server. */
   const [minutesLeft, setMinutesLeft] = useState<number | null>(null);
   /** A new-place card whose shape the user is adjusting on the full map. */
@@ -228,6 +240,20 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
     }
   };
 
+  const sendTyped = () => {
+    const message = typed.trim();
+    if (!message || phase !== 'live') return;
+    try {
+      markUserSpoke();
+      conversation.sendUserMessage(message);
+      // Typed turns aren't echoed back as transcripts, so show it here.
+      setLines((l) => [...l, { kind: 'line', who: 'you', text: message, at: Date.now() }]);
+      setTyped('');
+    } catch (error) {
+      console.warn('Sending a typed message failed:', error);
+    }
+  };
+
   const discardByTap = (draft: Draft) => {
     if (discardDraft(draft.id)) tell(`The user dismissed card ${draft.id} (${draft.title}). It was not saved.`);
   };
@@ -315,6 +341,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
 
   return (
     <Modal visible={visible} animationType="fade" onRequestClose={() => finish()}>
+      <KeyboardAvoidingView behavior="padding" style={styles.flex}>
       <View style={[styles.screen, { paddingTop: insets.top + spacing.space6, paddingBottom: insets.bottom + spacing.space5 }]}>
         <View style={styles.head}>
           <KandooSymbol state={markState} size={96} />
@@ -375,6 +402,36 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
           ) : null}
         </ScrollView>
 
+        {phase === 'live' ? (
+          <View style={styles.typeRow}>
+            <TextInput
+              style={styles.typeInput}
+              value={typed}
+              onChangeText={(value) => {
+                setTyped(value);
+                // Typing is activity: Kandoo mustn't talk over it or hang up on "silence".
+                if (phase === 'live') {
+                  try {
+                    conversation.sendUserActivity();
+                  } catch (error) {
+                    console.warn('Signalling typing failed:', error);
+                  }
+                }
+              }}
+              placeholder="Type instead…"
+              placeholderTextColor={colors.inkFaint}
+              returnKeyType="send"
+              onSubmitEditing={sendTyped}
+              blurOnSubmit={false}
+            />
+            {typed.trim() ? (
+              <Pressable onPress={sendTyped} hitSlop={8} accessibilityRole="button">
+                <Text style={styles.typeSend}>Send</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
         <View style={styles.actions}>
           {phase === 'live' ? (
             <Pressable
@@ -413,6 +470,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
         onSaved={() => endAdjust()}
         onNeedPro={() => endAdjust()}
       />
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -439,6 +497,19 @@ const styles = StyleSheet.create({
   you: { ...text.body, color: colors.inkMuted, textAlign: 'right' },
   error: { ...text.body, color: colors.alarmText },
   actions: { flexDirection: 'row', gap: spacing.space2 },
+  typeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.space3,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.space4,
+    marginBottom: spacing.space3,
+  },
+  typeInput: { ...text.body, flex: 1, color: colors.ink, minHeight: 44 },
+  typeSend: { ...text.bodyStrong, color: colors.markRing },
   cta: {
     minHeight: 52,
     borderRadius: radius.md,

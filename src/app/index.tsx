@@ -158,6 +158,14 @@ const CHIP_TEXT_LIMIT = 48;
  */
 function KandooHome() {
   const home = useHome();
+  // Coming back to Home from another tab (where things may have changed —
+  // a note written, a person added) refreshes Recently.
+  const { reloadRecent } = home;
+  useFocusEffect(
+    useCallback(() => {
+      void reloadRecent();
+    }, [reloadRecent])
+  );
   const entitlement = useEntitlement();
   const insets = useSafeAreaInsets();
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -399,7 +407,8 @@ function KandooHome() {
           </View>
         ) : null}
 
-        {home.state === 'listening' ? (
+        {/* Only while the mic is on — typing is not listening. */}
+        {home.state === 'listening' && home.voiceActive ? (
           <Text style={styles.listeningLabel}>Listening…</Text>
         ) : null}
 
@@ -409,6 +418,8 @@ function KandooHome() {
           <Idle
             recent={home.recent}
             loaded={home.recentLoaded}
+            failed={home.recentFailed}
+            onRetry={() => void home.reloadRecent()}
             onSelect={openRecent}
           />
         ) : null}
@@ -532,12 +543,24 @@ function KandooHome() {
 type IdleProps = {
   recent: RecentItem[];
   loaded: boolean;
+  /** The last load failed — offer a retry instead of "Nothing yet." */
+  failed: boolean;
+  onRetry: () => void;
   onSelect: (item: RecentItem) => void;
 };
 
-function Idle({ recent, loaded, onSelect }: IdleProps) {
+function Idle({ recent, loaded, failed, onRetry, onSelect }: IdleProps) {
   // Nothing until the first fetch settles — no flash of "Nothing yet.".
   if (!loaded) return null;
+
+  // A failed load is not an empty history: never tell the user "Nothing yet."
+  if (recent.length === 0 && failed) {
+    return (
+      <Pressable onPress={onRetry} accessibilityRole="button" style={styles.recentRetry}>
+        <Text style={styles.recentMeta}>Couldn’t load what you said recently. Tap to try again.</Text>
+      </Pressable>
+    );
+  }
 
   // Home already shows the symbol large above, so its empty state is words only.
   if (recent.length === 0) {
@@ -922,14 +945,16 @@ function buildChips(response: InterpretationResponse): Chip[] {
     }
   }
 
+  // What the user must act on (reminders and their times) comes before topics,
+  // so it is never the part hidden behind "+2".
   const chips: Chip[] = [
     ...[...people.values()].map((label) => ({
       kind: 'person' as const,
       label,
     })),
+    ...times,
     ...[...topics.values()].map((label) => ({ kind: 'topic' as const, label })),
     ...loose,
-    ...times,
   ];
 
   if (chips.length <= CHIP_LIMIT) return chips;
@@ -1537,6 +1562,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: colors.ink,
   },
+  recentRetry: { paddingVertical: spacing.space5, alignItems: 'center' },
   recentMeta: {
     ...text.caption,
     color: colors.inkMuted,
@@ -1650,7 +1676,8 @@ const styles = StyleSheet.create({
   tickIcon: {
     width: 14,
     height: 14,
-    tintColor: colors.markCore,
+    // Done is settled (olive) — amber means "needs your attention".
+    tintColor: colors.settled,
   },
   tickText: {
     ...text.body,

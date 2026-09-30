@@ -4,6 +4,7 @@ import {
   useSpeechRecognitionEvent,
 } from 'expo-speech-recognition';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 
 import {
   AiBusyError,
@@ -110,6 +111,12 @@ export function useHome() {
   // False until the first Recently fetch settles, so Home never flashes the
   // empty state at a returning user whose rows are still on the way.
   const [recentLoaded, setRecentLoaded] = useState(false);
+  /** The last load of Recently failed (and nothing is shown): say so, never "Nothing yet". */
+  const [recentFailed, setRecentFailed] = useState(false);
+  const recentRetry = useRef<{ attempt: number; timer: ReturnType<typeof setTimeout> | null }>({
+    attempt: 0,
+    timer: null,
+  });
   const [busy, setBusy] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
   // Voice is on but the recognizer is paused while the user edits the words.
@@ -156,8 +163,15 @@ export function useHome() {
 
   // Recently comes from the server (GET /captures?limit=3&noted=false), not
   // memory — the old in-memory list was empty on every cold start, which is why
-  // Home looked bare. Best-effort: a failure just leaves Recently empty.
+  // Home looked bare. A failed load is retried (3s, 10s, 30s) and again whenever
+  // the app or Home comes back into view — one blip at launch (a server that is
+  // waking up) used to leave "Nothing yet." on screen until a restart.
   const loadRecent = useCallback(async () => {
+    const retry = recentRetry.current;
+    if (retry.timer) {
+      clearTimeout(retry.timer);
+      retry.timer = null;
+    }
     const pending = await pendingCaptures();
     try {
       // Only captures that kept something — a question is answered, not listed.
@@ -168,13 +182,41 @@ export function useHome() {
       });
       const merged = [...pending, ...(await withPendingEdits(captures))];
       setRecent(merged.slice(0, RECENT_LIMIT).map(toRecentItem));
+      setRecentFailed(false);
+      retry.attempt = 0;
     } catch (caught) {
       console.warn('Loading Recently failed:', caught);
       if (pending.length > 0) setRecent(pending.slice(0, RECENT_LIMIT).map(toRecentItem));
+      setRecentFailed(true);
+      const delays = [3000, 10000, 30000];
+      if (retry.attempt < delays.length) {
+        const delay = delays[retry.attempt];
+        retry.attempt += 1;
+        retry.timer = setTimeout(() => {
+          retry.timer = null;
+          void loadRecentRef.current();
+        }, delay);
+      }
     } finally {
       setRecentLoaded(true);
     }
   }, []);
+  const loadRecentRef = useRef(loadRecent);
+  loadRecentRef.current = loadRecent;
+
+  // Back in the foreground: refresh (and give a failed load a fresh set of retries).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        recentRetry.current.attempt = 0;
+        void loadRecent();
+      }
+    });
+    return () => {
+      sub.remove();
+      if (recentRetry.current.timer) clearTimeout(recentRetry.current.timer);
+    };
+  }, [loadRecent]);
 
   // A save or a finished sync changes what Recently should show.
   useEffect(() => onOutboxChange(() => void loadRecent()), [loadRecent]);
@@ -645,6 +687,9 @@ export function useHome() {
     busy,
     recent,
     recentLoaded,
+    recentFailed,
+    /** Home came back into view (tab focus): refresh Recently. */
+    reloadRecent: loadRecent,
     voiceActive,
     voiceSupported: VOICE_SUPPORTED,
     paywallVisible,
