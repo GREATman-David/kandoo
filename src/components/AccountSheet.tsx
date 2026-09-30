@@ -22,6 +22,8 @@ export type AccountSheetProps = {
   onClose: () => void;
   /** Free users tap "Get Kandoo Pro" — the caller opens the paywall. */
   onGetPro: () => void;
+  /** Pro users tap "Get Kandoo Elite" — the caller opens the paywall on Elite. */
+  onGetElite?: () => void;
   /** Called after a successful restore so the badge flips. */
   onEntitlementChange: () => void;
 };
@@ -32,6 +34,7 @@ export function AccountSheet({
   isElite = false,
   onClose,
   onGetPro,
+  onGetElite,
   onEntitlementChange,
 }: AccountSheetProps) {
   const [busy, setBusy] = useState(false);
@@ -159,6 +162,20 @@ export function AccountSheet({
               <Text style={styles.rowHint}>Remember across all of time</Text>
             </Pressable>
           )}
+
+          {isPro && !isElite && onGetElite ? (
+            <Pressable
+              style={styles.row}
+              onPress={() => {
+                onClose();
+                onGetElite();
+              }}
+              accessibilityRole="button"
+            >
+              <Text style={styles.rowStrong}>Get Kandoo Elite</Text>
+              <Text style={styles.rowHint}>Talk with Kandoo — 45 minutes of Kandoo Agent a month</Text>
+            </Pressable>
+          ) : null}
 
           {isPro ? (
             <Pressable style={styles.row} onPress={() => setNaming(true)} accessibilityRole="button">

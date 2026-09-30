@@ -513,7 +513,8 @@ function KandooHome() {
         isPro={entitlement.isPro}
         isElite={entitlement.isElite}
         onClose={() => setAccountOpen(false)}
-        onGetPro={home.openPaywall}
+        onGetPro={() => openPaywallFor('pro')}
+        onGetElite={() => openPaywallFor('elite')}
         onEntitlementChange={entitlement.refresh}
       />
 
