@@ -883,7 +883,10 @@ function Understanding({
 }: UnderstandingProps) {
   // While the backend is working, the breathing mark is the whole signal and
   // the words wait in the card, dimmed. No spinner, ever.
-  const chips = response ? buildChips(response) : [];
+  // "+2" is a button: tapping it shows the chips it stood for.
+  const [allChips, setAllChips] = useState(false);
+  useEffect(() => setAllChips(false), [response]);
+  const chips = response ? buildChips(response, allChips) : [];
   const nothingActionable = response ? !hasActions(response) : false;
 
   const label = !response
@@ -929,6 +932,7 @@ function Understanding({
                   key={`${chip.label}-${index}`}
                   chip={chip}
                   index={index}
+                  onPress={chip.kind === null ? () => setAllChips(true) : undefined}
                 />
               ))}
             </View>
@@ -977,7 +981,7 @@ function hasActions(response: InterpretationResponse): boolean {
  * so a long recap reads as a summary, not a wall. Low confidence becomes the
  * one word "guessed" on the time chip — never a number.
  */
-function buildChips(response: InterpretationResponse): Chip[] {
+function buildChips(response: InterpretationResponse, all = false): Chip[] {
   const people = new Map<string, string>();
   const topics = new Map<string, string>();
   const loose: Chip[] = [];
@@ -1021,7 +1025,7 @@ function buildChips(response: InterpretationResponse): Chip[] {
     ...loose,
   ];
 
-  if (chips.length <= CHIP_LIMIT) return chips;
+  if (all || chips.length <= CHIP_LIMIT) return chips;
   return [
     ...chips.slice(0, CHIP_LIMIT - 1),
     { kind: null, label: `+${chips.length - CHIP_LIMIT + 1}` },
@@ -1035,7 +1039,7 @@ function clip(value: string): string {
 }
 
 /** Chips arrive one after another at duration-stagger. This is the "spinner". */
-function StaggerChip({ chip, index }: { chip: Chip; index: number }) {
+function StaggerChip({ chip, index, onPress }: { chip: Chip; index: number; onPress?: () => void }) {
   const shown = useSharedValue(0);
 
   useEffect(() => {
@@ -1060,9 +1064,20 @@ function StaggerChip({ chip, index }: { chip: Chip; index: number }) {
           style={[styles.chipIcon, chip.guessed && styles.chipIconGuessed]}
         />
       ) : null}
-      <Text style={[styles.chipText, chip.guessed && styles.chipTextGuessed]}>
-        {chip.label}
-      </Text>
+      {onPress ? (
+        <Pressable
+          onPress={onPress}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`Show ${chip.label.slice(1)} more`}
+        >
+          <Text style={styles.chipText}>{chip.label}</Text>
+        </Pressable>
+      ) : (
+        <Text style={[styles.chipText, chip.guessed && styles.chipTextGuessed]}>
+          {chip.label}
+        </Text>
+      )}
     </Animated.View>
   );
 }

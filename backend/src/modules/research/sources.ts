@@ -102,6 +102,15 @@ export function rebuildAbstract(index: Record<string, number[]> | null | undefin
   return words.filter(Boolean).join(' ');
 }
 
+/**
+ * Titles in scholarly metadata sometimes keep a footnote marker glued to the
+ * last word ("…in the Social Age1"). Strip a trailing "1" (the usual marker)
+ * after a word of 3+ letters only, so "Web3" or "COVID-19" are left alone.
+ */
+export function cleanTitle(title: string): string {
+  return title.trim().replace(/(?<=[A-Za-z]{2}[a-z])1$/, '');
+}
+
 function authorLine(work: OpenAlexWork): string | null {
   const names = (work.authorships ?? [])
     .map((a) => a.author?.display_name)
@@ -126,7 +135,7 @@ export async function searchOpenAlex(query: string, limit = 3): Promise<Research
       .filter(({ work, abstract }) => work.title && abstract.length > 120)
       .slice(0, limit)
       .map(({ work, abstract }) => ({
-        title: work.title as string,
+        title: cleanTitle(work.title as string),
         url: work.doi ?? work.primary_location?.landing_page_url ?? work.id ?? '',
         publisher: work.primary_location?.source?.display_name ?? null,
         authors: authorLine(work),

@@ -76,7 +76,17 @@ function FieldRow({ field, editable, onEdit }: { field: DraftField; editable: bo
           accessibilityRole={canEdit ? 'button' : undefined}
           accessibilityHint={canEdit ? 'Edit' : undefined}
         >
-          <Text style={[valueStyle, canEdit && styles.editable]}>{display(field)}</Text>
+          {/* A long note reads as a quiet block (a rule beside it); underlining
+              every line of a research write-up made it hard to read. */}
+          <Text
+            style={[
+              valueStyle,
+              field.kind === 'long' ? styles.long : canEdit && styles.editable,
+              field.kind === 'long' && canEdit && styles.longEditable,
+            ]}
+          >
+            {display(field)}
+          </Text>
         </Pressable>
       )}
       {field.kind === 'time' && canEdit ? (
@@ -174,6 +184,8 @@ const styles = StyleSheet.create({
   value: { ...text.bodyStrong, color: colors.ink },
   words: { ...text.memory, color: colors.ink },
   editable: { textDecorationLine: 'underline', textDecorationColor: colors.lineStrong },
+  long: { fontSize: 15, lineHeight: 23 },
+  longEditable: { borderLeftWidth: 2, borderLeftColor: colors.lineStrong, paddingLeft: spacing.space3 },
   input: {
     borderBottomWidth: 1,
     borderBottomColor: colors.accent,

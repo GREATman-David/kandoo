@@ -59,3 +59,12 @@ describe('OpenAlex abstracts', () => {
     assert.equal(rebuildAbstract(null), '');
   });
 });
+
+describe('source titles', () => {
+  it('strips a footnote digit glued to the last word, and nothing else', async () => {
+    const { cleanTitle } = await import('../modules/research/sources');
+    assert.equal(cleanTitle('A Digital Business Strategy in the Social Age1'), 'A Digital Business Strategy in the Social Age');
+    assert.equal(cleanTitle('Building for Web3'), 'Building for Web3');
+    assert.equal(cleanTitle('Remote work after COVID-19'), 'Remote work after COVID-19');
+  });
+});

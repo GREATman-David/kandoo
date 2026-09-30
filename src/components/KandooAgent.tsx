@@ -2,6 +2,7 @@ import { useConversation } from '@elevenlabs/react-native';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -126,7 +127,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
     onDisconnect: (details) => {
       if (details.reason === 'error') {
         logFailure('Kandoo Agent disconnected:', new Error(details.message));
-        setError('Kandoo lost the connection. Tap to try again.');
+        setError('Mr. Kandoo lost the connection. Tap to try again.');
         setPhase('error');
         return;
       }
@@ -134,7 +135,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
       // example, the voice service is out of quota). Say so — never a silent close.
       if (!heardAnything.current && Date.now() - connectedAt.current < 5000) {
         logFailure('Kandoo Agent closed right after connecting:', new Error(details.reason));
-        setError('Kandoo can’t talk right now. Please try again later.');
+        setError('Mr. Kandoo can’t talk right now. Please try again later.');
         setPhase('error');
         return;
       }
@@ -156,7 +157,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
     },
     onError: (message) => {
       logFailure('Kandoo Agent error:', new Error(message));
-      setError('Kandoo lost the connection. Tap to try again.');
+      setError('Mr. Kandoo lost the connection. Tap to try again.');
       setPhase('error');
     },
   });
@@ -178,7 +179,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
     stopSpeaking();
     try {
       if (!(await micAllowed())) {
-        setError('Kandoo needs the microphone to hear you. You can allow it in Settings.');
+        setError('Mr. Kandoo needs the microphone to hear you. You can allow it in Settings.');
         setPhase('error');
         return;
       }
@@ -206,7 +207,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
         return;
       }
       logFailure('Starting Kandoo Agent failed:', caught);
-      setError(userMessage(caught, 'Kandoo couldn’t start just now. Tap to try again.'));
+      setError(userMessage(caught, 'Mr. Kandoo couldn’t start just now. Tap to try again.'));
       setPhase('error');
     }
   };
@@ -230,6 +231,24 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
   useEffect(() => {
     scroll.current?.scrollToEnd({ animated: true });
   }, [lines.length, drafts.length]);
+
+  /** Done: a card still waiting is the user's work — never drop it silently. */
+  function leave() {
+    const waiting = draftsRef.current.filter((d) => d.status === 'draft');
+    if (waiting.length === 0) {
+      finish();
+      return;
+    }
+    const one = waiting.length === 1;
+    Alert.alert(
+      one ? `Save “${waiting[0].title}” first?` : `${waiting.length} cards aren’t saved yet`,
+      one ? 'It isn’t saved yet. Leaving now discards it.' : 'Leaving now discards them.',
+      [
+        { text: 'Keep it open', style: 'cancel' },
+        { text: one ? 'Discard' : 'Discard them', style: 'destructive', onPress: () => finish() },
+      ]
+    );
+  }
 
   /** Close the conversation, optionally landing on a screen. */
   function finish(to?: string, params?: Record<string, string>) {
@@ -340,10 +359,12 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
       ? 'Connecting…'
       : phase === 'live'
         ? conversation.isSpeaking
-          ? 'Kandoo is speaking'
+          ? 'Mr. Kandoo is speaking'
           : waitingOnCard
             ? 'Check the card'
-            : 'Listening'
+            : conversation.isMuted
+              ? 'Mic off · type to him'
+              : 'Listening'
         : phase === 'ended'
           ? 'Conversation ended'
           : '';
@@ -356,7 +377,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
   ].sort((a, b) => a.at - b.at);
 
   return (
-    <Modal visible={visible} animationType="fade" onRequestClose={() => finish()}>
+    <Modal visible={visible} animationType="fade" onRequestClose={leave}>
       <KeyboardAvoidingView behavior="padding" style={styles.flex}>
       <View style={[styles.screen, { paddingTop: insets.top + spacing.space6, paddingBottom: insets.bottom + spacing.space5 }]}>
         <View style={styles.head}>
@@ -443,6 +464,15 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
               value={typed}
               onChangeText={(value) => {
                 setTyped(value);
+                // Typing means typing: turn the mic off so background speech
+                // can't reach Mr. Kandoo mid-sentence. Unmute brings it back.
+                if (value && !typed && phase === 'live' && !conversation.isMuted) {
+                  try {
+                    conversation.setMuted(true);
+                  } catch (error) {
+                    console.warn('Muting while typing failed:', error);
+                  }
+                }
                 // Typing is activity: Kandoo mustn't talk over it or hang up on "silence".
                 if (phase === 'live') {
                   try {
@@ -480,7 +510,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
               <Text style={styles.secondaryText}>Talk again</Text>
             </Pressable>
           ) : null}
-          <Pressable style={[styles.cta, styles.flex]} onPress={() => finish()} accessibilityRole="button">
+          <Pressable style={[styles.cta, styles.flex]} onPress={leave} accessibilityRole="button">
             <Text style={styles.ctaText}>Done</Text>
           </Pressable>
         </View>

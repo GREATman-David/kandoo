@@ -49,6 +49,10 @@ RULES
    against the current local time above. Never return "4 PM" or "tomorrow".
    Resolve relative times yourself: "in 20 minutes", "tomorrow morning" (09:00),
    "tonight" (20:00), "end of day" (17:00).
+   A reminder is never set in the past. A clock time with no day ("at 5",
+   "before 5", "at 9") that has ALREADY PASSED today means the next time it
+   comes round — tomorrow. (At 22:40, "send the spec before 5" is tomorrow
+   17:00, not today 17:00.)
 3. A reminder tied to a place but not a time: dueAt = null, placeHint set.
    A reminder with neither a time nor a place: dueAt = null, placeHint = null.
 3a. PLACE REMINDERS fire when the user gets to (or leaves) the place — never at

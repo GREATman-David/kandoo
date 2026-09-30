@@ -1241,7 +1241,7 @@ export async function fetchAgentToken(): Promise<AgentSession> {
     apiFetch<AgentSession>(
       `/agent/session${fresh ? '?fresh=1' : ''}`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
-      'Kandoo Agent is not available right now.'
+      'Mr. Kandoo is not available right now.'
     );
   try {
     return await ask(false);

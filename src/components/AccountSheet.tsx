@@ -146,7 +146,7 @@ export function AccountSheet({
             <View style={styles.proRow}>
               <Text style={styles.proText}>
                 {isElite
-                  ? 'You’re on Kandoo Elite — everything in Pro, plus Kandoo Agent.'
+                  ? 'You’re on Kandoo Elite — everything in Pro, plus Mr. Kandoo.'
                   : 'You’re on Kandoo Pro — your whole history is unlocked.'}
               </Text>
             </View>
@@ -173,7 +173,7 @@ export function AccountSheet({
               accessibilityRole="button"
             >
               <Text style={styles.rowStrong}>Get Kandoo Elite</Text>
-              <Text style={styles.rowHint}>Talk with Kandoo — 45 minutes of Kandoo Agent a month</Text>
+              <Text style={styles.rowHint}>Talk with Mr. Kandoo — 45 minutes a month</Text>
             </Pressable>
           ) : null}
 

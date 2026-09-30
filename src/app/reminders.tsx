@@ -44,6 +44,8 @@ import { isRepeating, nextOccurrence, repeatWhen } from '@/utils/repeat';
 import { useAuth } from '../features/Auth/useAuth';
 
 const EMPTY: GroupedReminders = { needsReview: [], active: [], history: [] };
+/** Overdue shows the newest few; the rest are one tap away. */
+const OVERDUE_PREVIEW = 3;
 
 /**
  * When a reminder next happens, for sorting it into Overdue / Today / Upcoming.
@@ -76,6 +78,7 @@ export default function RemindersScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [allOverdue, setAllOverdue] = useState(false);
 
   const [selected, setSelected] = useState<CreatedReminder | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -243,7 +246,11 @@ export default function RemindersScreen() {
   // not "Today" in the same way as one still to come.
   const cutoff = endOfToday();
   const now = Date.now();
-  const overdue = groups.active.filter((r) => r.due_at && nextDue(r) < now);
+  // Newest first: what slipped this afternoon matters more than last month.
+  const overdue = groups.active
+    .filter((r) => r.due_at && nextDue(r) < now)
+    .sort((a, b) => nextDue(b) - nextDue(a));
+  const overdueShown = allOverdue ? overdue : overdue.slice(0, OVERDUE_PREVIEW);
   const today = groups.active.filter(
     (r) => r.due_at && nextDue(r) >= now && nextDue(r) <= cutoff
   );
@@ -309,20 +316,6 @@ export default function RemindersScreen() {
               </Section>
             ) : null}
 
-            {overdue.length > 0 ? (
-              <Section title="Overdue">
-                {overdue.map((r) => (
-                  <Row
-                    key={r.id}
-                    reminder={r}
-                    onOpen={setSelected}
-                    onDone={markDone}
-                    onMenu={openMenu}
-                  />
-                ))}
-              </Section>
-            ) : null}
-
             {today.length > 0 ? (
               <Section title="Today">
                 {today.map((r) => (
@@ -334,6 +327,32 @@ export default function RemindersScreen() {
                     onMenu={openMenu}
                   />
                 ))}
+              </Section>
+            ) : null}
+
+            {/* After Today, so what's due today is what you see first. */}
+            {overdue.length > 0 ? (
+              <Section title="Overdue">
+                {overdueShown.map((r) => (
+                  <Row
+                    key={r.id}
+                    reminder={r}
+                    onOpen={setSelected}
+                    onDone={markDone}
+                    onMenu={openMenu}
+                  />
+                ))}
+                {overdue.length > OVERDUE_PREVIEW ? (
+                  <Pressable
+                    style={styles.historyToggle}
+                    onPress={() => setAllOverdue((v) => !v)}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.historyEyebrow}>
+                      {allOverdue ? 'Show fewer' : `Show all ${overdue.length} overdue`}
+                    </Text>
+                  </Pressable>
+                ) : null}
               </Section>
             ) : null}
 

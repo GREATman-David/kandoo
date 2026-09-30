@@ -112,7 +112,7 @@ router.get('/agent/session', authenticateRequest, async (req, res) => {
   const { apiKey, agentId } = config();
   if (!apiKey || !agentId) {
     console.error('Kandoo Agent is not configured (ELEVENLABS_API_KEY / ELEVENLABS_AGENT_ID).');
-    return res.status(503).json({ error: 'Kandoo Agent is not available right now.' });
+    return res.status(503).json({ error: 'Mr. Kandoo is not available right now.' });
   }
   const tier = await getUserTier(userId, { fresh: req.query.fresh === '1' });
   const allowance = AGENT_ALLOWANCE_SECS[tier];
@@ -130,8 +130,8 @@ router.get('/agent/session', authenticateRequest, async (req, res) => {
       tier,
       error:
         tier === 'elite'
-          ? 'You’ve used this month’s Kandoo Agent minutes. They renew on the 1st.'
-          : 'You’ve used your Kandoo Agent minutes for this month. Kandoo Elite includes 45 a month.',
+          ? 'You’ve used this month’s minutes with Mr. Kandoo. They renew on the 1st.'
+          : 'You’ve used your minutes with Mr. Kandoo for this month. Kandoo Elite includes 45 a month.',
     });
   }
 
@@ -142,14 +142,14 @@ router.get('/agent/session', authenticateRequest, async (req, res) => {
     );
     if (!response.ok) {
       console.error('ElevenLabs conversation token failed:', response.status);
-      return res.status(502).json({ error: 'Kandoo Agent is busy right now. Please try again.' });
+      return res.status(502).json({ error: 'Mr. Kandoo is busy right now. Please try again.' });
     }
     const body = (await response.json()) as { token?: string };
     if (!body.token) throw new Error('No token in the ElevenLabs response');
     return res.json({ success: true, token: body.token, tier, remainingSeconds: remaining, allowanceSeconds: allowance });
   } catch (error) {
     console.error('Agent session failed:', error);
-    return res.status(502).json({ error: 'Kandoo Agent is busy right now. Please try again.' });
+    return res.status(502).json({ error: 'Mr. Kandoo is busy right now. Please try again.' });
   }
 });
 
