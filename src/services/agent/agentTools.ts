@@ -39,6 +39,16 @@ import { requestPlaceResync } from '@/services/places/placeStore';
 import { MIN_RADIUS_M, placeGeometry, type LatLng } from '@/utils/geo';
 import * as Location from 'expo-location';
 
+import {
+  describeDraft,
+  discardDraft,
+  proposeDraft,
+  saveDraft,
+  type DraftCommit,
+  type DraftField,
+  type DraftShape,
+} from './agentDrafts';
+
 /**
  * Kandoo Agent's hands. Every tool is a thin wrapper over the SAME function the
  * app's own buttons call, plus what the button does next (schedule the
@@ -46,8 +56,12 @@ import * as Location from 'expo-location';
  * anything the user can, through the app's own rules (AGENTS §3.1: the model
  * decides, Kandoo's code acts).
  *
+ * Nothing is saved on the agent's word alone (AGENTS §3.3). Every change is
+ * PROPOSED as a card the user sees and can edit (agentDrafts.ts); it saves on
+ * the user's yes (save_draft) or their tap on Save. Reading stays instant.
+ *
  * Rules enforced HERE, not only in the prompt:
- *   - deleting / merging needs confirmed === true (a spoken yes);
+ *   - save_draft only works after the user has spoken since the card appeared;
  *   - no purchases, account or permission changes exist as tools at all;
  *   - errors come back as plain words the agent can say, never internals.
  *
@@ -70,9 +84,58 @@ const days = (v: unknown): number[] | null =>
 
 const ok = (data: unknown) => JSON.stringify({ ok: true, ...(data as object) });
 const fail = (message: string) => JSON.stringify({ ok: false, error: message });
-const NEED_CONFIRM = fail(
-  'Not done: ask the user to confirm first, then call again with confirmed=true only after they clearly say yes.'
-);
+
+/** Show a card; the agent asks, and saves only on the user's yes. */
+function propose(
+  tool: string,
+  title: string,
+  fields: (DraftField | null)[],
+  commit: DraftCommit,
+  opts: { destructive?: boolean; shape?: DraftShape | null } = {}
+): string {
+  const draft = proposeDraft({
+    tool,
+    title,
+    destructive: opts.destructive ?? false,
+    fields: fields.filter((f): f is DraftField => f !== null),
+    shape: opts.shape ?? null,
+    commit,
+  });
+  return ok({
+    awaitingYes: true,
+    ...describeDraft(draft),
+    next: 'Not saved yet. The card is on screen: ask briefly if it looks right. Yes → save_draft. A change → discard_draft, then propose again.',
+  });
+}
+
+const field = (key: string, label: string, value: string | null, kind: DraftField['kind'] = 'text', editable = true): DraftField => ({
+  key,
+  label,
+  value,
+  kind,
+  editable,
+});
+const shown = (key: string, label: string, value: string | null): DraftField | null =>
+  value ? field(key, label, value, 'text', false) : null;
+
+/** Names the agent has already seen, so a card can say WHAT it will change. */
+const seen = new Map<string, string>();
+const remember = (id: string, label: string | null | undefined) => {
+  if (id && label) seen.set(id, label);
+};
+
+function shapeOf(p: { center: LatLng | null; radiusM: number | null; area: LatLng[] | null }): DraftShape | null {
+  return p.center && p.radiusM ? { center: p.center, radiusM: p.radiusM, area: p.area } : null;
+}
+
+/** The drawn outline of a place the user named, for the card's map. */
+async function placeShapeNamed(name: string | null): Promise<DraftShape | null> {
+  if (!name) return null;
+  const places = await fetchPlaces().catch(() => []);
+  const n = name.toLowerCase();
+  const hit = places.find((x) => x.name.toLowerCase() === n || x.aliases?.some((a) => a.toLowerCase() === n));
+  return hit ? shapeOf(hit) : null;
+}
 
 /** Tool errors become one sentence the agent can say out loud. */
 function guard(tool: Tool): Tool {
@@ -118,11 +181,27 @@ async function here(): Promise<LatLng | null> {
 }
 
 export const kandooTools: Record<string, Tool> = {
+  // ---------------------------------------------------------------- drafts
+  save_draft: guard(async (p) => {
+    const id = str(p.draft_id);
+    if (!id) return fail('Which card? Use its draft_id.');
+    const outcome = await saveDraft(id, 'agent');
+    if (!outcome.ok) return fail(outcome.error);
+    return ok({ saved: true, alreadySavedByUser: outcome.alreadySaved ?? false, ...outcome.result });
+  }),
+
+  discard_draft: guard(async (p) => {
+    const id = str(p.draft_id);
+    if (!id) return fail('Which card? Use its draft_id.');
+    return discardDraft(id) ? ok({ discarded: id }) : fail('That card is already saved or gone.');
+  }),
+
   // ---------------------------------------------------------------- memory
   search_memory: guard(async (p) => {
     const query = str(p.query);
     if (!query) return fail('Say what to look for.');
     const matches = await agentSearch(query);
+    matches.forEach((m) => remember(m.id, m.content));
     return ok({ matches: matches.slice(0, 6) });
   }),
 
@@ -130,34 +209,56 @@ export const kandooTools: Record<string, Tool> = {
     const content = str(p.content);
     if (!content) return fail('Say what to remember.');
     const noteId = str(p.note_id);
-    if (noteId) {
-      await addMemoryToCapture(noteId, content);
-      return ok({ saved: content, addedToNote: noteId });
-    }
-    const capture = await createManualCapture({ memory: { content } }, { clientTime: new Date().toISOString() });
-    return ok({ saved: content, memoryId: capture?.memories?.[0]?.id ?? null });
+    return propose('add_memory', 'Remember', [field('content', 'Memory', content, 'long')], async (v) => {
+      const text = v.content?.trim();
+      if (!text) throw new Error('empty');
+      if (noteId) {
+        await addMemoryToCapture(noteId, text);
+        return { result: { remembered: text }, open: { pathname: '/memory' } };
+      }
+      const capture = await createManualCapture({ memory: { content: text } }, { clientTime: new Date().toISOString() });
+      return { result: { remembered: text, memoryId: capture?.memories?.[0]?.id ?? null }, open: { pathname: '/memory' } };
+    });
   }),
 
   edit_memory: guard(async (p) => {
     const id = str(p.memory_id);
     const content = str(p.content);
     if (!id || !content) return fail('Need the memory and its new wording.');
-    await updateMemory(id, content);
-    return ok({ updated: id });
+    return propose(
+      'edit_memory',
+      'Change memory',
+      [shown('was', 'Was', seen.get(id) ?? null), field('content', 'Now', content, 'long')],
+      async (v) => {
+        const text = v.content?.trim();
+        if (!text) throw new Error('empty');
+        await updateMemory(id, text);
+        remember(id, text);
+        return { result: { updated: id, content: text }, open: { pathname: '/memory' } };
+      }
+    );
   }),
 
   delete_memory: guard(async (p) => {
     const id = str(p.memory_id);
     if (!id) return fail('Which memory?');
-    if (p.confirmed !== true) return NEED_CONFIRM;
-    await deleteMemoryById(id);
-    return ok({ deleted: id });
+    return propose(
+      'delete_memory',
+      'Delete memory',
+      [shown('memory', 'Memory', seen.get(id) ?? 'This memory')],
+      async () => {
+        await deleteMemoryById(id);
+        return { result: { deleted: id } };
+      },
+      { destructive: true }
+    );
   }),
 
   // ---------------------------------------------------------------- notes
   list_notes: guard(async (p) => {
     const limit = Math.min(Math.max(num(p.limit) ?? 8, 1), 20);
     const captures = await fetchCaptureNotes({ limit, requireContent: true });
+    captures.forEach((c) => remember(c.id, c.note?.title ?? c.text.slice(0, 60)));
     return ok({
       notes: captures.map((c) => ({
         id: c.id,
@@ -175,6 +276,9 @@ export const kandooTools: Record<string, Tool> = {
     if (!id) return fail('Which note?');
     const note = await fetchCaptureNote(id);
     if (!note) return fail('That note is no longer there.');
+    remember(note.id, note.note?.title ?? note.text.slice(0, 60));
+    note.memories.forEach((m) => remember(m.id, m.content));
+    note.reminders.forEach((r) => remember(r.id, r.task));
     return ok({
       id: note.id,
       title: note.note?.title ?? null,
@@ -186,14 +290,23 @@ export const kandooTools: Record<string, Tool> = {
   }),
 
   create_note: guard(async (p) => {
-    const title = str(p.title);
     const body = str(p.body);
     if (!body) return fail('Say what the note should say.');
-    const capture = await createManualCapture(
-      { note: { title: title ?? body.split(/[.!?]/)[0].slice(0, 60), body } },
-      { clientTime: new Date().toISOString() }
+    const title = str(p.title) ?? body.split(/[.!?]/)[0].slice(0, 60);
+    return propose(
+      'create_note',
+      'New note',
+      [field('title', 'Title', title), field('body', 'Note', body, 'long')],
+      async (v) => {
+        const text = v.body?.trim();
+        if (!text) throw new Error('empty');
+        const capture = await createManualCapture(
+          { note: { title: v.title?.trim() || text.split(/[.!?]/)[0].slice(0, 60), body: text } },
+          { clientTime: new Date().toISOString() }
+        );
+        return { result: { noteId: capture?.id ?? null }, open: { pathname: '/memory' } };
+      }
     );
-    return ok({ noteId: capture?.id ?? null });
   }),
 
   edit_note: guard(async (p) => {
@@ -203,21 +316,37 @@ export const kandooTools: Record<string, Tool> = {
     if (!current) return fail('That note is no longer there.');
     const title = str(p.title) ?? current.note?.title ?? 'A note';
     const body = str(p.body) ?? current.note?.body ?? current.text;
-    await updateCaptureNote(id, { title, body });
-    return ok({ updated: id });
+    return propose(
+      'edit_note',
+      'Edit note',
+      [field('title', 'Title', title), field('body', 'Note', body, 'long')],
+      async (v) => {
+        await updateCaptureNote(id, { title: v.title?.trim() || title, body: v.body?.trim() || body });
+        return { result: { updated: id }, open: { pathname: '/memory' } };
+      }
+    );
   }),
 
   delete_note: guard(async (p) => {
     const id = str(p.note_id);
     if (!id) return fail('Which note?');
-    if (p.confirmed !== true) return NEED_CONFIRM;
-    await deleteCaptureById(id);
-    return ok({ deleted: id });
+    const note = await fetchCaptureNote(id).catch(() => null);
+    return propose(
+      'delete_note',
+      'Delete note',
+      [shown('note', 'Note', note?.note?.title ?? note?.text.slice(0, 80) ?? seen.get(id) ?? 'This note')],
+      async () => {
+        await deleteCaptureById(id);
+        return { result: { deleted: id } };
+      },
+      { destructive: true }
+    );
   }),
 
   // ---------------------------------------------------------------- reminders
   list_reminders: guard(async () => {
     const g = await fetchGroupedReminders();
+    [...g.needsReview, ...g.active, ...g.history].forEach((r) => remember(r.id, r.task));
     return ok({
       needsReview: g.needsReview.slice(0, 10).map(compactReminder),
       active: g.active.slice(0, 20).map(compactReminder),
@@ -229,77 +358,128 @@ export const kandooTools: Record<string, Tool> = {
     const task = str(p.task);
     if (!task) return fail('Say what the reminder is for.');
     const dueAt = iso(p.due_at);
-    const placeName = str(p.place_name);
+    const placeName = dueAt ? null : str(p.place_name);
     if (!dueAt && !placeName) return fail('A reminder needs a time or a place.');
-    const reminder = await createManualReminder({
-      task,
-      dueAt,
-      person: str(p.person),
-      repeatDays: days(p.repeat_days),
-      placeName: dueAt ? null : placeName,
-      placeTrigger: p.trigger === 'leave' ? 'leave' : 'arrive',
-      notBefore: iso(p.not_before),
-    });
-    // The phone owns the trigger (§3.2): a time goes to the alarm, a place to the geofences.
-    await scheduleReminder(reminder);
-    return ok({ reminder: compactReminder(reminder) });
+    const trigger = p.trigger === 'leave' ? 'leave' : 'arrive';
+    const notBefore = iso(p.not_before);
+    const repeatDays = days(p.repeat_days);
+    return propose(
+      'create_reminder',
+      'New reminder',
+      [
+        field('task', 'Reminder', task),
+        dueAt ? field('dueAt', 'When', dueAt, 'time') : null,
+        placeName ? field('place', trigger === 'leave' ? 'When you leave' : 'When you arrive at', placeName) : null,
+        placeName && notBefore ? field('notBefore', 'Not before', notBefore, 'time', false) : null,
+        field('person', 'With', str(p.person)),
+      ],
+      async (v) => {
+        const reminder = await createManualReminder({
+          task: v.task?.trim() || task,
+          dueAt: dueAt ? v.dueAt ?? dueAt : null,
+          person: v.person?.trim() || null,
+          repeatDays,
+          placeName: placeName ? v.place?.trim() || placeName : null,
+          placeTrigger: trigger,
+          notBefore,
+        });
+        // The phone owns the trigger (§3.2): a time goes to the alarm, a place to the geofences.
+        await scheduleReminder(reminder);
+        remember(reminder.id, reminder.task);
+        return { result: { reminder: compactReminder(reminder) }, open: { pathname: '/reminders' } };
+      },
+      { shape: await placeShapeNamed(placeName) }
+    );
   }),
 
   update_reminder: guard(async (p) => {
     const id = str(p.reminder_id);
     if (!id) return fail('Which reminder?');
-    const patch: Parameters<typeof updateReminder>[1] = {};
-    if (str(p.task)) patch.task = str(p.task)!;
-    if (iso(p.due_at)) patch.dueAt = iso(p.due_at);
-    if (p.person !== undefined) patch.person = str(p.person);
-    if (p.repeat_days !== undefined) patch.repeatDays = days(p.repeat_days);
-    if (Object.keys(patch).length === 0) return fail('Nothing to change.');
-    const updated = await updateReminder(id, patch);
-    await scheduleReminder(updated);
-    return ok({ reminder: compactReminder(updated) });
+    const g = await fetchGroupedReminders();
+    const current = [...g.active, ...g.needsReview, ...g.history].find((r) => r.id === id);
+    if (!current) return fail('That reminder is no longer there.');
+    const newDue = iso(p.due_at);
+    const repeat = p.repeat_days !== undefined ? days(p.repeat_days) : undefined;
+    if (!str(p.task) && !newDue && p.person === undefined && repeat === undefined) return fail('Nothing to change.');
+    return propose(
+      'update_reminder',
+      'Change reminder',
+      [
+        field('task', 'Reminder', str(p.task) ?? current.task),
+        newDue || current.due_at ? field('dueAt', 'When', newDue ?? current.due_at, 'time') : null,
+        field('person', 'With', p.person !== undefined ? str(p.person) : current.person),
+      ],
+      async (v) => {
+        const patch: Parameters<typeof updateReminder>[1] = {};
+        if (v.task && v.task.trim() !== current.task) patch.task = v.task.trim();
+        if (v.dueAt && v.dueAt !== current.due_at) patch.dueAt = v.dueAt;
+        if ((v.person?.trim() || null) !== (current.person ?? null)) patch.person = v.person?.trim() || null;
+        if (repeat !== undefined) patch.repeatDays = repeat;
+        const updated = Object.keys(patch).length ? await updateReminder(id, patch) : current;
+        await scheduleReminder(updated);
+        return { result: { reminder: compactReminder(updated) }, open: { pathname: '/reminders' } };
+      }
+    );
   }),
 
   complete_reminder: guard(async (p) => {
     const id = str(p.reminder_id);
     if (!id) return fail('Which reminder?');
-    await updateReminder(id, { status: 'fired' });
-    await cancelReminder(id);
-    return ok({ done: id });
+    return propose('complete_reminder', 'Mark done', [shown('task', 'Reminder', seen.get(id) ?? 'This reminder')], async () => {
+      await updateReminder(id, { status: 'fired' });
+      await cancelReminder(id);
+      return { result: { done: id }, open: { pathname: '/reminders' } };
+    });
   }),
 
   snooze_reminder: guard(async (p) => {
     const id = str(p.reminder_id);
     const minutes = num(p.minutes) ?? 15;
     if (!id) return fail('Which reminder?');
-    // A repeating reminder snoozes ONCE, as the app's own Snooze does — moving
-    // due_at would shift every future repeat.
-    const g = await fetchGroupedReminders();
-    const current = [...g.active, ...g.needsReview].find((r) => r.id === id);
-    if (current && isRepeating(current.repeat_days)) {
-      await snoozeRepeatingOnce(
-        { reminderId: id, title: current.task, body: current.person ? `With ${current.person}` : 'Kandoo reminder', insistent: current.insistent },
-        minutes
-      );
-      return ok({ snoozedOnce: id, minutes });
-    }
-    const dueAt = new Date(Date.now() + minutes * 60_000).toISOString();
-    const updated = await updateReminder(id, { dueAt, status: 'confirmed' });
-    await scheduleReminder(updated);
-    return ok({ reminder: compactReminder(updated) });
+    return propose(
+      'snooze_reminder',
+      'Snooze',
+      [shown('task', 'Reminder', seen.get(id) ?? 'This reminder'), shown('for', 'For', `${minutes} minutes`)],
+      async () => {
+        // A repeating reminder snoozes ONCE, as the app's own Snooze does — moving
+        // due_at would shift every future repeat.
+        const g = await fetchGroupedReminders();
+        const current = [...g.active, ...g.needsReview].find((r) => r.id === id);
+        if (current && isRepeating(current.repeat_days)) {
+          await snoozeRepeatingOnce(
+            { reminderId: id, title: current.task, body: current.person ? `With ${current.person}` : 'Kandoo reminder', insistent: current.insistent },
+            minutes
+          );
+          return { result: { snoozedOnce: id, minutes } };
+        }
+        const dueAt = new Date(Date.now() + minutes * 60_000).toISOString();
+        const updated = await updateReminder(id, { dueAt, status: 'confirmed' });
+        await scheduleReminder(updated);
+        return { result: { reminder: compactReminder(updated) }, open: { pathname: '/reminders' } };
+      }
+    );
   }),
 
   delete_reminder: guard(async (p) => {
     const id = str(p.reminder_id);
     if (!id) return fail('Which reminder?');
-    if (p.confirmed !== true) return NEED_CONFIRM;
-    await deleteReminderById(id);
-    await cancelReminder(id);
-    return ok({ deleted: id });
+    return propose(
+      'delete_reminder',
+      'Delete reminder',
+      [shown('task', 'Reminder', seen.get(id) ?? 'This reminder')],
+      async () => {
+        await deleteReminderById(id);
+        await cancelReminder(id);
+        return { result: { deleted: id } };
+      },
+      { destructive: true }
+    );
   }),
 
   // ---------------------------------------------------------------- people
   list_people: guard(async () => {
     const people = await fetchPeople();
+    people.forEach((x) => remember(x.id, x.name));
     return ok({
       people: people.slice(0, 30).map((x) => ({
         id: x.id,
@@ -316,6 +496,9 @@ export const kandooTools: Record<string, Tool> = {
     if (!id) return fail('Which person?');
     const person = await fetchPerson(id);
     if (!person) return fail('That person is no longer there.');
+    remember(person.id, person.name);
+    person.memories.forEach((m) => remember(m.id, m.content));
+    person.reminders.forEach((r) => remember(r.id, r.task));
     return ok({
       id: person.id,
       name: person.name,
@@ -326,16 +509,27 @@ export const kandooTools: Record<string, Tool> = {
 
   merge_people: guard(async (p) => {
     const keep = str(p.keep_person_id);
-    const others = Array.isArray(p.merge_person_ids) ? (p.merge_person_ids as unknown[]).map(str).filter(Boolean) as string[] : [];
+    const others = Array.isArray(p.merge_person_ids) ? ((p.merge_person_ids as unknown[]).map(str).filter(Boolean) as string[]) : [];
     if (!keep || others.length === 0) return fail('Say who to keep and who to fold in.');
-    if (p.confirmed !== true) return NEED_CONFIRM;
-    await mergePeople(keep, others);
-    return ok({ kept: keep, merged: others });
+    return propose(
+      'merge_people',
+      'Merge people',
+      [
+        shown('keep', 'Keep', seen.get(keep) ?? 'This person'),
+        shown('fold', 'Fold in', others.map((o) => seen.get(o) ?? 'another person').join(', ')),
+      ],
+      async () => {
+        await mergePeople(keep, others);
+        return { result: { kept: keep, merged: others }, open: { pathname: '/people' } };
+      },
+      { destructive: true }
+    );
   }),
 
   // ---------------------------------------------------------------- places
   list_places: guard(async () => {
     const places = await fetchPlaces();
+    places.forEach((x) => remember(x.id, x.name));
     return ok({
       places: places.map((x) => ({
         id: x.id,
@@ -354,12 +548,16 @@ export const kandooTools: Record<string, Tool> = {
     if (!id) return fail('Which place?');
     const place = await fetchPlace(id);
     if (!place) return fail('That place is no longer there.');
+    remember(place.id, place.name);
+    place.memories.forEach((m) => remember(m.id, m.content));
     return ok({
       id: place.id,
       name: place.name,
       drawn: !!place.center,
       memories: place.memories.slice(0, 10).map((m) => ({ id: m.id, content: m.content, savedAt: m.created_at })),
-      waiting: place.reminders.filter((r) => !r.due_at && (r.status === 'confirmed' || r.status === 'pending')).map((r) => ({ id: r.id, task: r.task })),
+      waiting: place.reminders
+        .filter((r) => !r.due_at && (r.status === 'confirmed' || r.status === 'pending'))
+        .map((r) => ({ id: r.id, task: r.task })),
     });
   }),
 
@@ -379,11 +577,11 @@ export const kandooTools: Record<string, Tool> = {
   draw_place: guard(async (p) => {
     const name = str(p.name);
     if (!name) return fail('What should the place be called?');
-    let drawing: Parameters<typeof createPlace>[1];
+    let shape: DraftShape;
     if (p.use_current_location === true) {
       const at = await here();
       if (!at) return fail('I can’t get your location. The user can allow location in the Places tab.');
-      drawing = { center: at, radiusM: num(p.radius_m) ?? MIN_RADIUS_M };
+      shape = { center: at, radiusM: num(p.radius_m) ?? MIN_RADIUS_M, area: null };
     } else {
       const found = lastFound.find((r) => r.id === str(p.result_id));
       if (!found) return fail('Call find_place first and use one of its result_id values.');
@@ -398,57 +596,97 @@ export const kandooTools: Record<string, Tool> = {
           ]
         : null;
       const geometry = area ? placeGeometry({ area }) : null;
-      drawing =
+      shape =
         area && geometry && !('error' in geometry)
-          ? { area }
-          : { center: found.center, radiusM: num(p.radius_m) ?? 150 };
+          ? { center: geometry.center, radiusM: geometry.radiusM, area }
+          : { center: found.center, radiusM: num(p.radius_m) ?? 150, area: null };
     }
-    const saved = await createPlace(name, drawing, { replace: p.replace === true });
-    requestPlaceResync();
-    return ok({ placeId: saved.id, name: saved.name });
+    const replace = p.replace === true;
+    return propose(
+      'draw_place',
+      replace ? 'Redraw place' : 'New place',
+      [field('name', 'Name', name)],
+      async (v, finalShape) => {
+        const s = finalShape ?? shape;
+        const drawing = s.area ? { area: s.area } : { center: s.center, radiusM: s.radiusM };
+        const saved = await createPlace(v.name?.trim() || name, drawing, { replace });
+        requestPlaceResync();
+        remember(saved.id, saved.name);
+        return { result: { placeId: saved.id, name: saved.name }, open: { pathname: '/places', params: { open: saved.id } } };
+      },
+      { shape }
+    );
   }),
 
   star_place: guard(async (p) => {
     const id = str(p.place_id);
     if (!id) return fail('Which place?');
-    await setPlaceStarred(id, p.starred !== false);
-    requestPlaceResync();
-    return ok({ starred: p.starred !== false });
+    const star = p.starred !== false;
+    return propose('star_place', star ? 'Star place' : 'Unstar place', [shown('place', 'Place', seen.get(id) ?? 'This place')], async () => {
+      await setPlaceStarred(id, star);
+      requestPlaceResync();
+      return { result: { starred: star }, open: { pathname: '/places', params: { open: id } } };
+    });
   }),
 
   rename_place: guard(async (p) => {
     const id = str(p.place_id);
     const name = str(p.name);
     if (!id || !name) return fail('Which place, and its new name?');
-    await updatePlace(id, { name });
-    return ok({ renamed: name });
+    return propose(
+      'rename_place',
+      'Rename place',
+      [shown('was', 'Was', seen.get(id) ?? null), field('name', 'New name', name)],
+      async (v) => {
+        const next = v.name?.trim() || name;
+        await updatePlace(id, { name: next });
+        remember(id, next);
+        return { result: { renamed: next }, open: { pathname: '/places', params: { open: id } } };
+      }
+    );
   }),
 
   merge_places: guard(async (p) => {
     const from = str(p.place_id);
     const into = str(p.into_place_id);
     if (!from || !into) return fail('Which place is the other name for which?');
-    if (p.confirmed !== true) return NEED_CONFIRM;
-    await mergePlaceInto(from, into);
-    requestPlaceResync();
-    return ok({ merged: from, into });
+    return propose(
+      'merge_places',
+      'Join places',
+      [shown('from', 'Other name', seen.get(from) ?? 'This place'), shown('into', 'Is really', seen.get(into) ?? 'that place')],
+      async () => {
+        await mergePlaceInto(from, into);
+        requestPlaceResync();
+        return { result: { merged: from, into }, open: { pathname: '/places', params: { open: into } } };
+      },
+      { destructive: true }
+    );
   }),
 
   stop_watching_place: guard(async (p) => {
     const id = str(p.place_id);
     if (!id) return fail('Which place?');
-    await clearPlaceArea(id);
-    requestPlaceResync();
-    return ok({ stopped: id });
+    return propose('stop_watching_place', 'Stop watching', [shown('place', 'Place', seen.get(id) ?? 'This place')], async () => {
+      await clearPlaceArea(id);
+      requestPlaceResync();
+      return { result: { stopped: id }, open: { pathname: '/places', params: { open: id } } };
+    });
   }),
 
   delete_place: guard(async (p) => {
     const id = str(p.place_id);
     if (!id) return fail('Which place?');
-    if (p.confirmed !== true) return NEED_CONFIRM;
-    await deletePlace(id);
-    requestPlaceResync();
-    return ok({ deleted: id });
+    return propose(
+      'delete_place',
+      'Delete place',
+      [shown('place', 'Place', seen.get(id) ?? 'This place')],
+      async () => {
+        await deletePlace(id);
+        requestPlaceResync();
+        return { result: { deleted: id } };
+      },
+      { destructive: true }
+    );
   }),
 
   // ---------------------------------------------------------------- app

@@ -112,6 +112,11 @@ export type PlaceDrawerProps = {
   knownNames?: string[];
   /** The user's other drawn places, shown faintly so one can be drawn inside another. */
   otherPlaces?: (PlaceGeometry & { id: string; name: string })[];
+  /**
+   * Kandoo Agent's cards: hand the drawn shape back instead of saving it —
+   * the card saves it later, on the user's yes.
+   */
+  onShape?: (shape: PlaceGeometry, name: string) => void;
 };
 
 export function PlaceDrawer({
@@ -123,6 +128,7 @@ export function PlaceDrawer({
   suggestedName,
   knownNames = [],
   otherPlaces = [],
+  onShape,
 }: PlaceDrawerProps) {
   const insets = useSafeAreaInsets();
   const [look, setLook] = useState<MapLook>('map');
@@ -353,6 +359,10 @@ export function PlaceDrawer({
   const save = async (replace = false) => {
     const trimmed = name.trim();
     if (!drawn || !trimmed || saving) return;
+    if (onShape) {
+      onShape(drawn, trimmed);
+      return;
+    }
     setSaving(true);
     setError(null);
     const drawing: PlaceDrawing = drawn.area
@@ -632,7 +642,7 @@ export function PlaceDrawer({
                 disabled={!name.trim() || saving}
                 accessibilityRole="button"
               >
-                <Text style={styles.ctaText}>{saving ? 'Saving…' : 'Save place'}</Text>
+                <Text style={styles.ctaText}>{onShape ? 'Back to Kandoo' : saving ? 'Saving…' : 'Save place'}</Text>
               </Pressable>
             </View>
           )}
