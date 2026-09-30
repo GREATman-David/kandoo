@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { AppState } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { AppLock } from '@/components/AppLock';
 import AppTabs from '@/components/app-tabs';
 import { NotificationRouter } from '@/features/reminders/NotificationRouter';
 import { flushOutbox } from '@/services/outbox';
@@ -40,6 +41,8 @@ export default function TabLayout() {
         <AnimatedSplashOverlay />
         <AppTabs />
         <NotificationRouter />
+        {/* Optional passcode over everything (the user's choice). */}
+        <AppLock />
       </ConversationProvider>
     </ThemeProvider>
   );

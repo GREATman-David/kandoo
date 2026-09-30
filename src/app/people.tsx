@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AddPersonSheet } from '@/components/AddPersonSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { OfflineNote } from '@/components/OfflineNote';
 import { PersonDetail } from '@/components/PersonDetail';
@@ -26,6 +27,7 @@ import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 
 /** Figma's clock: this person has a reminder still to come. */
 const CLOCK_ICON = require('@/assets/images/icons/chip-time.png');
+const PLUS_ICON = require('@/assets/images/icons/plus.png');
 
 import { useAuth } from '../features/Auth/useAuth';
 
@@ -37,6 +39,7 @@ export default function PeopleScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   // Merge mode: the long-pressed person is the survivor; the user multi-selects
   // the others to fold into them.
@@ -149,7 +152,7 @@ export default function PeopleScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top + spacing.space2 }]}>
       <Text style={styles.heading}>People</Text>
-      <Text style={styles.sub}>People Kandoo knows from what you’ve said.</Text>
+      <Text style={styles.sub}>People Kandoo remembers.</Text>
       <OfflineNote />
 
       <ScrollView
@@ -168,7 +171,7 @@ export default function PeopleScreen() {
         ) : people.length === 0 ? (
           <EmptyState
             line="No one yet."
-            help="Kandoo learns people from what you say."
+            help="Kandoo learns people from what you say, or add someone below."
           />
         ) : (
           people.map((person, index) => {
@@ -234,6 +237,28 @@ export default function PeopleScreen() {
         </View>
       ) : null}
 
+      {/* Docked above the tab bar, like Memory's "Add something new". */}
+      {isAuthenticated && !merging ? (
+        <View style={styles.addDock}>
+          <Pressable style={styles.add} onPress={() => setAdding(true)} accessibilityRole="button">
+            <View style={styles.addIconWrap}>
+              <Image source={PLUS_ICON} style={styles.addIcon} />
+            </View>
+            <Text style={styles.addText}>Add someone new</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <AddPersonSheet
+        visible={adding}
+        onClose={() => setAdding(false)}
+        onAdded={(person) => {
+          void load();
+          // Open them straight away — a name Kandoo already knew opens that person.
+          setSelected(person.id);
+        }}
+      />
+
       <PersonDetail
         personId={selected}
         visible={selected !== null}
@@ -252,6 +277,28 @@ function countLine(p: PersonSummary): string {
 }
 
 const styles = StyleSheet.create({
+  addDock: { paddingTop: spacing.space3, paddingBottom: spacing.space3 },
+  add: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minHeight: 52,
+    paddingHorizontal: spacing.space4,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.lineStrong,
+    backgroundColor: colors.accentWash,
+  },
+  addIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addIcon: { width: 14, height: 14, tintColor: colors.markRing },
+  addText: { ...text.bodyStrong, flex: 1, color: colors.ink },
   // People (Figma: kandoo-people).
   screen: { flex: 1, backgroundColor: colors.base, paddingHorizontal: spacing.space5 },
   heading: { ...text.displayL, letterSpacing: 0, color: colors.ink },

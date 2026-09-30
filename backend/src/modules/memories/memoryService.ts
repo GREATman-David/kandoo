@@ -185,7 +185,9 @@ export async function deleteMemory(
 export async function createManualMemory(
   userId: string,
   captureId: string,
-  content: string
+  content: string,
+  /** The person it is about, when added from People. */
+  person: string | null = null
 ): Promise<CreatedMemory> {
   const trimmed = content.trim();
   if (!trimmed) {
@@ -206,7 +208,7 @@ export async function createManualMemory(
       user_id: userId,
       capture_id: captureId,
       content: trimmed,
-      person: null,
+      person,
       location: null,
       topics: [],
       embedding,

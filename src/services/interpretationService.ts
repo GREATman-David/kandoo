@@ -662,6 +662,33 @@ export async function mergePeople(
   );
 }
 
+/** Add a person by hand, with optional things to remember about them. */
+export async function addPerson(
+  name: string,
+  facts: string[]
+): Promise<{ id: string; name: string; existed: boolean; memoriesAdded: number }> {
+  const accessToken = await getAccessTokenOrThrow();
+  const data = await apiFetch<{ person: { id: string; name: string; existed: boolean; memoriesAdded: number } }>(
+    '/people',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        name,
+        facts,
+        clientTime: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
+    },
+    'Could not add that person just now.',
+    { timeoutMs: AI_TIMEOUT_MS }
+  );
+  return data.person;
+}
+
 export async function deletePerson(id: string): Promise<void> {
   const accessToken = await getAccessTokenOrThrow();
   await apiFetch<unknown>(

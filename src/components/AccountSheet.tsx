@@ -1,7 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { NameSheet } from '@/components/NameSheet';
+import { PasscodeScreen, type PasscodeMode } from '@/components/PasscodeScreen';
+import { useAuth } from '@/features/Auth/useAuth';
+import { clearPasscode, hasPasscode, onLockChanged } from '@/services/appLock';
 import { signOut } from '@/services/authService';
+import { chosenName } from '@/services/profile';
 import {
   isUserCancelled,
   resetPurchasesUser,
@@ -27,6 +32,57 @@ export function AccountSheet({
   onEntitlementChange,
 }: AccountSheetProps) {
   const [busy, setBusy] = useState(false);
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  const [lockOn, setLockOn] = useState(false);
+  /** The passcode step in progress: set a new one, or prove it's you first. */
+  const [passcode, setPasscodeStep] = useState<{ mode: PasscodeMode; then: 'change' | 'off' | null } | null>(null);
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState<string | null>(null);
+
+  useEffect(() => setName(chosenName(user)), [user]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    const read = () =>
+      void hasPasscode(userId).then((on) => {
+        if (active) setLockOn(on);
+      });
+    read();
+    const unsubscribe = onLockChanged(read);
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [userId]);
+
+  function lockOptions() {
+    if (!lockOn) {
+      setPasscodeStep({ mode: 'set', then: null });
+      return;
+    }
+    Alert.alert('App lock', 'Kandoo asks for your passcode when you open it.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Change passcode', onPress: () => setPasscodeStep({ mode: 'verify', then: 'change' }) },
+      { text: 'Turn off', style: 'destructive', onPress: () => setPasscodeStep({ mode: 'verify', then: 'off' }) },
+    ]);
+  }
+
+  async function passcodeDone() {
+    const step = passcode;
+    if (!step || !userId) return setPasscodeStep(null);
+    if (step.mode === 'verify' && step.then === 'change') return setPasscodeStep({ mode: 'set', then: null });
+    if (step.mode === 'verify' && step.then === 'off') {
+      try {
+        await clearPasscode(userId);
+      } catch (error) {
+        console.error('Turning off the app lock failed:', error);
+        Alert.alert('Couldn’t turn it off', 'Please try again.');
+      }
+    }
+    setPasscodeStep(null);
+  }
 
   async function restore() {
     if (busy) return;
@@ -99,6 +155,18 @@ export function AccountSheet({
             </Pressable>
           )}
 
+          {isPro ? (
+            <Pressable style={styles.row} onPress={() => setNaming(true)} accessibilityRole="button">
+              <Text style={styles.rowText}>Kandoo calls you</Text>
+              <Text style={styles.rowHint}>{name ?? 'Add your name'}</Text>
+            </Pressable>
+          ) : null}
+
+          <Pressable style={styles.row} onPress={lockOptions} disabled={!userId} accessibilityRole="button">
+            <Text style={styles.rowText}>App lock</Text>
+            <Text style={styles.rowHint}>{lockOn ? 'On · a passcode opens Kandoo' : 'Off · add a passcode'}</Text>
+          </Pressable>
+
           <Pressable style={styles.row} onPress={restore} disabled={busy}>
             <Text style={styles.rowText}>
               {busy ? 'Restoring…' : 'Restore purchase'}
@@ -112,6 +180,23 @@ export function AccountSheet({
           </Pressable>
         </Pressable>
       </Pressable>
+
+      {userId ? (
+        <PasscodeScreen
+          visible={passcode !== null}
+          mode={passcode?.mode ?? 'set'}
+          userId={userId}
+          onDone={() => void passcodeDone()}
+          onCancel={() => setPasscodeStep(null)}
+        />
+      ) : null}
+
+      <NameSheet
+        visible={naming}
+        initialName={name}
+        onClose={() => setNaming(false)}
+        onSaved={setName}
+      />
     </Modal>
   );
 }

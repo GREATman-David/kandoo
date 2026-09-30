@@ -27,6 +27,7 @@ import { OfflineNote } from '@/components/OfflineNote';
 import { NoteDetail } from '@/components/NoteDetail';
 import { Onboarding } from '@/components/Onboarding';
 import { KandooAgent } from '@/components/KandooAgent';
+import { NameSheet } from '@/components/NameSheet';
 import { Paywall } from '@/components/Paywall';
 import { ReviewSheet } from '@/components/ReviewSheet';
 import { KandooSymbol } from '@/components/Symbol';
@@ -41,6 +42,7 @@ import { useEntitlement } from '@/hooks/useEntitlement';
 import { useKeyboardLift } from '@/hooks/useKeyboardLift';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import { useSpeechEnabled } from '@/hooks/useSpeechEnabled';
+import { chosenName } from '@/services/profile';
 import { speakAnswer, stopSpeaking } from '@/services/speech';
 import { configurePurchases, identifyUser } from '@/services/purchases';
 import {
@@ -161,6 +163,9 @@ function KandooHome() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  // Just unlocked Pro: ask what Kandoo should call them (once, skippable).
+  const [askName, setAskName] = useState(false);
+  const { user: account } = useAuth();
   const [noteId, setNoteId] = useState<string | null>(null);
   // Typing: lift the docked field above the keyboard, and shrink the mark so
   // what is being typed stays in view. Voice is full-screen and unaffected.
@@ -475,8 +480,11 @@ function KandooHome() {
         onPurchased={() => {
           entitlement.refresh();
           home.onProUnlocked();
+          if (!chosenName(account)) setAskName(true);
         }}
       />
+
+      <NameSheet visible={askName} welcome onClose={() => setAskName(false)} />
 
       <KandooAgent
         visible={agentOpen}

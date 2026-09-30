@@ -21,6 +21,7 @@ import {
 } from '@/services/agent/agentDrafts';
 import { kandooTools } from '@/services/agent/agentTools';
 import { fetchAgentToken, isProRequired, logFailure, userMessage } from '@/services/interpretationService';
+import { preferredName } from '@/services/profile';
 import { stopSpeaking } from '@/services/speech';
 import { supabase } from '@/services/supabase';
 import { colors, radius, spacing, text } from '@/theme/theme';
@@ -56,10 +57,6 @@ async function micAllowed(): Promise<boolean> {
   return status === PermissionsAndroid.RESULTS.GRANTED;
 }
 
-function firstName(meta: Record<string, unknown> | undefined): string {
-  const name = [meta?.name, meta?.full_name, meta?.first_name].find((v) => typeof v === 'string' && v.trim());
-  return typeof name === 'string' ? name.trim().split(/\s+/)[0] : 'there';
-}
 
 /** How an edited value reads back to Kandoo. */
 function spoken(field: DraftField, value: string): string {
@@ -169,7 +166,8 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
         conversationToken: token,
         connectionType: 'webrtc',
         dynamicVariables: {
-          user_name: firstName(data.user?.user_metadata),
+          // The name the user chose; 'there' tells Kandoo it has none.
+          user_name: preferredName(data.user) ?? 'there',
           client_time: localIsoNow(),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },

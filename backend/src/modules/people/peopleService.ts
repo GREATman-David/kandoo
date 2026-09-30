@@ -1,3 +1,6 @@
+import { createCapture } from '../captures/captureService';
+import { linkMemoryToEntities, resolveEntity } from '../entities/entityService';
+import { createManualMemory } from '../memories/memoryService';
 import { supabase } from '../../services/supabase';
 
 /**
@@ -136,7 +139,7 @@ function latest(memories: MemoryRow[], reminders: ReminderRow[]): string {
 export async function listPeople(userId: string): Promise<PersonSummary[]> {
   const { data: entities, error } = await supabase
     .from('entities')
-    .select('id, name')
+    .select('id, name, created_at')
     .eq('user_id', userId)
     .eq('kind', 'person');
 
@@ -145,7 +148,7 @@ export async function listPeople(userId: string): Promise<PersonSummary[]> {
     throw new Error('Failed to load people.');
   }
 
-  const rows = (entities ?? []) as { id: string; name: string }[];
+  const rows = (entities ?? []) as { id: string; name: string; created_at: string }[];
   if (rows.length === 0) return [];
 
   const ids = rows.map((e) => e.id);
@@ -193,7 +196,8 @@ export async function listPeople(userId: string): Promise<PersonSummary[]> {
       reminderCount: reminders.length,
       noteCount,
       hasActiveReminder: reminders.some(isActive),
-      lastMentionedAt: latest(memories, reminders),
+      // Someone added by hand with nothing said yet sorts by when they were added.
+      lastMentionedAt: memories.length || reminders.length ? latest(memories, reminders) : e.created_at,
     };
   });
 
@@ -397,4 +401,52 @@ export async function deletePerson(userId: string, personId: string): Promise<vo
     console.error('Delete person failed:', error);
     throw new Error('Failed to delete that person.');
   }
+}
+
+/**
+ * Add a person by hand from People, with optional things to remember about
+ * them. A name Kandoo already knows returns that person (people are deduped
+ * per user), so adding "Kofi" twice never makes two Kofis. Each fact becomes a
+ * memory linked to the person — embedded, so recall finds it.
+ */
+export async function addPerson(
+  userId: string,
+  name: string,
+  facts: string[],
+  opts: { clientTime: string; timezone: string }
+): Promise<{ id: string; name: string; existed: boolean; memoriesAdded: number }> {
+  const before = await supabase
+    .from('entities')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('kind', 'person')
+    .ilike('name', name.trim());
+  const existed = (before.data ?? []).length > 0;
+
+  const person = await resolveEntity(userId, 'person', name);
+  if (!person) throw new Error('A person needs a name.');
+
+  let memoriesAdded = 0;
+  if (facts.length > 0) {
+    const capture = await createCapture(userId, {
+      text: facts.join('\n'),
+      clientTime: opts.clientTime,
+      timezone: opts.timezone,
+      source: 'manual',
+    });
+    const first = person.name.split(/\s+/)[0].toLowerCase();
+    for (const fact of facts) {
+      // Keep each memory meaningful on its own: "likes tea" → "Kofi likes tea",
+      // "Birthday is 12 May" → "Kofi: Birthday is 12 May".
+      const content = fact.toLowerCase().includes(first)
+        ? fact
+        : /^[a-z]/.test(fact)
+          ? `${person.name} ${fact}`
+          : `${person.name}: ${fact}`;
+      const memory = await createManualMemory(userId, capture.id, content, person.name);
+      await linkMemoryToEntities(memory.id, [person.id]);
+      memoriesAdded += 1;
+    }
+  }
+  return { id: person.id, name: person.name, existed, memoriesAdded };
 }

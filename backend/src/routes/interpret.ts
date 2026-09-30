@@ -20,6 +20,7 @@ import {
 } from '../modules/captures/captureService';
 import { isProUser } from '../modules/entitlements/entitlementService';
 import {
+  addPerson,
   deletePerson,
   getPerson,
   listPeople,
@@ -685,6 +686,40 @@ router.get('/people', authenticateRequest, async (req, res) => {
   } catch (error) {
     console.error('List people failed:', error);
     return res.status(500).json({ error: 'Could not load people.' });
+  }
+});
+
+const MAX_PERSON_NAME = 60;
+const MAX_PERSON_FACTS = 5;
+
+/** Add a person by hand, with up to five things to remember about them. */
+router.post('/people', authenticateRequest, aiRateLimit, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).user.id;
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim().replace(/\s+/g, ' ') : '';
+  const facts: string[] = Array.isArray(req.body?.facts)
+    ? req.body.facts
+        .filter((f: unknown): f is string => typeof f === 'string')
+        .map((f: string) => f.trim())
+        .filter(Boolean)
+    : [];
+  if (!name) return res.status(400).json({ error: 'Add their name.' });
+  if (name.length > MAX_PERSON_NAME) return res.status(400).json({ error: 'That name is too long.' });
+  if (facts.length > MAX_PERSON_FACTS || facts.some((f) => f.length > MAX_CAPTURE_CHARS)) {
+    return res.status(400).json({ error: 'That’s too much to save at once.' });
+  }
+  const clientTime =
+    typeof req.body?.clientTime === 'string' && !Number.isNaN(Date.parse(req.body.clientTime))
+      ? req.body.clientTime
+      : new Date().toISOString();
+  try {
+    const person = await addPerson(userId, name, facts, {
+      clientTime,
+      timezone: resolveTimezone(req.body?.timezone),
+    });
+    return res.json({ success: true, person });
+  } catch (error) {
+    console.error('Add person failed:', error);
+    return res.status(500).json({ error: 'Could not add that person just now.' });
   }
 });
 
