@@ -11,7 +11,7 @@ import {
   logFailure,
   type Photo,
 } from '@/services/interpretationService';
-import { PhotoPermissionError, pickPhoto, type PhotoSource } from '@/services/photos';
+import { PhotoPermissionError, alertCameraOff, pickPhoto, type PhotoSource } from '@/services/photos';
 import { colors, radius, spacing, text } from '@/theme/theme';
 
 /**
@@ -65,7 +65,7 @@ export function PhotoStrip({ entityId, entityName, isPro, onNeedPro }: PhotoStri
         return;
       }
       if (error instanceof PhotoPermissionError) {
-        Alert.alert('Camera is off', error.message);
+        alertCameraOff(error);
         return;
       }
       logFailure('Adding a photo failed:', error);

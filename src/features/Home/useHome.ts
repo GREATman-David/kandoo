@@ -27,6 +27,7 @@ import { answerOffline, isLikelyQuestion } from '@/services/offlineRecall';
 import { onOutboxChange, pendingCaptures, saveManual, withPendingEdits } from '@/services/outbox';
 import {
   PhotoPermissionError,
+  alertCameraOff,
   currentPlaceIds,
   pickPhoto,
   type PhotoSource,
@@ -356,7 +357,7 @@ export function useHome() {
       prepared = await pickPhoto(source);
     } catch (caught) {
       if (caught instanceof PhotoPermissionError) {
-        Alert.alert('Camera is off', caught.message);
+        alertCameraOff(caught);
       } else {
         logFailure('Taking a photo failed:', caught);
         Alert.alert('That photo didn’t open', 'Try another photo, or take it again.');

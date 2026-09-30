@@ -1,5 +1,6 @@
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
+import { Alert, Linking } from 'react-native';
 
 import { placesInside } from '@/services/places/placeRules';
 import { readPlaceState } from '@/services/places/placeStore';
@@ -27,10 +28,33 @@ export type PreparedPhoto = {
 export type PhotoSource = 'camera' | 'library';
 
 export class PhotoPermissionError extends Error {
-  constructor() {
+  /** False once Android stops asking: only Settings can turn the camera back on. */
+  readonly canAskAgain: boolean;
+
+  constructor(canAskAgain: boolean) {
     super('Kandoo needs the camera to take a photo. You can allow it in Settings, or choose one from your gallery.');
     this.name = 'PhotoPermissionError';
+    this.canAskAgain = canAskAgain;
   }
+}
+
+/** Explain a refused camera, with a way into Settings when Android won't ask again. */
+export function alertCameraOff(error: PhotoPermissionError): void {
+  if (error.canAskAgain) {
+    Alert.alert('Camera is off', error.message);
+    return;
+  }
+  Alert.alert('Camera is off', error.message, [
+    { text: 'Not now', style: 'cancel' },
+    {
+      text: 'Open Settings',
+      onPress: () => {
+        Linking.openSettings().catch((caught: unknown) => {
+          console.warn('Opening Settings failed:', caught);
+        });
+      },
+    },
+  ]);
 }
 
 /** Resize and re-encode one image. Throws if the phone can't read it. */
@@ -62,7 +86,7 @@ export async function pickPhoto(source: PhotoSource): Promise<PreparedPhoto | nu
   let result: ImagePicker.ImagePickerResult;
   if (source === 'camera') {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) throw new PhotoPermissionError();
+    if (!permission.granted) throw new PhotoPermissionError(permission.canAskAgain);
     result = await ImagePicker.launchCameraAsync(options);
   } else {
     result = await ImagePicker.launchImageLibraryAsync(options);
