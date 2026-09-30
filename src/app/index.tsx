@@ -163,6 +163,14 @@ function KandooHome() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  // Which tier the paywall opens on, and why (e.g. Agent minutes used up).
+  const [paywallFocus, setPaywallFocus] = useState<'pro' | 'elite'>('pro');
+  const [paywallNote, setPaywallNote] = useState<string | null>(null);
+  const openPaywallFor = (focus: 'pro' | 'elite', note: string | null = null) => {
+    setPaywallFocus(focus);
+    setPaywallNote(note);
+    home.openPaywall();
+  };
   // Just unlocked Pro: ask what Kandoo should call them (once, skippable).
   const [askName, setAskName] = useState(false);
   const { user: account } = useAuth();
@@ -321,8 +329,9 @@ function KandooHome() {
           style={styles.talk}
           onPress={() => {
             stopSpeaking();
+            // Pro gets a five-minute taste each month; Elite the full allowance.
             if (entitlement.isPro) setAgentOpen(true);
-            else home.openPaywall();
+            else openPaywallFor('elite');
           }}
           hitSlop={10}
           accessibilityRole="button"
@@ -338,7 +347,7 @@ function KandooHome() {
           accessibilityLabel="Account"
         >
           <Text style={styles.badgeText}>
-            {entitlement.isPro ? 'Kandoo Pro' : 'Free'}
+            {entitlement.isElite ? 'Kandoo Elite' : entitlement.isPro ? 'Kandoo Pro' : 'Free'}
           </Text>
         </Pressable>
         </View>
@@ -475,8 +484,15 @@ function KandooHome() {
       ) : null}
 
       <Paywall
+        focus={paywallFocus}
+        note={paywallNote}
         visible={home.paywallVisible}
-        onClose={home.closePaywall}
+        onClose={() => {
+          home.closePaywall();
+          // Next time (a locked memory, the account sheet) it opens on Pro again.
+          setPaywallFocus('pro');
+          setPaywallNote(null);
+        }}
         onPurchased={() => {
           entitlement.refresh();
           home.onProUnlocked();
@@ -489,12 +505,13 @@ function KandooHome() {
       <KandooAgent
         visible={agentOpen}
         onClose={() => setAgentOpen(false)}
-        onNeedPro={home.openPaywall}
+        onNeedPro={(reason) => openPaywallFor('elite', reason)}
       />
 
       <AccountSheet
         visible={accountOpen}
         isPro={entitlement.isPro}
+        isElite={entitlement.isElite}
         onClose={() => setAccountOpen(false)}
         onGetPro={home.openPaywall}
         onEntitlementChange={entitlement.refresh}

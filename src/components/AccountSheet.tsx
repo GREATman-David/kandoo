@@ -17,6 +17,8 @@ import { colors, radius, spacing, text, withOpacity } from '@/theme/theme';
 export type AccountSheetProps = {
   visible: boolean;
   isPro: boolean;
+  /** Kandoo Elite (includes everything in Pro). */
+  isElite?: boolean;
   onClose: () => void;
   /** Free users tap "Get Kandoo Pro" — the caller opens the paywall. */
   onGetPro: () => void;
@@ -27,6 +29,7 @@ export type AccountSheetProps = {
 export function AccountSheet({
   visible,
   isPro,
+  isElite = false,
   onClose,
   onGetPro,
   onEntitlementChange,
@@ -134,12 +137,14 @@ export function AccountSheet({
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <Text style={styles.eyebrow}>{isPro ? 'Kandoo Pro' : 'Account'}</Text>
+          <Text style={styles.eyebrow}>{isElite ? 'Kandoo Elite' : isPro ? 'Kandoo Pro' : 'Account'}</Text>
 
           {isPro ? (
             <View style={styles.proRow}>
               <Text style={styles.proText}>
-                You’re on Kandoo Pro — your whole history is unlocked.
+                {isElite
+                  ? 'You’re on Kandoo Elite — everything in Pro, plus Kandoo Agent.'
+                  : 'You’re on Kandoo Pro — your whole history is unlocked.'}
               </Text>
             </View>
           ) : (

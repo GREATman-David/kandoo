@@ -1125,21 +1125,23 @@ export async function deletePlace(id: string): Promise<void> {
 // ---- Kandoo Agent ----
 
 /** A short-lived token for the private Kandoo agent. Pro only (402 otherwise). */
-export async function fetchAgentToken(): Promise<string> {
+export type AgentSession = { token: string; remainingSeconds: number; tier: 'pro' | 'elite' };
+
+export async function fetchAgentToken(): Promise<AgentSession> {
   const accessToken = await getAccessTokenOrThrow();
   const ask = (fresh: boolean) =>
-    apiFetch<{ token: string }>(
+    apiFetch<AgentSession>(
       `/agent/session${fresh ? '?fresh=1' : ''}`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
       'Kandoo Agent is not available right now.'
     );
   try {
-    return (await ask(false)).token;
+    return await ask(false);
   } catch (error) {
-    // The server caches Pro status; a just-bought or just-renewed Pro must not
-    // be sent back to the paywall. Ask once more without the cache.
+    // The server caches the tier; a just-bought Elite must not be sent back to
+    // the paywall. Ask once more without the cache.
     if (!isProRequired(error)) throw error;
-    return (await ask(true)).token;
+    return await ask(true);
   }
 }
 

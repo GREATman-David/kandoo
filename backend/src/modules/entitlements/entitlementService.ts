@@ -4,7 +4,8 @@
  * — a client boolean is trivially spoofable, and memory depth is the whole
  * product. The device only presents the paywall; the server decides who is Pro.
  *
- * Pro status comes from RevenueCat's V2 REST API, keyed by the Supabase user id
+ * Tiers: Free, Pro (`kandoo_pro`) and Elite (`kandoo_elite`, which includes
+ * everything in Pro). Status comes from RevenueCat's V2 REST API, keyed by the Supabase user id
  * (the app calls `Purchases.logIn(supabaseUserId)`, so RevenueCat's customer id
  * IS the Supabase id). Two calls, both cached:
  *   1. lookup_key `kandoo_pro` → RevenueCat's internal entitlement id
@@ -17,15 +18,19 @@
  */
 
 const API_BASE = 'https://api.revenuecat.com/v2';
-const ENTITLEMENT_LOOKUP_KEY = 'kandoo_pro';
+const PRO_LOOKUP_KEY = 'kandoo_pro';
+/** Kandoo Elite: everything in Pro, plus Kandoo Agent minutes. */
+const ELITE_LOOKUP_KEY = 'kandoo_elite';
 
 const ENTITLEMENT_ID_TTL_MS = 60 * 60 * 1000; // config barely changes
 const PRO_STATUS_TTL_MS = 60 * 1000; // brief, so a new purchase unlocks fast
 
 type Cached<T> = { value: T; at: number };
 
-let entitlementIdCache: Cached<string> | null = null;
-const proStatusCache = new Map<string, Cached<boolean>>();
+export type Tier = 'free' | 'pro' | 'elite';
+
+let entitlementIdCache: Cached<{ pro: string | null; elite: string | null }> | null = null;
+const tierCache = new Map<string, Cached<Tier>>();
 
 function credentials(): { secret: string; projectId: string } | null {
   const secret = process.env.REVENUECAT_SECRET_KEY;
@@ -57,46 +62,39 @@ async function revenueCatGet(
 }
 
 /**
- * Resolve the human lookup key `kandoo_pro` to RevenueCat's internal
- * entitlement id. Cached for an hour: entitlement configuration is not
- * something that changes between requests.
+ * Resolve the lookup keys `kandoo_pro` / `kandoo_elite` to RevenueCat's
+ * internal entitlement ids. Cached for an hour: entitlement configuration is
+ * not something that changes between requests.
  */
-async function resolveEntitlementId(
+async function resolveEntitlementIds(
   secret: string,
   projectId: string
-): Promise<string | null> {
-  if (
-    entitlementIdCache &&
-    Date.now() - entitlementIdCache.at < ENTITLEMENT_ID_TTL_MS
-  ) {
+): Promise<{ pro: string | null; elite: string | null }> {
+  if (entitlementIdCache && Date.now() - entitlementIdCache.at < ENTITLEMENT_ID_TTL_MS) {
     return entitlementIdCache.value;
   }
 
   const data = await revenueCatGet(`/projects/${projectId}/entitlements`, secret);
-  const items = (data?.items ?? []) as {
-    id?: string;
-    lookup_key?: string;
-  }[];
+  const items = (data?.items ?? []) as { id?: string; lookup_key?: string }[];
+  const idOf = (key: string) => items.find((item) => item.lookup_key === key)?.id ?? null;
+  const value = { pro: idOf(PRO_LOOKUP_KEY), elite: idOf(ELITE_LOOKUP_KEY) };
 
-  const match = items.find((item) => item.lookup_key === ENTITLEMENT_LOOKUP_KEY);
-  if (!match?.id) return null;
-
-  entitlementIdCache = { value: match.id, at: Date.now() };
-  return match.id;
+  entitlementIdCache = { value, at: Date.now() };
+  return value;
 }
 
 /**
- * Whether this user currently holds the `kandoo_pro` entitlement. Fails CLOSED
- * (treated as free) on any misconfiguration or REST failure: a transient
- * RevenueCat outage must never hand out Pro, and free still answers the last
- * 10 days, so the user is never blocked — only asked to upgrade for older ones.
+ * This user's tier. Fails CLOSED (treated as free) on any misconfiguration or
+ * REST failure: a transient RevenueCat outage must never hand out a paid tier,
+ * and free still answers the last 10 days, so the user is never blocked — only
+ * asked to upgrade.
  */
-export async function isProUser(
+export async function getUserTier(
   userId: string,
   /** Skip the cache — the app sends this right after a purchase. */
   opts: { fresh?: boolean } = {}
-): Promise<boolean> {
-  const cached = proStatusCache.get(userId);
+): Promise<Tier> {
+  const cached = tierCache.get(userId);
   if (!opts.fresh && cached && Date.now() - cached.at < PRO_STATUS_TTL_MS) {
     return cached.value;
   }
@@ -108,30 +106,32 @@ export async function isProUser(
       'RevenueCat is not configured (REVENUECAT_SECRET_KEY / ' +
         'REVENUECAT_PROJECT_ID); treating all users as free.'
     );
-    return false;
+    return 'free';
   }
 
-  let pro = false;
+  let tier: Tier = 'free';
   try {
-    const entitlementId = await resolveEntitlementId(
-      creds.secret,
-      creds.projectId
-    );
-    if (entitlementId) {
+    const ids = await resolveEntitlementIds(creds.secret, creds.projectId);
+    if (ids.pro || ids.elite) {
       const data = await revenueCatGet(
-        `/projects/${creds.projectId}/customers/${encodeURIComponent(
-          userId
-        )}/active_entitlements`,
+        `/projects/${creds.projectId}/customers/${encodeURIComponent(userId)}/active_entitlements`,
         creds.secret
       );
-      const active = (data?.items ?? []) as { entitlement_id?: string }[];
-      pro = active.some((item) => item.entitlement_id === entitlementId);
+      const active = new Set(
+        ((data?.items ?? []) as { entitlement_id?: string }[]).map((item) => item.entitlement_id)
+      );
+      tier = ids.elite && active.has(ids.elite) ? 'elite' : ids.pro && active.has(ids.pro) ? 'pro' : 'free';
     }
   } catch (error) {
     console.error('RevenueCat entitlement check failed; treating as free:', error);
-    pro = false;
+    tier = 'free';
   }
 
-  proStatusCache.set(userId, { value: pro, at: Date.now() });
-  return pro;
+  tierCache.set(userId, { value: tier, at: Date.now() });
+  return tier;
+}
+
+/** Pro features (whole history, Places, Kandoo's voice): Pro or Elite. */
+export async function isProUser(userId: string, opts: { fresh?: boolean } = {}): Promise<boolean> {
+  return (await getUserTier(userId, opts)) !== 'free';
 }

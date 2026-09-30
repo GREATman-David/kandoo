@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 
-import { onEntitlementChange, readEntitlement } from '@/services/purchases';
+import { onEntitlementChange, readTier, type Tier } from '@/services/purchases';
+import { setKandooVoiceAllowed } from '@/services/speech';
 
 /**
- * The one place the client reads the `kandoo_pro` entitlement. It drives what
+ * The one place the client reads the tier (`kandoo_pro` / `kandoo_elite`). It drives what
  * the UI shows — the Free/Pro badge, which older rows look locked — never what
  * access is granted; the backend enforces memory depth server-side.
  *
@@ -15,18 +16,20 @@ import { onEntitlementChange, readEntitlement } from '@/services/purchases';
  * listener and re-checked whenever the app returns to the foreground. A failed
  * read (offline) keeps the last known value rather than dropping to Free.
  */
-let isPro = false;
+let tier: Tier = 'free';
 const listeners = new Set<() => void>();
 
-function set(next: boolean) {
-  if (next === isPro) return;
-  isPro = next;
+function set(next: Tier) {
+  if (next === tier) return;
+  tier = next;
+  // Kandoo's own voice for spoken answers is a paid benefit; Free uses the phone's.
+  setKandooVoiceAllowed(next !== 'free');
   listeners.forEach((listener) => listener());
 }
 
 async function refreshNow(fresh = false): Promise<void> {
-  const pro = await readEntitlement(fresh);
-  if (pro !== null) set(pro);
+  const next = await readTier(fresh);
+  if (next !== null) set(next);
 }
 
 let started = false;
@@ -34,9 +37,9 @@ function start() {
   if (started) return;
   started = true;
   // Live updates from RevenueCat; `null` = just configured, so read now.
-  onEntitlementChange((pro) => {
-    if (pro === null) void refreshNow();
-    else set(pro);
+  onEntitlementChange((next) => {
+    if (next === null) void refreshNow();
+    else set(next);
   });
   AppState.addEventListener('change', (state) => {
     if (state === 'active') void refreshNow(true);
@@ -56,8 +59,9 @@ export function useEntitlement() {
     start();
   }, []);
 
-  const pro = useSyncExternalStore(subscribe, () => isPro);
+  const current = useSyncExternalStore(subscribe, () => tier);
   const refresh = useCallback(() => refreshNow(true), []);
 
-  return { isPro: pro, refresh };
+  // isPro = Pro features (Pro or Elite); isElite = Kandoo Agent's full allowance.
+  return { tier: current, isPro: current !== 'free', isElite: current === 'elite', refresh };
 }

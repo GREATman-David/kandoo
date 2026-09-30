@@ -66,8 +66,8 @@ function spoken(field: DraftField, value: string): string {
 export type KandooAgentProps = {
   visible: boolean;
   onClose: () => void;
-  /** Not Pro (the server said so): open the paywall. */
-  onNeedPro: () => void;
+  /** No Agent minutes for this user (the server said so): open the Elite paywall, with why. */
+  onNeedPro: (reason: string | null) => void;
 };
 
 export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
@@ -77,6 +77,8 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  /** Agent minutes left this month, from the server. */
+  const [minutesLeft, setMinutesLeft] = useState<number | null>(null);
   /** A new-place card whose shape the user is adjusting on the full map. */
   const [adjusting, setAdjusting] = useState<Draft | null>(null);
   const scroll = useRef<ScrollView>(null);
@@ -160,11 +162,15 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
         setPhase('error');
         return;
       }
-      const token = await fetchAgentToken();
+      const session = await fetchAgentToken();
+      setMinutesLeft(Math.max(1, Math.floor(session.remainingSeconds / 60)));
       const { data } = await supabase.auth.getUser();
       conversation.startSession({
-        conversationToken: token,
+        conversationToken: session.token,
         connectionType: 'webrtc',
+        // Tags the conversation with this account, so the server can count
+        // this month's minutes against the plan's allowance.
+        userId: data.user?.id,
         dynamicVariables: {
           // The name the user chose; 'there' tells Kandoo it has none.
           user_name: preferredName(data.user) ?? 'there',
@@ -175,7 +181,8 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
     } catch (caught) {
       if (isProRequired(caught)) {
         onClose();
-        onNeedPro();
+        // "Talking with Kandoo is part of Kandoo Elite." / "You've used your minutes…"
+        onNeedPro(caught instanceof Error ? caught.message : null);
         return;
       }
       logFailure('Starting Kandoo Agent failed:', caught);
@@ -312,6 +319,11 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
         <View style={styles.head}>
           <KandooSymbol state={markState} size={96} />
           <Text style={styles.status}>{status}</Text>
+          {minutesLeft !== null && phase !== 'error' ? (
+            <Text style={styles.allowance}>
+              {minutesLeft} {minutesLeft === 1 ? 'minute' : 'minutes'} left this month
+            </Text>
+          ) : null}
         </View>
 
         <ScrollView
@@ -420,6 +432,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   head: { alignItems: 'center', gap: spacing.space3, marginBottom: spacing.space5 },
   status: { ...text.label, letterSpacing: 1.5, color: colors.markRing },
+  allowance: { ...text.caption, color: colors.inkMuted },
   lines: { gap: spacing.space4, paddingBottom: spacing.space5 },
   // Kandoo's words and answers are Fraunces (AGENTS §7).
   kandoo: { ...text.answer, color: colors.ink },

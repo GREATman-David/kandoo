@@ -15,6 +15,13 @@ import Purchases, {
  * API and the entitlement follows the user across devices.
  */
 export const ENTITLEMENT_ID = 'kandoo_pro';
+/** Kandoo Elite: everything in Pro, plus Kandoo Agent minutes. */
+export const ELITE_ENTITLEMENT_ID = 'kandoo_elite';
+
+export type Tier = 'free' | 'pro' | 'elite';
+
+/** Paywall packages for Elite live in the same offering under these ids. */
+export const ELITE_PACKAGES = { monthly: 'elite_monthly', annual: 'elite_annual' } as const;
 
 let configured = false;
 
@@ -31,14 +38,14 @@ export function configurePurchases(): void {
   // Every entitlement change (purchase, restore, logIn/logOut, renewal,
   // expiry) is pushed to whoever is listening — see useEntitlement.
   Purchases.addCustomerInfoUpdateListener((info) => {
-    const pro = hasEntitlement(info.entitlements);
-    entitlementListeners.forEach((listener) => listener(pro));
+    const tier = tierOf(info.entitlements);
+    entitlementListeners.forEach((listener) => listener(tier));
   });
   entitlementListeners.forEach((listener) => listener(null));
 }
 
-/** Receives Pro status on every change; `null` means "configured, re-check". */
-type EntitlementListener = (pro: boolean | null) => void;
+/** Receives the tier on every change; `null` means "configured, re-check". */
+type EntitlementListener = (tier: Tier | null) => void;
 const entitlementListeners = new Set<EntitlementListener>();
 
 export function onEntitlementChange(listener: EntitlementListener): () => void {
@@ -49,19 +56,19 @@ export function onEntitlementChange(listener: EntitlementListener): () => void {
 }
 
 /**
- * Pro status, or null when it can't be read right now (not configured yet,
+ * The tier, or null when it can't be read right now (not configured yet,
  * offline). Callers keep their last known value on null instead of treating
  * an unanswered question as "free".
  */
-export async function readEntitlement(
+export async function readTier(
   /** Skip RevenueCat's ~5 min cache — e.g. on returning to the app. */
   fresh = false
-): Promise<boolean | null> {
+): Promise<Tier | null> {
   if (!configured) return null;
   try {
     if (fresh) await Purchases.invalidateCustomerInfoCache();
     const info = await Purchases.getCustomerInfo();
-    return hasEntitlement(info.entitlements);
+    return tierOf(info.entitlements);
   } catch (error) {
     console.warn('getCustomerInfo failed:', error);
     return null;
@@ -107,10 +114,20 @@ export async function getDefaultOffering(): Promise<PurchasesOffering | null> {
   }
 }
 
-function hasEntitlement(entitlements: {
-  active: Record<string, unknown>;
-}): boolean {
-  return typeof entitlements.active[ENTITLEMENT_ID] !== 'undefined';
+/** Pro features (Pro or Elite), or null when unknown — see readTier. */
+export async function readEntitlement(fresh = false): Promise<boolean | null> {
+  const tier = await readTier(fresh);
+  return tier === null ? null : tier !== 'free';
+}
+
+function tierOf(entitlements: { active: Record<string, unknown> }): Tier {
+  if (typeof entitlements.active[ELITE_ENTITLEMENT_ID] !== 'undefined') return 'elite';
+  if (typeof entitlements.active[ENTITLEMENT_ID] !== 'undefined') return 'pro';
+  return 'free';
+}
+
+function hasEntitlement(entitlements: { active: Record<string, unknown> }): boolean {
+  return tierOf(entitlements) !== 'free';
 }
 
 /** Whether this device currently reports `kandoo_pro` active. Drives what the
@@ -127,13 +144,13 @@ export async function isEntitled(): Promise<boolean> {
 }
 
 /**
- * Buy a package. Returns whether `kandoo_pro` is active afterwards. A cancel
+ * Buy a package. Returns the tier afterwards (Elite packages grant Elite). A cancel
  * throws `userCancelled` — the caller treats that as a quiet no-op, never an
  * error.
  */
-export async function purchasePackage(pkg: PurchasesPackage): Promise<boolean> {
+export async function purchasePackage(pkg: PurchasesPackage): Promise<Tier> {
   const { customerInfo } = await Purchases.purchasePackage(pkg);
-  return hasEntitlement(customerInfo.entitlements);
+  return tierOf(customerInfo.entitlements);
 }
 
 export async function restorePurchases(): Promise<boolean> {

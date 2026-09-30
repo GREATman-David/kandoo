@@ -5,8 +5,8 @@ import * as Speech from 'expo-speech';
 import { fetchSpeech } from '@/services/interpretationService';
 
 /**
- * Spoken recall answers, in Kandoo's voice — the same voice as Kandoo Agent, so
- * Free and Pro sound like one assistant. The audio comes from the backend
+ * Spoken recall answers. Pro and Elite hear Kandoo's own voice — the same voice
+ * as Kandoo Agent; Free hears the phone's voice, which costs nothing. The audio comes from the backend
  * (/speak; the ElevenLabs key never leaves the server). If that fails — offline,
  * quota, not configured — the phone's own voice (expo-speech) says it instead.
  * Speaking never blocks the UI; the text is already on screen.
@@ -16,6 +16,12 @@ import { fetchSpeech } from '@/services/interpretationService';
  */
 
 let player: AudioPlayer | null = null;
+/** Kandoo's voice is a paid benefit (the server enforces it too); Free uses the phone's. */
+let kandooVoiceAllowed = false;
+
+export function setKandooVoiceAllowed(allowed: boolean): void {
+  kandooVoiceAllowed = allowed;
+}
 /** Ends the current Kandoo-voice answer (releases it, tells the caller). */
 let finishCurrent: (() => void) | null = null;
 /** Bumped on every speak/stop, so a late download can't start talking. */
@@ -78,6 +84,10 @@ export function speakAnswer(text: string, onEnd?: () => void): void {
   stopSpeaking();
   if (!trimmed) {
     onEnd?.();
+    return;
+  }
+  if (!kandooVoiceAllowed) {
+    speakOnDevice(trimmed, onEnd);
     return;
   }
   const mine = generation;
