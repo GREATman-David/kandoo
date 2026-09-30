@@ -25,8 +25,13 @@ import { recallMemories } from '../modules/memories/recallService';
 const router = Router();
 
 const ELEVENLABS = 'https://api.elevenlabs.io/v1';
-/** Nathaniel, named Kandoo. Overridable without a deploy of the app. */
-const DEFAULT_VOICE_ID = 'Wq15xSaY3gWvazBRaGEU';
+/**
+ * Kandoo's voice. George (a built-in ElevenLabs voice) for now: Nathaniel
+ * (Wq15xSaY3gWvazBRaGEU) is a library voice, which the free plan can't use over
+ * the API. To switch back on a paid plan, set KANDOO_VOICE_ID and give the
+ * ElevenLabs agent the same voice — no app release needed.
+ */
+const DEFAULT_VOICE_ID = 'JBFqnCBsd6RMkjVDRZzb';
 const MAX_SPEAK_CHARS = 600;
 const TIMEOUT_MS = 15_000;
 
