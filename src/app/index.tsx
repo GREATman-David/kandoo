@@ -1092,6 +1092,9 @@ function Answered({
   onAskAgain,
 }: AnsweredProps) {
   const answer = recallAnswer(response);
+  const fromLocation = !!response?.results.some(
+    (r) => r.kind === 'recall' && r.status === 'ok' && r.fromLocation
+  );
   const { enabled, loading, toggle } = useSpeechEnabled();
   const shown = useSharedValue(0);
   // True while Kandoo is saying this answer: the primary button reads Stop, then
@@ -1183,7 +1186,7 @@ function Answered({
       >
         <View style={styles.answeredHead}>
           <Text style={styles.immersiveLabel}>
-            {speaking ? 'Speaking…' : 'Here’s what you told me'}
+            {speaking ? 'Speaking…' : fromLocation ? 'Here’s where you are' : 'Here’s what you told me'}
           </Text>
           <Pressable
             style={styles.speakerBtn}

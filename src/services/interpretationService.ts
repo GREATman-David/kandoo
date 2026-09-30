@@ -338,6 +338,8 @@ export type InterpretResult =
       memories: unknown[];
       /** The question reached past the free 10-day window; raise the paywall. */
       proBoundaryHit: boolean;
+      /** Answered on the phone from where the user is ("where am I?"), not from memories. */
+      fromLocation?: boolean;
     }
   | {
       kind: 'reminder' | 'memory' | 'recall';

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { logFailure } from '@/services/interpretationService';
 import {
@@ -29,9 +29,25 @@ export function PlacePermissionSheet({ visible, onClose, onGranted }: PlacePermi
 
   useEffect(() => {
     if (!visible) return;
-    void getPlacePermission()
-      .then(setState)
-      .catch((error) => logFailure('Reading location permission failed:', error));
+    const check = () =>
+      void getPlacePermission()
+        .then((next) => {
+          setState(next);
+          // Back from Settings with "Allow all the time" on: done — close
+          // rather than leaving the user to find "Not now".
+          if (next === 'granted') {
+            requestPlaceResync();
+            onGranted();
+          }
+        })
+        .catch((error) => logFailure('Reading location permission failed:', error));
+    check();
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') check();
+    });
+    return () => sub.remove();
+    // onGranted is the parent's close handler; re-subscribing on every render isn't needed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   const ask = async () => {

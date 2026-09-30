@@ -64,8 +64,12 @@ const ICONS = {
   minus: require('@/assets/images/icons/minus.png'),
 };
 
-/** Close enough to draw a single building. */
-const MAX_ZOOM = 20;
+/**
+ * Close enough to draw a single building. Satellite imagery ends at 19; past
+ * it the map only stretches tiles while still fetching, which read as a slow,
+ * stuck map on a phone connection.
+ */
+const MAX_ZOOM = 19;
 /** How long to wait for a GPS fix before saying so. */
 const LOCATE_TIMEOUT_MS = 15_000;
 

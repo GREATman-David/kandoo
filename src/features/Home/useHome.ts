@@ -20,6 +20,7 @@ import {
   logFailure,
 } from '@/services/interpretationService';
 import { scheduleReminder } from '@/services/localNotifications';
+import { answerWhereAmI } from '@/features/places/whereAmI';
 import { answerOffline, isLikelyQuestion } from '@/services/offlineRecall';
 import { onOutboxChange, pendingCaptures, saveManual, withPendingEdits } from '@/services/outbox';
 
@@ -200,6 +201,25 @@ export function useHome() {
     setState('understanding');
 
     try {
+      // "Where am I?" is answered on the phone — where the user is never goes
+      // to the server (AGENTS §3.5). Anything else goes to Kandoo as usual.
+      const here = await answerWhereAmI(text).catch((error) => {
+        logFailure('Answering "where am I" failed:', error);
+        return null;
+      });
+      if (here) {
+        setResponse({
+          success: true,
+          captureId: '',
+          summary: null,
+          confidence: 'high',
+          note: null,
+          results: [{ kind: 'recall', status: 'ok', answer: here, memories: [], proBoundaryHit: false, fromLocation: true }],
+        });
+        setState('answered');
+        return;
+      }
+
       const freshEntitlement = freshEntitlementNext.current;
       freshEntitlementNext.current = false;
       const result = await interpretText(text, { freshEntitlement });
