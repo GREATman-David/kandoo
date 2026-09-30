@@ -1253,7 +1253,10 @@ export async function fetchAgentToken(): Promise<AgentSession> {
 
 export type AgentMatch = {
   id: string;
-  kind: 'memory' | 'reminder';
+  /** 'note' = a capture's write-up; 'library' = a Library note. */
+  kind: 'memory' | 'reminder' | 'note' | 'library';
+  /** For a Library note: the category it is filed in. */
+  category?: string;
   content: string;
   person: string | null;
   place: string | null;

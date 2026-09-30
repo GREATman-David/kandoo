@@ -2,6 +2,8 @@ import { supabase } from '../../services/supabase';
 import { aiProvider, withDeadline } from '../ai';
 import { answerFromMatches } from '../ai/fallbackProvider';
 
+import { backfillNoteEmbeddings } from './noteEmbeddings';
+
 import type { RecallMemory } from '../ai/aiProvider';
 import type { RecallAction } from '../ai/interpretationSchema';
 
@@ -28,6 +30,12 @@ export async function recallMemories(
   if (!query) {
     throw new Error('Recall query cannot be empty.');
   }
+
+  // Notes written before 012 (or whose embed failed) get their meaning
+  // searchable in the background; this question already finds them by words.
+  backfillNoteEmbeddings(userId).catch((error) =>
+    console.error('Note embedding backfill failed:', error)
+  );
 
   let queryEmbedding: number[] | null = null;
   try {
@@ -132,6 +140,28 @@ async function fallbackRecall(
   if (memories.error) console.error('Fallback memory recall failed:', memories.error);
   if (reminders.error) console.error('Fallback reminder recall failed:', reminders.error);
 
+  // Notes and the Library too: a paying user's recall must reach everything,
+  // even with the embedding model down.
+  const [notes, library] = await Promise.all([
+    supabase
+      .from('captures')
+      .select('id, note, created_at')
+      .eq('user_id', userId)
+      .not('note', 'is', null)
+      .or(terms.flatMap((term) => [`note->>title.ilike.%${term}%`, `note->>body.ilike.%${term}%`]).join(','))
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    supabase
+      .from('library_notes')
+      .select('id, title, body, created_at, library_categories(name)')
+      .eq('user_id', userId)
+      .or(terms.flatMap((term) => [`title.ilike.%${term}%`, `body.ilike.%${term}%`]).join(','))
+      .order('updated_at', { ascending: false })
+      .limit(limit),
+  ]);
+  if (notes.error) console.error('Fallback note recall failed:', notes.error);
+  if (library.error) console.error('Fallback library recall failed:', library.error);
+
   const items: RecallMemory[] = [
     ...(memories.data ?? []).map((m) => ({
       id: m.id as string,
@@ -151,6 +181,28 @@ async function fallbackRecall(
       due_at: (r.due_at as string | null) ?? null,
       created_at: r.created_at as string,
     })),
+    ...(notes.data ?? []).map((c) => ({
+      id: c.id as string,
+      source: 'note' as const,
+      content: `${c.note?.title ?? ''}: ${c.note?.body ?? ''}`.slice(0, 1500),
+      person: null,
+      location: null,
+      due_at: null,
+      created_at: c.created_at as string,
+    })),
+    ...(library.data ?? []).map((n) => {
+      const shelf = n.library_categories as unknown as { name: string } | { name: string }[] | null;
+      return {
+        id: n.id as string,
+        source: 'library' as const,
+        content: `${n.title ? `${n.title}: ` : ''}${n.body as string}`.slice(0, 1500),
+        category: (Array.isArray(shelf) ? shelf[0]?.name : shelf?.name) ?? null,
+        person: null,
+        location: null,
+        due_at: null,
+        created_at: n.created_at as string,
+      };
+    }),
   ];
 
   const hits = (text: string) => {

@@ -1,5 +1,7 @@
 import { supabase } from '../../services/supabase';
 
+import { embedCaptureNote } from '../memories/noteEmbeddings';
+
 import type { KandooNote } from '../ai/interpretationSchema';
 
 export type CaptureInput = {
@@ -106,7 +108,11 @@ export async function attachNote(
     // Don't throw — see above. A missing `note` column (migration not applied)
     // lands here too, which is the intended graceful degradation.
     console.error('Attaching note to capture failed:', error);
+    return;
   }
+  // So recall finds the note by meaning, not only its words. In the
+  // background: it logs its own failure and the recall backfill retries.
+  void embedCaptureNote(userId, captureId, note);
 }
 
 export type CaptureNote = {
@@ -342,6 +348,8 @@ export async function updateCaptureNote(
     throw new Error('Failed to update that note.');
   }
   if (!data) throw new Error('Note not found.');
+  // The edited words replace the old meaning in recall.
+  void embedCaptureNote(userId, captureId, note);
 }
 
 /**

@@ -1,5 +1,7 @@
 import { supabase } from '../../services/supabase';
 
+import { embedLibraryNote } from '../memories/noteEmbeddings';
+
 import { LibraryInputError, type NoteInput } from './libraryInput';
 
 /**
@@ -194,6 +196,9 @@ export async function createNote(
     .single();
   if (error) throw error;
   await touchCategory(userId, categoryId);
+  // Recall reaches the Library by meaning too (012). In the background: it
+  // logs its own failure and the recall backfill retries.
+  void embedLibraryNote(userId, (data as LibraryNote).id, note);
   return data as LibraryNote;
 }
 
@@ -224,6 +229,7 @@ export async function updateNote(
   if (error) throw error;
   if (!data) return null;
   await touchCategory(userId, (data as LibraryNote).category_id);
+  void embedLibraryNote(userId, id, note);
   return data as LibraryNote;
 }
 

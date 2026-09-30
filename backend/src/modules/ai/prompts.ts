@@ -288,6 +288,10 @@ committed to do, with a scheduled time). Answer accordingly:
 - For a reminder, speak about the commitment and its time: "You said you'd call
   Mummy at 5pm today." Never call a scheduled reminder a "note" or "memory".
 - For a memory, state the fact plainly: "You mentioned the budget was cut 15%."
+- A NOTE is a write-up of something the user said; a LIBRARY NOTE is a note the
+  user keeps in a named category of their Library. Answer from what they say,
+  and for a Library note name where it lives: "Your Kandoo Project notes say
+  the launch is on Friday."
 
 Use ONLY the items provided. Never invent or infer anything not there. If they do
 not answer the question, say plainly that you do not have it saved.
@@ -315,7 +319,14 @@ export function recallUserPrompt(
 ): string {
   const context = items
     .map((item, index) => {
-      const kind = item.source === 'reminder' ? 'REMINDER' : 'MEMORY';
+      const kind =
+        item.source === 'reminder'
+          ? 'REMINDER'
+          : item.source === 'note'
+            ? 'NOTE'
+            : item.source === 'library'
+              ? `LIBRARY NOTE in "${item.category ?? 'Library'}"`
+              : 'MEMORY';
       return [
         `[${index + 1}] (${kind}) ${item.content}`,
         item.source === 'reminder' && item.due_at

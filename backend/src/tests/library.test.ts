@@ -55,3 +55,32 @@ describe('search terms', () => {
     assert.equal(searchTerm('  %%  '), null);
   });
 });
+
+describe('recall reaches the Library', () => {
+  it('tells the answer model a Library note is one, and which category it lives in', async () => {
+    const { recallUserPrompt } = await import('../modules/ai/prompts');
+    const prompt = recallUserPrompt('When is the launch?', [
+      {
+        id: 'n1',
+        source: 'library',
+        category: 'Kandoo Project',
+        content: 'Launch plan: ship on Friday.',
+        person: null,
+        location: null,
+        due_at: null,
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: 'c1',
+        source: 'note',
+        content: 'The Window: tomorrow’s speaking topic.',
+        person: null,
+        location: null,
+        due_at: null,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    assert.match(prompt, /\(LIBRARY NOTE in "Kandoo Project"\) Launch plan: ship on Friday\./);
+    assert.match(prompt, /\(NOTE\) The Window/);
+  });
+});

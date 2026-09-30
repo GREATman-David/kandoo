@@ -13,7 +13,13 @@ import type {
  */
 export type RecallMemory = {
   id: string;
-  source: 'memory' | 'reminder';
+  /**
+   * Also 'note' (the note Kandoo wrote up from a capture) and 'library' (a
+   * Library note) since 012 — recall reaches everything the user kept.
+   */
+  source: 'memory' | 'reminder' | 'note' | 'library';
+  /** The Library category a 'library' hit is filed in. */
+  category?: string | null;
   content: string;
   person: string | null;
   location: string | null;

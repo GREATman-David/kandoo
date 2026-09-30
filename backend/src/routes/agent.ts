@@ -164,7 +164,9 @@ router.post('/agent/search', authenticateRequest, aiRateLimit, async (req, res) 
       success: true,
       matches: matches.map((m) => ({
         id: m.id,
-        kind: m.source === 'reminder' ? 'reminder' : 'memory',
+        // 'note' = a capture's write-up; 'library' = a Library note (with its category).
+        kind: m.source,
+        category: m.category ?? undefined,
         content: m.content,
         person: m.person ?? null,
         place: m.location ?? null,
