@@ -23,8 +23,22 @@ function matches(haystack: string[], term: string): boolean {
   return haystack.some((word) => word.startsWith(term));
 }
 
+/**
+ * Question and filler words. "what is my speaking topic" should find the note
+ * about the speaking topic, not every card whose title happens to contain
+ * "is" — so these only count when the query is made of nothing else.
+ */
+const FILLER = new Set([
+  'what', 'when', 'where', 'who', 'why', 'how', 'which', 'is', 'are', 'was', 'were',
+  'am', 'be', 'my', 'me', 'mine', 'the', 'an', 'to', 'of', 'in', 'on', 'at', 'for',
+  'do', 'did', 'does', 'about', 'that', 'this', 'it', 'and', 'or', 'with', 'you',
+  'your', 'tell', 'say', 'said', 'have', 'has', 'had', 'any', 'can', 'could',
+]);
+
 export function searchNotes(notes: CaptureNote[], query: string): CaptureNote[] {
-  const terms = [...new Set(words(query))].filter((term) => term.length >= MIN_WORD);
+  const all = [...new Set(words(query))].filter((term) => term.length >= MIN_WORD);
+  const meaningful = all.filter((term) => !FILLER.has(term));
+  const terms = meaningful.length > 0 ? meaningful : all;
   if (terms.length === 0) return notes;
 
   const scored = notes.map((note, index) => {
@@ -53,8 +67,8 @@ export function searchNotes(notes: CaptureNote[], query: string): CaptureNote[] 
     return { note, index, hits, score };
   });
 
-  const all = scored.filter((s) => s.hits === terms.length);
-  const pool = all.length > 0 ? all : scored.filter((s) => s.hits > 0);
+  const everyWord = scored.filter((s) => s.hits === terms.length);
+  const pool = everyWord.length > 0 ? everyWord : scored.filter((s) => s.hits > 0);
 
   // Best score first; ties keep the list's own (newest-first) order.
   return pool
