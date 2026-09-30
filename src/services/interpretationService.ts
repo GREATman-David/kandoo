@@ -103,8 +103,10 @@ export function degradedReason(error: unknown): 'offline' | 'slow' {
  * it is a warning; anything else is a real error worth the red dev overlay.
  */
 export function logFailure(label: string, error: unknown): void {
-  // Offline, slow, or the AI busy upstream: expected states with their own UI.
-  if (error instanceof NetworkError || error instanceof AiBusyError) {
+  // Offline, slow, the AI busy upstream, or the server saying no to the input
+  // (4xx: a duplicate name, an empty note): expected states with their own UI.
+  const refusal = error instanceof ApiError && error.status !== undefined && error.status < 500;
+  if (error instanceof NetworkError || error instanceof AiBusyError || refusal) {
     console.warn(label, error.message);
   } else {
     console.error(label, error);

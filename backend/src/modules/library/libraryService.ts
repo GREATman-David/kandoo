@@ -111,7 +111,11 @@ export async function createCategory(userId: string, name: string): Promise<Libr
     .select('id, name, created_at, updated_at')
     .single();
   if (error) {
-    if (error.code === UNIQUE_VIOLATION) throw new DuplicateCategoryError(name);
+    if (error.code === UNIQUE_VIOLATION) {
+      // Name the shelf as the user actually spelled it when they made it.
+      const existing = await findCategoryByName(userId, name).catch(() => null);
+      throw new DuplicateCategoryError(existing?.name ?? name);
+    }
     throw error;
   }
   return { ...data, noteCount: 0 };
