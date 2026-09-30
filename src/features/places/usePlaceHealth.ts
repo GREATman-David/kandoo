@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Linking } from 'react-native';
 
 import { useEntitlement } from '@/hooks/useEntitlement';
@@ -25,8 +25,9 @@ export function usePlaceHealth(): { health: PlaceHealth; state: PlaceState | nul
   const { isPro } = useEntitlement();
   const [health, setHealth] = useState<PlaceHealth>({ kind: 'unknown' });
   const [state, setState] = useState<PlaceState | null>(null);
+  const rechecked = useRef(false);
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback(function refresh() {
     void (async () => {
       try {
         const [permission, servicesOn, stored] = await Promise.all([
@@ -44,7 +45,15 @@ export function usePlaceHealth(): { health: PlaceHealth; state: PlaceState | nul
         const last = stored.lastSync?.status;
         if (last === 'no-permission' || last === 'location-off' || last === 'not-pro') {
           requestPlaceResync();
+          // Read again once that sync has had time to land (it is debounced),
+          // so "Watching N places" appears without leaving the screen.
+          if (!rechecked.current) {
+            rechecked.current = true;
+            setTimeout(refresh, 4000);
+          }
+          return setHealth({ kind: 'unknown' });
         }
+        rechecked.current = false;
         if (last === 'error') return setHealth({ kind: 'error' });
         setHealth({ kind: 'watching', places: stored.lastSync?.places ?? Object.keys(stored.places).length });
       } catch (error) {
