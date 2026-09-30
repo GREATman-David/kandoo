@@ -4,7 +4,7 @@ import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { KandooSymbol } from '@/components/Symbol';
-import { checkPasscode, PASSCODE_LENGTH, resetLockBySigningOut, setPasscode } from '@/services/appLock';
+import { checkPasscode, PASSCODE_LENGTH, passcodeLength, resetLockBySigningOut, setPasscode } from '@/services/appLock';
 import { colors, radius, spacing, text } from '@/theme/theme';
 
 /**
@@ -42,13 +42,21 @@ export function PasscodeScreen({ visible, mode, userId, onDone, onCancel, intro 
   const [busy, setBusy] = useState(false);
   const [waitUntil, setWaitUntil] = useState(0);
   const [now, setNow] = useState(Date.now());
+  // New passcodes are PASSCODE_LENGTH; checking one uses the length it was set with.
+  const [length, setLength] = useState(PASSCODE_LENGTH);
 
   useEffect(() => {
     if (!visible) return;
     setEntry('');
     setFirst(null);
     setMessage(null);
-  }, [visible, mode]);
+    let active = true;
+    if (mode === 'set') setLength(PASSCODE_LENGTH);
+    else void passcodeLength(userId).then((n) => active && setLength(n));
+    return () => {
+      active = false;
+    };
+  }, [visible, mode, userId]);
 
   // Count down a cool-down after too many wrong tries.
   useEffect(() => {
@@ -119,9 +127,9 @@ export function PasscodeScreen({ visible, mode, userId, onDone, onCancel, intro 
       setEntry((e) => e.slice(0, -1));
       return;
     }
-    const next = (entry + key).slice(0, PASSCODE_LENGTH);
+    const next = (entry + key).slice(0, length);
     setEntry(next);
-    if (next.length === PASSCODE_LENGTH) void submit(next);
+    if (next.length === length) void submit(next);
   };
 
   const seconds = Math.ceil((waitUntil - now) / 1000);
@@ -155,8 +163,8 @@ export function PasscodeScreen({ visible, mode, userId, onDone, onCancel, intro 
               {intro ?? `${PASSCODE_LENGTH} digits. Kandoo will ask for it when you open the app.`}
             </Text>
           ) : null}
-          <View style={styles.dots} accessibilityLabel={`${entry.length} of ${PASSCODE_LENGTH} digits`}>
-            {Array.from({ length: PASSCODE_LENGTH }, (_, i) => (
+          <View style={styles.dots} accessibilityLabel={`${entry.length} of ${length} digits`}>
+            {Array.from({ length }, (_, i) => (
               <View key={i} style={[styles.dot, i < entry.length && styles.dotFilled]} />
             ))}
           </View>

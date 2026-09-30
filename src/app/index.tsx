@@ -502,7 +502,10 @@ function KandooHome() {
         }}
       />
 
-      <NameSheet visible={askName} welcome onClose={() => setAskName(false)} />
+      <NameSheet
+        visible={askName}
+        welcome={entitlement.isElite ? 'Kandoo Elite' : 'Kandoo Pro'}
+        onClose={() => setAskName(false)} />
 
       <KandooAgent
         visible={agentOpen}

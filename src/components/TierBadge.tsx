@@ -29,14 +29,17 @@ type Props = { tier: Tier; onPress: () => void };
 const MEDAL = 14;
 
 /** The Adinkrahene mark at badge size, still, in its fixed brand colours. */
-function Medallion({ ground }: { ground: string }) {
-  return (
+function Medallion({ ground, rim }: { ground: string; rim?: boolean }) {
+  const mark = (
     <View style={[styles.medalOuter, { backgroundColor: ground }]}>
       <View style={[styles.medalRing, { backgroundColor: ground }]}>
         <View style={styles.medalCore} />
       </View>
     </View>
   );
+  // On Elite's dark ground the mark's dark outer ring would vanish: a gold
+  // rim around the medallion keeps the whole mark visible.
+  return rim ? <View style={styles.medalRim}>{mark}</View> : mark;
 }
 
 export function TierBadge({ tier, onPress }: Props) {
@@ -78,7 +81,7 @@ export function TierBadge({ tier, onPress }: Props) {
         style={[styles.pill, tier === 'free' ? styles.free : tier === 'pro' ? styles.pro : styles.elite, popStyle]}
         onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
       >
-        {tier !== 'free' ? <Medallion ground={tier === 'elite' ? colors.markPale : colors.base} /> : null}
+        {tier !== 'free' ? <Medallion ground={tier === 'elite' ? colors.markPale : colors.base} rim={tier === 'elite'} /> : null}
         <Text style={tier === 'free' ? styles.freeText : tier === 'pro' ? styles.proText : styles.eliteText}>{label}</Text>
         {tier === 'elite' ? <Animated.View pointerEvents="none" style={[styles.sweep, sweepStyle]} /> : null}
       </Animated.View>
@@ -132,6 +135,14 @@ const styles = StyleSheet.create({
     borderRadius: MEDAL,
     borderWidth: MEDAL * (8 / 72) + 0.5,
     borderColor: colors.markRing,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  medalRim: {
+    width: MEDAL + 4,
+    height: MEDAL + 4,
+    borderRadius: (MEDAL + 4) / 2,
+    backgroundColor: colors.markCore,
     alignItems: 'center',
     justifyContent: 'center',
   },

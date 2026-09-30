@@ -13,13 +13,13 @@ import { colors, radius, spacing, text, withOpacity } from '@/theme/theme';
 export type NameSheetProps = {
   visible: boolean;
   initialName?: string | null;
-  /** Shown just after upgrading: a warmer title, and "Not now" to skip. */
-  welcome?: boolean;
+  /** Just after upgrading, the plan they joined: a warmer title, and "Not now" to skip. */
+  welcome?: string;
   onClose: () => void;
   onSaved?: (name: string) => void;
 };
 
-export function NameSheet({ visible, initialName, welcome = false, onClose, onSaved }: NameSheetProps) {
+export function NameSheet({ visible, initialName, welcome, onClose, onSaved }: NameSheetProps) {
   const [name, setName] = useState(initialName ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export function NameSheet({ visible, initialName, welcome = false, onClose, onSa
       <KeyboardAvoidingView behavior="padding" style={styles.flex}>
         <Pressable style={styles.backdrop} onPress={onClose}>
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.eyebrow}>{welcome ? 'Welcome to Kandoo Pro' : 'Your name'}</Text>
+            <Text style={styles.eyebrow}>{welcome ? `Welcome to ${welcome}` : 'Your name'}</Text>
             <Text style={styles.title}>What should Kandoo call you?</Text>
             <Text style={styles.hint}>Kandoo will use it when you talk together.</Text>
             <TextInput

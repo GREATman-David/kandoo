@@ -21,7 +21,9 @@ const COOL_DOWN_MS = 30_000;
 /** Rounds of hashing: slows a guessing attack on a stolen copy. */
 const ROUNDS = 1000;
 
-type Stored = { salt: string; hash: string; rounds: number };
+/** `digits` is absent on passcodes set before the switch to 6 digits (they were 4). */
+type Stored = { salt: string; hash: string; rounds: number; digits?: number };
+const LEGACY_LENGTH = 4;
 
 // SecureStore keys allow [A-Za-z0-9._-] only; Supabase ids are UUIDs.
 const lockKey = (userId: string) => `kandoo.lock.${userId}`;
@@ -56,10 +58,25 @@ export async function hasPasscode(userId: string): Promise<boolean> {
   }
 }
 
+/**
+ * How many digits the user's current passcode has, so the unlock keypad
+ * matches it — an older 4-digit passcode keeps working until they change it.
+ */
+export async function passcodeLength(userId: string): Promise<number> {
+  try {
+    const raw = await SecureStore.getItemAsync(lockKey(userId));
+    if (!raw) return PASSCODE_LENGTH;
+    return (JSON.parse(raw) as Stored).digits ?? LEGACY_LENGTH;
+  } catch (error) {
+    console.warn('Reading the passcode length failed:', error);
+    return PASSCODE_LENGTH;
+  }
+}
+
 export async function setPasscode(userId: string, passcode: string): Promise<void> {
   if (!isValidPasscode(passcode)) throw new Error(`A passcode is ${PASSCODE_LENGTH} digits.`);
   const salt = toHex(Crypto.getRandomBytes(16));
-  const stored: Stored = { salt, hash: await stretch(passcode, salt, ROUNDS), rounds: ROUNDS };
+  const stored: Stored = { salt, hash: await stretch(passcode, salt, ROUNDS), rounds: ROUNDS, digits: PASSCODE_LENGTH };
   await SecureStore.setItemAsync(lockKey(userId), JSON.stringify(stored));
   await markLockOffered(userId);
   notifyLockChanged();
