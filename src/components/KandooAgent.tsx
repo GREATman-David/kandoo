@@ -255,7 +255,12 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
   };
 
   const discardByTap = (draft: Draft) => {
-    if (discardDraft(draft.id)) tell(`The user dismissed card ${draft.id} (${draft.title}). It was not saved.`);
+    if (!discardDraft(draft.id)) return;
+    tell(`The user dismissed card ${draft.id} (${draft.title}). It was not saved.`);
+    // The conversation already ended and nothing else waits: head Home.
+    if (phase === 'ended' && !draftsRef.current.some((d) => d.status === 'draft')) {
+      setTimeout(() => finish('/'), 900);
+    }
   };
 
   const editByTap = (draft: Draft, field: DraftField, value: string) => {

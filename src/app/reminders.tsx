@@ -68,12 +68,6 @@ function endOfToday(): number {
   return d.getTime();
 }
 
-function startOfToday(): number {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
 export default function RemindersScreen() {
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuth();
@@ -244,13 +238,14 @@ export default function RemindersScreen() {
     ]);
   };
 
-  // Overdue stays in front of the user until they complete it, but under its
-  // own heading — a reminder from last week is not "Today".
+  // Overdue stays in front of the user until they complete it, under its own
+  // heading — a reminder whose time has passed (this morning or last week) is
+  // not "Today" in the same way as one still to come.
   const cutoff = endOfToday();
-  const todayStart = startOfToday();
-  const overdue = groups.active.filter((r) => r.due_at && nextDue(r) < todayStart);
+  const now = Date.now();
+  const overdue = groups.active.filter((r) => r.due_at && nextDue(r) < now);
   const today = groups.active.filter(
-    (r) => r.due_at && nextDue(r) >= todayStart && nextDue(r) <= cutoff
+    (r) => r.due_at && nextDue(r) >= now && nextDue(r) <= cutoff
   );
   // Place reminders have no time: they wait for an arrival, under their own
   // heading rather than lost at the end of "Upcoming".

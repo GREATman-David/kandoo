@@ -1,6 +1,8 @@
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
+import { supabase } from './supabase';
+
 /**
  * Kandoo's app lock: an optional passcode the user chooses. Kandoo holds
  * sensitive memories, so opening it can require the passcode — but only if
@@ -12,7 +14,7 @@ import * as SecureStore from 'expo-secure-store';
  * the lock, and everything the user saved is on the server.
  */
 
-export const PASSCODE_LENGTH = 4;
+export const PASSCODE_LENGTH = 6;
 /** Wrong tries allowed before a short wait. */
 const FREE_TRIES = 5;
 const COOL_DOWN_MS = 30_000;
@@ -61,6 +63,25 @@ export async function setPasscode(userId: string, passcode: string): Promise<voi
   await SecureStore.setItemAsync(lockKey(userId), JSON.stringify(stored));
   await markLockOffered(userId);
   notifyLockChanged();
+}
+
+/**
+ * "Forgot passcode?": the user proves who they are by signing in again. This
+ * clears the lock on this phone and signs out; nothing they saved is lost —
+ * it lives in their account. Returns false if signing out failed.
+ */
+export async function resetLockBySigningOut(userId: string): Promise<boolean> {
+  try {
+    await clearPasscode(userId);
+  } catch (error) {
+    console.warn('Clearing the passcode failed:', error);
+  }
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    console.warn('Sign-out to reset the passcode failed:', error.message);
+    return false;
+  }
+  return true;
 }
 
 export async function clearPasscode(userId: string): Promise<void> {

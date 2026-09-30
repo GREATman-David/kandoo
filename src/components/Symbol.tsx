@@ -159,6 +159,11 @@ export function KandooSymbol({ state, size, gapColor }: SymbolProps) {
       -1,
       false
     );
+    // An endless loop must end with its view: when a screen holding the mark
+    // closes (Kandoo Agent, the passcode), stop it on the UI thread too — a
+    // loop left running against an unmounted view was one suspect in native
+    // animation crashes seen in QA.
+    return () => cancelAnimation(scale);
   }, [motion, reduceMotion, scale]);
 
   const animatedStyle = useAnimatedStyle(() => ({

@@ -54,6 +54,9 @@ function sentence(line: string): string {
   return /[.!?]$/.test(t) ? t : `${t}.`;
 }
 
+/** Beyond this, the nearest of the user's places isn't worth mentioning. */
+export const NEAREST_MAX_M = 50_000;
+
 export function composeWhereAnswer(question: WhereQuestion, facts: WhereFacts): string {
   const [here, ...around] = facts.inside;
 
@@ -69,8 +72,10 @@ export function composeWhereAnswer(question: WhereQuestion, facts: WhereFacts): 
 
   if (!here) {
     const where = facts.area ? `You're around ${facts.area}` : 'You’re not at any of your places';
-    const tail = facts.nearest
-      ? `${facts.area ? ' — not at any of your places. ' : '. '}${facts.nearest.name} is ${formatDistance(facts.nearest.distanceM)} away.`
+    // "School is 11,293 km away" is noise: only a place within reach is worth naming.
+    const nearest = facts.nearest && facts.nearest.distanceM <= NEAREST_MAX_M ? facts.nearest : null;
+    const tail = nearest
+      ? `${facts.area ? ' — not at any of your places. ' : '. '}${nearest.name} is ${formatDistance(nearest.distanceM)} away.`
       : '.';
     return `${where}${tail}`;
   }

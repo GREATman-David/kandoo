@@ -4,6 +4,7 @@ import Animated, {
   interpolateColor,
   useAnimatedStyle,
   useSharedValue,
+  cancelAnimation,
   withRepeat,
   withSequence,
   withTiming,
@@ -92,6 +93,8 @@ export function MemoryCard({
       -1,
       false
     );
+    // End the endless loop with its view (see Symbol.tsx).
+    return () => cancelAnimation(breathe);
   }, [state, breathe]);
 
   const cardAnimatedStyle = useAnimatedStyle(() => {

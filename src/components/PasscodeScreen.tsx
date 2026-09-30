@@ -1,18 +1,20 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { KandooSymbol } from '@/components/Symbol';
-import { checkPasscode, PASSCODE_LENGTH, setPasscode } from '@/services/appLock';
+import { checkPasscode, PASSCODE_LENGTH, resetLockBySigningOut, setPasscode } from '@/services/appLock';
 import { colors, radius, spacing, text } from '@/theme/theme';
 
 /**
  * The passcode screen, in three modes:
  *   - 'set'    choose a passcode, then enter it again to confirm;
  *   - 'unlock' open Kandoo (full screen, no way around it but the passcode or
- *              "Forgot passcode?", which signs out);
+ *              "Forgot passcode?");
  *   - 'verify' prove it's you before changing or removing the lock.
+ * "Forgot passcode?" (unlock and verify) resets the lock by signing in again:
+ * the account password is the recovery, and no memory is lost.
  * Its own keypad, so no system keyboard, autofill or suggestion bar ever sees
  * the digits. The mark stays whole; state is colour (AGENTS §7).
  */
@@ -26,15 +28,13 @@ export type PasscodeScreenProps = {
   onDone: () => void;
   /** 'set' and 'verify' can be backed out of; 'unlock' cannot. */
   onCancel?: () => void;
-  /** 'unlock' only: sign out, which clears the lock. */
-  onForgot?: () => void;
   /** 'set' only: why Kandoo is asking (the first-time offer). */
   intro?: string;
 };
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'] as const;
 
-export function PasscodeScreen({ visible, mode, userId, onDone, onCancel, onForgot, intro }: PasscodeScreenProps) {
+export function PasscodeScreen({ visible, mode, userId, onDone, onCancel, intro }: PasscodeScreenProps) {
   const insets = useSafeAreaInsets();
   const [entry, setEntry] = useState('');
   const [first, setFirst] = useState<string | null>(null);
@@ -126,6 +126,24 @@ export function PasscodeScreen({ visible, mode, userId, onDone, onCancel, onForg
 
   const seconds = Math.ceil((waitUntil - now) / 1000);
 
+  const forgot = () => {
+    Alert.alert(
+      'Forgot your passcode?',
+      'Sign in to Kandoo again and the passcode is cleared on this phone. Everything you’ve saved stays safe in your account.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign in again',
+          onPress: () => {
+            void resetLockBySigningOut(userId).then((ok) => {
+              if (!ok) setMessage('Couldn’t sign out just now. Check your connection and try again.');
+            });
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <Modal visible={visible} animationType="fade" onRequestClose={() => onCancel?.()}>
       <View style={[styles.screen, { paddingTop: insets.top + spacing.space7, paddingBottom: insets.bottom + spacing.space5 }]}>
@@ -161,13 +179,14 @@ export function PasscodeScreen({ visible, mode, userId, onDone, onCancel, onForg
         </View>
 
         <View style={styles.footer}>
-          {mode === 'unlock' && onForgot ? (
-            <Pressable onPress={onForgot} hitSlop={10} accessibilityRole="button">
-              <Text style={styles.link}>Forgot passcode? Sign out</Text>
+          {mode !== 'set' ? (
+            <Pressable onPress={forgot} hitSlop={10} accessibilityRole="button">
+              <Text style={styles.link}>Forgot passcode?</Text>
             </Pressable>
-          ) : onCancel ? (
+          ) : null}
+          {onCancel ? (
             <Pressable onPress={onCancel} hitSlop={10} accessibilityRole="button">
-              <Text style={styles.link}>{mode === 'set' ? 'Not now' : 'Cancel'}</Text>
+              <Text style={styles.linkQuiet}>{mode === 'set' ? 'Not now' : 'Cancel'}</Text>
             </Pressable>
           ) : null}
         </View>
@@ -201,6 +220,7 @@ const styles = StyleSheet.create({
   keyEmpty: { backgroundColor: 'transparent', borderColor: 'transparent' },
   keyPressed: { backgroundColor: colors.accentWash },
   keyText: { ...text.displayL, color: colors.ink },
-  footer: { minHeight: 44, justifyContent: 'center' },
+  footer: { minHeight: 44, flexDirection: 'row', gap: spacing.space6, alignItems: 'center', justifyContent: 'center' },
   link: { ...text.bodyStrong, color: colors.markRing },
+  linkQuiet: { ...text.bodyStrong, color: colors.inkMuted },
 });

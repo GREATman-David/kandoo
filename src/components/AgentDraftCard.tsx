@@ -24,6 +24,18 @@ export type AgentDraftCardProps = {
   mapPreview?: React.ReactNode;
 };
 
+/** What a finished card says, by what it did — a deletion is not "Saved". */
+function doneLabel(tool: string): string {
+  if (tool.startsWith('delete_')) return '✓ Deleted';
+  if (tool.startsWith('merge_')) return '✓ Merged';
+  if (tool === 'complete_reminder') return '✓ Done';
+  if (tool === 'stop_watching_place') return '✓ Stopped';
+  return '✓ Saved';
+}
+
+/** Fields that are labels or times read as UI; everything else is the user's words. */
+const PLAIN_FIELDS = new Set(['person', 'for', 'keep', 'fold']);
+
 function display(field: DraftField): string {
   if (field.kind === 'time') return formatDueDate(field.value) ?? 'Pick a time';
   return field.value ?? '—';
@@ -33,8 +45,9 @@ function FieldRow({ field, editable, onEdit }: { field: DraftField; editable: bo
   const [editing, setEditing] = useState(false);
   const [draftText, setDraftText] = useState(field.value ?? '');
   const canEdit = editable && field.editable;
-  // What the user said is shown in Fraunces — their own words (AGENTS §7).
-  const valueStyle = field.kind === 'long' || field.key === 'task' || field.key === 'name' ? styles.words : styles.value;
+  // What the user said is shown in Fraunces — their own words (AGENTS §7);
+  // times and simple labels stay in the UI face.
+  const valueStyle = field.kind === 'time' || PLAIN_FIELDS.has(field.key) ? styles.value : styles.words;
 
   return (
     <View style={styles.field}>
@@ -103,7 +116,7 @@ export function AgentDraftCard({ draft, onEdit, onSave, onDiscard, onOpen, mapPr
           {draft.title}
         </Text>
         <Text style={[styles.status, saved && styles.titleSaved]}>
-          {saved ? '✓ Saved' : saving ? 'Saving' : 'Check this'}
+          {saved ? doneLabel(draft.tool) : saving ? 'Saving' : 'Check this'}
         </Text>
       </View>
 

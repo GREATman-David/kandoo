@@ -4,8 +4,7 @@ import { AppState, StyleSheet, View } from 'react-native';
 import { KandooSymbol } from '@/components/Symbol';
 import { PasscodeScreen } from '@/components/PasscodeScreen';
 import { useAuth } from '@/features/Auth/useAuth';
-import { clearPasscode, hasPasscode, markLockOffered, onLockChanged, wasLockOffered } from '@/services/appLock';
-import { supabase } from '@/services/supabase';
+import { hasPasscode, markLockOffered, onLockChanged, wasLockOffered } from '@/services/appLock';
 import { colors } from '@/theme/theme';
 
 /**
@@ -81,17 +80,6 @@ export function AppLock() {
 
   if (!userId) return null;
 
-  const forgot = async () => {
-    // Everything the user saved is on the server; signing out only clears this phone's lock.
-    try {
-      await clearPasscode(userId);
-    } catch (error) {
-      console.warn('Clearing the passcode on sign-out failed:', error);
-    }
-    const { error } = await supabase.auth.signOut();
-    if (error) console.warn('Sign-out from the lock screen failed:', error.message);
-  };
-
   return (
     <>
       {/* Until we know whether a lock is set, nothing personal shows. */}
@@ -106,13 +94,12 @@ export function AppLock() {
         mode="unlock"
         userId={userId}
         onDone={() => setLocked(false)}
-        onForgot={() => void forgot()}
       />
 
       <PasscodeScreen
         visible={offer && !lockSet}
         mode="set"
-        intro="Kandoo keeps personal things. Add a 4-digit passcode so only you can open it. You can skip this and add one later from your account."
+        intro="Kandoo keeps personal things. Add a 6-digit passcode so only you can open it. You can skip this and add one later from your account."
         userId={userId}
         onDone={() => {
           setOffer(false);

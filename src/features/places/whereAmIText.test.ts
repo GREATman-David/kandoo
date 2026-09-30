@@ -38,6 +38,11 @@ describe('the answer', () => {
   });
 
   it('answers "am I at …?" directly', () => {
+    // A "nearest" place on another continent is not mentioned.
+    assert.equal(
+      composeWhereAnswer({ kind: 'where' }, { inside: [], nearest: { name: 'School', distanceM: 11_293_000 }, area: 'Daxing, Beijing' }),
+      "You're around Daxing, Beijing."
+    );
     assert.equal(composeWhereAnswer({ kind: 'at', place: 'school' }, { inside: [balme, school], nearest: null, area: null }), "Yes — you're at School.");
     assert.equal(composeWhereAnswer({ kind: 'at', place: 'the gym' }, { inside: [balme], nearest: null, area: null }), "No — you're at Balme, not the gym.");
   });

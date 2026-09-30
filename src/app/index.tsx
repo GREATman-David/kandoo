@@ -31,6 +31,7 @@ import { NameSheet } from '@/components/NameSheet';
 import { Paywall } from '@/components/Paywall';
 import { ReviewSheet } from '@/components/ReviewSheet';
 import { KandooSymbol } from '@/components/Symbol';
+import { TierBadge } from '@/components/TierBadge';
 import {
   useHome,
   type HomeState,
@@ -347,17 +348,7 @@ function KandooHome() {
         >
           <Text style={styles.talkText}>Talk to Kandoo</Text>
         </Pressable>
-        <Pressable
-          style={styles.badge}
-          onPress={() => setAccountOpen(true)}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Account"
-        >
-          <Text style={styles.badgeText}>
-            {entitlement.isElite ? 'Kandoo Elite' : entitlement.isPro ? 'Kandoo Pro' : 'Free'}
-          </Text>
-        </Pressable>
+        <TierBadge tier={entitlement.tier} onPress={() => setAccountOpen(true)} />
         </View>
       </View>
 
@@ -1343,18 +1334,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   talkText: { ...text.label, textTransform: 'none', letterSpacing: 0.5, color: colors.ink },
-  badge: {
-    backgroundColor: colors.accentWash,
-    borderRadius: radius.full,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-  },
-  badgeText: {
-    ...text.label,
-    textTransform: 'none',
-    letterSpacing: 1,
-    color: colors.markRing,
-  },
   answerText: {
     ...text.answer,
     color: colors.ink,
