@@ -1,0 +1,386 @@
+<title>Inside Kandoo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap">
+<style>
+  /* Layout: one reading column; the "Try it" examples are pairs of what you say → what Kandoo does. Kandoo's own app palette (src/theme/theme.ts). */
+  :root {
+    /* Kandoo's app palette, exactly (src/theme/theme.ts). The app has one look, cream, so this page does too. */
+    color-scheme: light;
+    --base: #F7F0E6;        /* app ground */
+    --surface: #FFFFFF;
+    --raised: #F2E9DC;
+    --line: #E8D8C4;
+    --line-strong: #D8C7B5;
+    --ink: #2F241B;
+    --muted: #7A6758;
+    --accent: #A06400;      /* attention, readable as text */
+    --wash: #FFF7D1;        /* the plan badge pill */
+    --settled: #6E6105;
+    --ring: #8A6A00;        /* mark ring: section labels */
+    --core: #DA8F00;        /* mark core */
+    --pale: #FCE9A6;
+    --display: "Fraunces", Georgia, "Times New Roman", serif;
+    --ui: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--base); color: var(--ink);
+    font: 400 16px/1.6 var(--ui);
+    padding-inline: 20px; padding-block: 0;
+  }
+  .page { max-width: 760px; margin: 0 auto; padding-block: 40px 64px; display: grid; gap: 56px; }
+  h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; line-height: 1.15; }
+  h1 { font-size: clamp(2rem, 5.5vw, 3rem); letter-spacing: -0.01em; }
+  h2 { font-size: 1.6rem; }
+  h3 { font-size: 1.15rem; }
+  p { margin: 0; }
+  .label { font: 600 0.72rem/1 var(--ui); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ring); }
+  .lede { font-size: 1.1rem; color: var(--muted); max-width: 62ch; }
+  section { display: grid; gap: 20px; }
+  a { color: var(--ring); text-underline-offset: 3px; }
+  a:focus-visible { outline: 2px solid var(--core); outline-offset: 2px; }
+
+  /* Head */
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand b { font: 600 1.35rem var(--display); font-style: italic; }
+  .brand span { color: var(--muted); font-size: 0.85rem; }
+  .hero { display: grid; gap: 18px; }
+
+  /* The loop */
+  .loop { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 0; margin: 0; list-style: none; counter-reset: step; }
+  .loop li { border-top: 2px solid var(--ring); padding-top: 10px; display: grid; gap: 4px; min-width: 0; }
+  .loop strong { font: 600 0.95rem var(--ui); }
+  .loop strong::before { counter-increment: step; content: counter(step) "  "; color: var(--ring); }
+  .loop small { color: var(--muted); font-size: 0.86rem; line-height: 1.45; }
+
+  /* Why */
+  .why { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 28px; }
+  .why div { display: grid; gap: 4px; min-width: 0; }
+  .why p { color: var(--muted); font-size: 0.95rem; }
+
+  /* Features */
+  .features { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .feat { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+  .feat ul { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: 0.92rem; }
+  .feat li::marker { color: var(--ring); }
+  /* Like the app's plan badge: a pale-gold pill; Elite wears the gold border and italic display face. */
+  .tag { font: 600 0.68rem/1 var(--ui); font-style: normal; color: var(--accent); background: var(--wash); border-radius: 999px; padding: 3px 8px; vertical-align: 2px; white-space: nowrap; }
+  .tag.elite { font: 600 0.78rem/1 var(--display); font-style: italic; border: 1.5px solid var(--core); padding: 2px 8px; }
+
+  /* Try it */
+  .tries { display: grid; gap: 14px; }
+  .try {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 20px; display: grid; gap: 12px; min-width: 0;
+  }
+  .try-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .plan { font: 600 0.8rem/1 var(--ui); padding: 6px 11px; border-radius: 999px; background: var(--wash); color: var(--accent); }
+  .plan.elite { font: 600 0.9rem/1 var(--display); font-style: italic; border: 2px solid var(--core); padding: 4px 11px; }
+  .say { font: 400 1.12rem/1.5 var(--display); }
+  .say::before { content: "You say  "; font: 600 0.72rem var(--ui); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .does { display: grid; gap: 6px; margin: 0; padding: 12px 0 0; border-top: 1px dashed var(--line); list-style: none; }
+  .does li { padding-left: 22px; position: relative; font-size: 0.95rem; }
+  .does li::before { content: ""; position: absolute; left: 2px; top: 0.5em; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--ring); }
+  .does .wow { font-weight: 600; }
+  .does .wow::before { background: var(--core); border-color: var(--core); }
+
+  /* Plans */
+  .plans { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .tier { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+  .tier.elite { border: 2px solid var(--core); }
+  .tier h3 { font-style: italic; }
+  .price { font: 600 1.05rem var(--ui); font-variant-numeric: tabular-nums; }
+  .price small { color: var(--muted); font-weight: 400; font-size: 0.8rem; display: block; }
+  .tier ul { margin: 0; padding-left: 16px; display: grid; gap: 4px; font-size: 0.88rem; color: var(--muted); }
+  .tier .for { font-size: 0.85rem; }
+
+  /* Trust */
+  .trust { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 28px; margin: 0; padding: 0; list-style: none; }
+  .trust li { display: grid; gap: 2px; min-width: 0; }
+  .trust span { color: var(--muted); font-size: 0.93rem; }
+
+  footer { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 24px; color: var(--muted); font-size: 0.9rem; }
+  footer .motto { font: 600 1.4rem var(--display); color: var(--ink); font-style: italic; }
+
+  @media (max-width: 680px) {
+    .loop, .plans { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .why, .trust, .features { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 400px) {
+    .plans { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+
+<main class="page">
+  <header class="hero">
+    <div class="brand">
+      <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+        <circle cx="20" cy="20" r="18" fill="#2F241B"/>
+        <circle cx="20" cy="20" r="13.5" fill="#F7F0E6"/>
+        <circle cx="20" cy="20" r="10.5" fill="#8A6A00"/>
+        <circle cx="20" cy="20" r="6.5" fill="#F7F0E6"/>
+        <circle cx="20" cy="20" r="3.6" fill="#DA8F00"/>
+      </svg>
+      <b>Kandoo</b>
+      <span>RevenueCat Shipaton 2026 · Android</span>
+    </div>
+    <h1>Tell Kandoo once. It remembers when it matters.</h1>
+    <p class="lede">Most assistants wait to be asked. Kandoo listens to how you actually talk, turns it into memories and actions, and brings each one back at the right time, the right place, or with the right person. Our two-minute video can't show all of it, so here is everything Kandoo does today, with things you can say and what happens next.</p>
+  </header>
+
+  <section aria-labelledby="loop">
+    <p class="label" id="loop">One loop, everywhere in the app</p>
+    <ol class="loop">
+      <li><strong>Capture</strong><small>Speak, type, photograph a page, or talk to Mr. Kandoo.</small></li>
+      <li><strong>Understand</strong><small>One utterance becomes many actions: facts, reminders, questions.</small></li>
+      <li><strong>Link</strong><small>Each is tied to who, where and when.</small></li>
+      <li><strong>Surface</strong><small>It returns at a time, on arrival somewhere, or when a person comes up.</small></li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="why">
+    <h2 id="why">What makes it different</h2>
+    <div class="why">
+      <div><h3>No structure needed</h3><p>You never fill in a form or design a page. A 90-second ramble comes out as clean, separate memories and reminders with real times.</p></div>
+      <div><h3>It knows where you are, without tracking you</h3><p>Reminders fire as you walk into a place you drew. Only those places are watched, and your location never leaves the phone.</p></div>
+      <div><h3>Nothing saves without your yes</h3><p>Every action arrives as a card you can check and edit. The AI proposes; you decide.</p></div>
+      <div><h3>A colleague you can talk to</h3><p>Mr. Kandoo holds a real conversation and acts across the whole app: reminders, notes, research, places, your team.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="features">
+    <h2 id="features">Everything in the app</h2>
+    <p class="lede">Plan tags show where a feature starts; each plan includes everything before it.</p>
+    <div class="features">
+
+      <div class="feat">
+        <h3>Capture</h3>
+        <ul>
+          <li>Speak with a live transcript, pause and resume, or type</li>
+          <li>Photograph or pick a photo, with an optional caption</li>
+          <li>One utterance becomes many actions: memories, reminders, questions</li>
+          <li>Relative times ("before 5", "tomorrow morning") resolved on your phone's clock</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <h3>Review before anything saves</h3>
+        <ul>
+          <li>Every extraction arrives as a card you can edit</li>
+          <li>Save, change or dismiss each action</li>
+          <li>Colour shows state: listening, needs you, saved</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <h3>Reminders</h3>
+        <ul>
+          <li>Local notifications that fire with no internet</li>
+          <li>Alarms that show over the lock screen</li>
+          <li>Repeat on chosen weekdays, snooze, complete with undo</li>
+          <li>Grouped into Today, Overdue, When you arrive, Upcoming</li>
+          <li>On arrival or on leaving a place <em class="tag">Personal</em></li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <h3>Memory and recall</h3>
+        <ul>
+          <li>Ask in plain words; meaning-based search, not keyword matching</li>
+          <li>Answers draw on memories, reminders, notes, your Library and team files</li>
+          <li>Spoken answers in the phone's voice, or Kandoo's own <em class="tag">Personal</em></li>
+          <li>Free answers from the last 10 days; your whole history <em class="tag">Personal</em></li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <h3>People and photos</h3>
+        <ul>
+          <li>A page for every person: what you promised, what you know, their photos</li>
+          <li>Spot and merge duplicates ("Mum" and "mother")</li>
+          <li>A private photo library, kept with the people and places in it <em class="tag">Personal</em></li>
+          <li>Share a photo with a Kandoo watermark</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <h3>Places <em class="tag">Personal</em></h3>
+        <ul>
+          <li>Draw any shape on the map: home, a campus, a church</li>
+          <li>Each place keeps its memories and waiting reminders</li>
+          <li>A monthly recap of where your time went, kept on the phone</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <h3>Insights <em class="tag">Personal</em></h3>
+        <ul>
+          <li>This week or this month, on request</li>
+          <li>Captures, memories, reminders and Library notes, day by day, with your busiest day</li>
+          <li>How you capture: voice, typed, photo, handwritten pages</li>
+          <li>Reminders done, overdue, upcoming and waiting for review</li>
+          <li>Your Library by category, who came up most, and where</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <h3>Library</h3>
+        <ul>
+          <li>Notes in categories you name, laid out as boxes</li>
+          <li>Write, edit and delete notes; links stay tappable</li>
+          <li>Open any note in Microsoft Word as a real .docx</li>
+          <li>Photograph pages into organised notes, filed for you <em class="tag">Pro</em></li>
+          <li>Research write-ups with numbered references <em class="tag elite">Elite</em></li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <h3>Teams <em class="tag">Pro</em></h3>
+        <ul>
+          <li>Join by invite link or 8-character code</li>
+          <li>Share notes, research, PDFs, Word, slides, sheets and photos, each showing who sent it</li>
+          <li>Search inside shared documents; save any file to your Library</li>
+          <li>Accept a task into your own reminders, then mark it done</li>
+          <li>Create a team, invite, set admins, send tasks and track progress <em class="tag elite">Elite</em></li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <h3>Mr. Kandoo <em class="tag elite">Elite</em></h3>
+        <ul>
+          <li>A voice conversation, or typing when it's quiet</li>
+          <li>Creates and changes reminders, notes and memories, each on a card you approve</li>
+          <li>Researches, reads pages through the camera, finds photos and places</li>
+          <li>Reads and summarises team files, shares work, sends and answers tasks</li>
+          <li>Answers "how did I do this week?" and opens your charts</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <h3>Your account</h3>
+        <ul>
+          <li>A 6-digit app lock</li>
+          <li>Choose the name Kandoo calls you</li>
+          <li>Plans bought in the app, restored on any phone</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <section aria-labelledby="try">
+    <h2 id="try">Try it</h2>
+    <div class="tries">
+
+      <article class="try">
+        <div class="try-head"><h3>One sentence, four actions</h3><span class="plan">Free</span></div>
+        <p class="say">"Just came out of the meeting with Jed. He's pushing the API migration to Q1 because of the vendor issue, and the budget got cut by fifteen percent. I need to send Michael the spec before 5, and remind me to book the review room tomorrow morning."</p>
+        <ul class="does">
+          <li>Two memories, each a standalone fact: the migration moved to Q1, the budget cut by 15%.</li>
+          <li>Two reminders: "Send Michael the spec" today at 5:00 PM, "Book the review room" tomorrow at 9:00 AM.</li>
+          <li class="wow">Shown as a review card. Nothing is scheduled until you tap Save; then they fire on the phone, even offline.</li>
+        </ul>
+      </article>
+
+      <article class="try">
+        <div class="try-head"><h3>Point the camera at the world</h3><span class="plan">Free</span></div>
+        <p class="say">Photograph an event flyer, a business card or a whiteboard.</p>
+        <ul class="does">
+          <li>Kandoo reads it and pulls out what matters: the event, date, place and people.</li>
+          <li class="wow">Later, "When is the outreach?" gets the answer from the photo you took.</li>
+        </ul>
+      </article>
+
+      <article class="try">
+        <div class="try-head"><h3>Reminders that wait for a place</h3><span class="plan personal">Personal</span></div>
+        <p class="say">"Remind me to call my mother when I get to the hostel."</p>
+        <ul class="does">
+          <li>A reminder tied to the hostel you drew on the map, with no time attached.</li>
+          <li class="wow">It fires the moment you walk in. Your whole history stays answerable, and Insights charts how you used Kandoo this week or month.</li>
+        </ul>
+      </article>
+
+      <article class="try">
+        <div class="try-head"><h3>Paper to your whole team</h3><span class="plan pro">Pro</span></div>
+        <p class="say">Photograph a page of handwritten lecture or meeting notes.</p>
+        <ul class="does">
+          <li>It becomes a clean, organised note, filed into the right Library category ("Kandoo Project", "Biology Notes").</li>
+          <li>Share it to your team in one tap. Everyone sees who sent it and when.</li>
+          <li class="wow">Open it in Microsoft Word to keep editing, and search inside every PDF and document your team shares.</li>
+        </ul>
+      </article>
+
+      <article class="try">
+        <div class="try-head"><h3>Research with real sources</h3><span class="plan elite">Elite</span></div>
+        <p class="say">"Mr. Kandoo, research how student startups should price a subscription app, and write it up for my Kandoo Project."</p>
+        <ul class="does">
+          <li>He tells you the findings out loud, saying only what the sources support.</li>
+          <li class="wow">A card holds the write-up with numbered references and links. Say "yes" and it's in your Library.</li>
+        </ul>
+      </article>
+
+      <article class="try">
+        <div class="try-head"><h3>Run your team by talking</h3><span class="plan elite">Elite</span></div>
+        <p class="say">"Summarise the PDF Ama shared, then tell the team to send their slides by Friday at noon."</p>
+        <ul class="does">
+          <li>He reads the shared file and gives you the key points.</li>
+          <li>A team-task card for Friday at 12:00 PM, to everyone. Say "yes" and it's sent.</li>
+          <li class="wow">Each teammate accepts it into their own reminders, and you see who accepted and who's done.</li>
+        </ul>
+      </article>
+
+      <article class="try">
+        <div class="try-head"><h3>Ask about your own week</h3><span class="plan elite">Elite</span></div>
+        <p class="say">"How did I use Kandoo this week?"</p>
+        <ul class="does">
+          <li class="wow">"You captured 46 things and set 24 reminders. Your busiest day was Monday the 28th. Want me to open your charts?"</li>
+        </ul>
+      </article>
+
+    </div>
+  </section>
+
+  <section aria-labelledby="plans">
+    <h2 id="plans">Four plans, one product</h2>
+    <div class="plans">
+      <div class="tier">
+        <h3>Free</h3>
+        <p class="price">$0</p>
+        <ul><li>Speak, type or photograph</li><li>Reminders and your Library</li><li>Answers from the last 10 days</li></ul>
+      </div>
+      <div class="tier">
+        <h3>Personal</h3>
+        <p class="price">$3.99/mo<small>$29.99 a year</small></p>
+        <ul><li>Your whole history</li><li>Places that remind you on arrival</li><li>Photos kept with people and places</li><li>Insights and Kandoo's own voice</li></ul>
+      </div>
+      <div class="tier">
+        <h3>Pro</h3>
+        <p class="price">$9.99/mo<small>$79.99 a year</small></p>
+        <ul><li>Everything in Personal</li><li>Pages and documents into notes</li><li>Teams: share files, open in Word, take tasks</li></ul>
+      </div>
+      <div class="tier elite">
+        <h3>Elite</h3>
+        <p class="price">$19.99/mo<small>$179.99 a year</small></p>
+        <ul><li>Everything in Pro</li><li>Mr. Kandoo, 60 minutes a month</li><li>Research with references</li><li>Lead a team: invite, assign, track</li></ul>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="trust">
+    <h2 id="trust">Built to be trusted</h2>
+    <ul class="trust">
+      <li><strong>The AI understands; it never acts alone</strong><span>Models return structured proposals. Ordinary code, and your yes, decide what is saved.</span></li>
+      <li><strong>Your phone owns the triggers</strong><span>Time and place reminders fire as local notifications, with the server offline.</span></li>
+      <li><strong>Location stays on the device</strong><span>Only places you drew are watched, capped and evicted by recency.</span></li>
+      <li><strong>Plans are enforced on the server</strong><span>RevenueCat entitlements are checked server-side, so a paid feature can't be unlocked from the phone.</span></li>
+    </ul>
+  </section>
+
+  <footer>
+    <p class="motto">Yes You Kan.</p>
+    <p>Open source: <a href="https://github.com/GREATman-David/kandoo">github.com/GREATman-David/kandoo</a></p>
+    <p>The mark is Adinkrahene, the "chief" of the Adinkra symbols of Ghana: concentric circles for greatness and leadership.</p>
+  </footer>
+</main>
