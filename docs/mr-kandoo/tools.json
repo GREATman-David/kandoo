@@ -1,0 +1,1125 @@
+{
+  "note": "Client tools for the Mr. Kandoo ElevenLabs agent. Each runs on the phone (src/services/agent/agentTools.ts). Create each as a client tool, then attach all of them to the agent.",
+  "count": 50,
+  "tools": [
+    {
+      "name": "add_memory",
+      "description": "Save something the user wants remembered as ONE standalone memory (names instead of pronouns, still meaningful in six months). Optionally attach it to an existing note.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The memory as one clear standalone sentence."
+          },
+          "note_id": {
+            "type": "string",
+            "description": "Optional: id of a note (from list_notes/read_note) to add it to."
+          }
+        }
+      }
+    },
+    {
+      "name": "answer_team_task",
+      "description": "Elite. PROPOSE accepting (it becomes the user's own reminder, scheduled on their phone) or declining a task their team sent (a card; done only on the user's yes → save_draft). Get the task_id from list_team_tasks.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "The task's id, from list_team_tasks."
+          },
+          "accept": {
+            "type": "boolean",
+            "description": "true to accept (default), false to decline."
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_reminder",
+      "description": "Mark a reminder as done and cancel its notification.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "reminder_id"
+        ],
+        "properties": {
+          "reminder_id": {
+            "type": "string",
+            "description": "Id of the reminder."
+          }
+        }
+      }
+    },
+    {
+      "name": "create_note",
+      "description": "Write a new note with what the user dictates. Keep their meaning; tidy only filler and grammar.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "A short plain title (a few words)."
+          },
+          "body": {
+            "type": "string",
+            "description": "The note text in clean sentences."
+          }
+        }
+      }
+    },
+    {
+      "name": "create_reminder",
+      "description": "PROPOSE a reminder: shows a card; nothing is saved or scheduled until the user says yes and you call save_draft. Give EITHER due_at (a time) OR place_name (fires on arriving at / leaving a place). For 'every Monday and Friday at 8' give due_at for the next occurrence plus repeat_days. Always set person when the task involves someone.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "task"
+        ],
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "What to do, short and imperative ('Call Ama')."
+          },
+          "due_at": {
+            "type": "string",
+            "description": "When, as full ISO 8601 with offset. For a weekday ('Friday'), copy that day's date from the coming-days list in the current local time; never work it out. Never in the past: a time with no day that has already passed today means tomorrow. Omit for a place reminder."
+          },
+          "weekday": {
+            "type": "string",
+            "description": "If the user named a weekday ('on Friday', 'by Monday'), that weekday — the phone checks due_at falls on it. Omit otherwise.",
+            "enum": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday",
+              "saturday",
+              "sunday"
+            ]
+          },
+          "person": {
+            "type": "string",
+            "description": "The person the reminder is about, whenever the task names or implies someone: 'Call Jed' → 'Jed', 'send Michael the spec' → 'Michael'. Use the name as the user knows it. This puts the reminder on that person's page."
+          },
+          "repeat_days": {
+            "type": "array",
+            "description": "Optional weekdays it repeats on at due_at's time: 0=Sunday … 6=Saturday.",
+            "items": {
+              "type": "integer",
+              "description": "Weekday 0-6."
+            }
+          },
+          "place_name": {
+            "type": "string",
+            "description": "For a place reminder: the place as the user names it ('school', 'Mum's house'). Omit due_at."
+          },
+          "trigger": {
+            "type": "string",
+            "description": "Place reminders: fire on arriving (default) or leaving.",
+            "enum": [
+              "arrive",
+              "leave"
+            ]
+          },
+          "not_before": {
+            "type": "string",
+            "description": "Place reminders only: earliest day it may fire, e.g. 'when I get to school tomorrow' = tomorrow 00:00 local, full ISO with offset."
+          }
+        }
+      }
+    },
+    {
+      "name": "delete_library_note",
+      "description": "PROPOSE deleting one Library note: shows a card; nothing is deleted until the user says yes (save_draft). Get the note_id from read_library_category first, and say plainly which note will go.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "note_id"
+        ],
+        "properties": {
+          "note_id": {
+            "type": "string",
+            "description": "The note's id, from read_library_category."
+          }
+        }
+      }
+    },
+    {
+      "name": "delete_memory",
+      "description": "Propose deleting a memory: shows a card with the memory that would be removed. Nothing is deleted until the user says yes and you call save_draft.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "memory_id"
+        ],
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "description": "Id of the memory to delete."
+          }
+        }
+      }
+    },
+    {
+      "name": "delete_note",
+      "description": "Propose deleting a note (and what came from it): shows a card with the note. Nothing is deleted until the user says yes and you call save_draft.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "note_id"
+        ],
+        "properties": {
+          "note_id": {
+            "type": "string",
+            "description": "Id of the note to delete."
+          }
+        }
+      }
+    },
+    {
+      "name": "delete_place",
+      "description": "Propose deleting a place entirely (memories are kept): shows a card. Nothing is deleted until the user says yes and you call save_draft.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "place_id"
+        ],
+        "properties": {
+          "place_id": {
+            "type": "string",
+            "description": "Id from list_places."
+          }
+        }
+      }
+    },
+    {
+      "name": "delete_reminder",
+      "description": "Propose deleting a reminder entirely: shows a card with it. Nothing is deleted until the user says yes and you call save_draft. (To just finish it, use complete_reminder.)",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "reminder_id"
+        ],
+        "properties": {
+          "reminder_id": {
+            "type": "string",
+            "description": "Id of the reminder."
+          }
+        }
+      }
+    },
+    {
+      "name": "discard_draft",
+      "description": "Remove a card you proposed that the user doesn't want, or before proposing a corrected version of it (e.g. 'make it six instead' → discard_draft, then propose again with the new values).",
+      "response_timeout_secs": 10,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "draft_id"
+        ],
+        "properties": {
+          "draft_id": {
+            "type": "string",
+            "description": "The draft_id of the card to remove."
+          }
+        }
+      }
+    },
+    {
+      "name": "draw_place",
+      "description": "Propose saving a place on the map so Kandoo notices arrivals there (Pro): shows a card with the place on a map, which the user can also reshape. Use a find_place result (result_id), or where the user is standing now (use_current_location=true). Name it the way the user calls it ('school', 'Mum's house'). If a place with that name is already drawn, ask before redrawing and pass replace=true. Saved only after the user's yes and save_draft.",
+      "response_timeout_secs": 25,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "What the user calls the place."
+          },
+          "result_id": {
+            "type": "string",
+            "description": "result_id from find_place."
+          },
+          "use_current_location": {
+            "type": "boolean",
+            "description": "true to save where the user is standing right now."
+          },
+          "radius_m": {
+            "type": "integer",
+            "description": "Optional size in metres for a point place (default 150; 100 when standing there)."
+          },
+          "replace": {
+            "type": "boolean",
+            "description": "true only if the user agreed to redraw an existing place with this name."
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_library_note",
+      "description": "PROPOSE a change to one Library note (its title and/or text): shows a card with the old and new version; saved only on the user's yes (save_draft). Get the note_id from read_library_category first. To add to a note, pass its whole new text.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "note_id"
+        ],
+        "properties": {
+          "note_id": {
+            "type": "string",
+            "description": "The note's id, from read_library_category."
+          },
+          "title": {
+            "type": "string",
+            "description": "New title (omit to keep it)."
+          },
+          "body": {
+            "type": "string",
+            "description": "The note's complete new text (omit to keep it). Bullets as lines starting with '• '."
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_memory",
+      "description": "Change the wording of an existing memory. Find its id first with search_memory, read_note or get_person.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "memory_id",
+          "content"
+        ],
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "description": "Id of the memory to change."
+          },
+          "content": {
+            "type": "string",
+            "description": "The new wording, one standalone sentence."
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_note",
+      "description": "Change a note's title and/or body. Read it first with read_note so edits keep what the user didn't ask to change; send the full new body.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "note_id"
+        ],
+        "properties": {
+          "note_id": {
+            "type": "string",
+            "description": "Id of the note."
+          },
+          "title": {
+            "type": "string",
+            "description": "New title, if changing it."
+          },
+          "body": {
+            "type": "string",
+            "description": "New full body, if changing it."
+          }
+        }
+      }
+    },
+    {
+      "name": "find_photos",
+      "description": "Find photos the user showed Kandoo or added to a person or place (flyers, business cards, whiteboards, places). They appear on the user's screen, where they can open and share them. Search by what the photo is (query), or give a person_id (from list_people) or place_id (from list_places) for that person's or place's photos. Returns matched (false means nothing matched the search and the newest photos are shown instead), shownOnScreen, and each photo's description, people, places and keptAt.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What the photo is, as a short phrase: 'outreach flyer', 'business card', 'whiteboard'."
+          },
+          "person_id": {
+            "type": "string",
+            "description": "Optional: id from list_people, for that person's photos."
+          },
+          "place_id": {
+            "type": "string",
+            "description": "Optional: id from list_places, for that place's photos."
+          }
+        }
+      }
+    },
+    {
+      "name": "find_place",
+      "description": "Search the map for a place the user describes (a landmark, business, school, street, Plus Code or coordinates), near the user. Returns up to 5 results with result_id, name and where. If one result clearly matches, go straight to draw_place with it — its card shows the place on a map, which is how the user confirms. If several could fit, ask which in a few words first.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What to search for, e.g. 'University of Ghana', 'Korle Bu hospital', '7FWR+CV'."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_person",
+      "description": "Everything about one person: memories about them and reminders involving them (with ids).",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "person_id"
+        ],
+        "properties": {
+          "person_id": {
+            "type": "string",
+            "description": "Id from list_people."
+          }
+        }
+      }
+    },
+    {
+      "name": "get_place",
+      "description": "What happened at one place (memories) and what is waiting there (reminders).",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "place_id"
+        ],
+        "properties": {
+          "place_id": {
+            "type": "string",
+            "description": "Id from list_places."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_library",
+      "description": "List the user's Library categories (their projects and topics, e.g. 'Kandoo Project') with how many notes each has. Use before talking about or researching a project, to get its exact name.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_notes",
+      "description": "List the user's recent notes (newest first) with id, title, a short preview and counts of memories and reminders inside.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "How many notes (1-20). Default 8."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_people",
+      "description": "List the people Kandoo knows from what the user has said, with id, name, counts and their latest memory. Use it to find a person's id.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_places",
+      "description": "List the user's places: id, name, whether it's drawn on the map (watched), starred, other names it's known by, and counts of memories and waiting reminders.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_reminders",
+      "description": "List the user's reminders: needsReview (not yet confirmed), active (confirmed, upcoming or waiting at a place), recentlyDone. Each has id, task, dueAt (ISO or null), person, place, trigger (arrive/leave for place reminders), notBefore, repeatDays (0=Sunday..6=Saturday), status. Use it to answer 'what do I have today' and to find a reminder's id before changing it.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_team_files",
+      "description": "Elite. What a team has shared, newest first: id, title, kind (note / research / document / photo), file name, who shared it and when, their message, and whether its text can be read. Optional query matches titles, senders and the text inside documents.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "team_name": {
+            "type": "string",
+            "description": "The team, as list_teams names it. Can be omitted if they are in only one team."
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional words to search for, e.g. 'budget'."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_team_tasks",
+      "description": "Elite. Tasks the user's teams sent them that still wait for an answer (waitingForYou), and with team_name, that team's tasks with progress (sent / accepted / declined / done) and the user's own status.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "team_name": {
+            "type": "string",
+            "description": "Optional: a team, to see all its tasks and progress."
+          }
+        }
+      }
+    },
+    {
+      "name": "list_teams",
+      "description": "Elite. The teams the user is in: name, their role (owner / admin / member), members, files, last activity.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "name": "merge_people",
+      "description": "Propose folding duplicate people into one (e.g. 'Kofi' and 'Kofi Mensah'): shows a card. Everything moves to the kept person only after the user says yes and you call save_draft.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "keep_person_id",
+          "merge_person_ids"
+        ],
+        "properties": {
+          "keep_person_id": {
+            "type": "string",
+            "description": "Id of the person to keep."
+          },
+          "merge_person_ids": {
+            "type": "array",
+            "description": "Ids of the people to fold into the kept one.",
+            "items": {
+              "type": "string",
+              "description": "Person id."
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "merge_places",
+      "description": "Propose that one place is another name for another ('campus' is my 'School'): shows a card. Everything moves to the second place only after the user says yes and you call save_draft.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "place_id",
+          "into_place_id"
+        ],
+        "properties": {
+          "place_id": {
+            "type": "string",
+            "description": "Id of the place that is just another name."
+          },
+          "into_place_id": {
+            "type": "string",
+            "description": "Id of the real (usually drawn) place."
+          }
+        }
+      }
+    },
+    {
+      "name": "month_recap",
+      "description": "This month so far: memories kept, reminders set and done, and who was on the user's mind most.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "name": "open_screen",
+      "description": "Open a screen in the app for the user: home, memory, library (their notes by category), team (their teams' shared files and tasks), insights (charts of how they use Kandoo; range week or month), people, reminders, places (optionally one place by item_id), draw_place (the map, optionally pre-named with place_name), or recap (this month's places).",
+      "response_timeout_secs": 10,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "screen"
+        ],
+        "properties": {
+          "screen": {
+            "type": "string",
+            "description": "Which screen.",
+            "enum": [
+              "home",
+              "memory",
+              "library",
+              "team",
+              "insights",
+              "people",
+              "reminders",
+              "places",
+              "draw_place",
+              "recap"
+            ]
+          },
+          "range": {
+            "type": "string",
+            "description": "For insights: which window.",
+            "enum": [
+              "week",
+              "month"
+            ]
+          },
+          "item_id": {
+            "type": "string",
+            "description": "Optional: a place id to open directly."
+          },
+          "place_name": {
+            "type": "string",
+            "description": "Optional for draw_place: the name to start with."
+          }
+        }
+      }
+    },
+    {
+      "name": "open_team_file",
+      "description": "Elite. Open a shared file on the user's phone: a note or research write-up opens in Microsoft Word as an editable document; a PDF, Word file or photo opens in its own app.",
+      "response_timeout_secs": 60,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "file_id"
+        ],
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "description": "The file's id, from list_team_files."
+          }
+        }
+      }
+    },
+    {
+      "name": "read_document",
+      "description": "Elite only. Opens the phone's camera (or gallery) so the user can photograph a page — handwritten or printed notes, a document, slides, a whiteboard, a textbook page — then reads it and PROPOSES one organised Library note (title, the insights, and the category to file it in) as a card on screen. Nothing is saved until the user says yes: then call save_draft with the returned draft_id. Returns awaitingYes, draft_id, category, title and body; or ok:false with a reason to say (not Elite, camera off, no photo taken, nothing readable).",
+      "response_timeout_secs": 120,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "category_name": {
+            "type": "string",
+            "description": "Optional: the Library category the user named for this page, e.g. 'Kandoo Project'. Leave empty to let Kandoo choose (an existing category it clearly belongs in, or a short new one)."
+          },
+          "source": {
+            "type": "string",
+            "description": "'camera' to take the photo now (default); 'gallery' if the user says the photo is already on their phone.",
+            "enum": [
+              "camera",
+              "gallery"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "read_library_category",
+      "description": "Read what is in one Library category: its notes (title, text trimmed, kind: manual / document / research), newest first. Use when the user wants to talk about a project or topic ('what's in my Kandoo Project?', 'what have I got on pricing?'), or before researching it.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "category_name"
+        ],
+        "properties": {
+          "category_name": {
+            "type": "string",
+            "description": "The category's name, as list_library gives it."
+          }
+        }
+      }
+    },
+    {
+      "name": "read_note",
+      "description": "Read one note in full: title, body, and the memories and reminders that came from it (with their ids).",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "note_id"
+        ],
+        "properties": {
+          "note_id": {
+            "type": "string",
+            "description": "Id of the note (from list_notes)."
+          }
+        }
+      }
+    },
+    {
+      "name": "read_team_file",
+      "description": "Elite. The full text of one shared file (a PDF, Word document, scanned page, note or research write-up), so you can summarise it, answer questions about it, or help the user work on it. Get the file_id from list_team_files.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "file_id"
+        ],
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "description": "The file's id, from list_team_files."
+          }
+        }
+      }
+    },
+    {
+      "name": "rename_place",
+      "description": "Rename one of the user's places.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "place_id",
+          "name"
+        ],
+        "properties": {
+          "place_id": {
+            "type": "string",
+            "description": "Id from list_places."
+          },
+          "name": {
+            "type": "string",
+            "description": "The new name."
+          }
+        }
+      }
+    },
+    {
+      "name": "research_topic",
+      "description": "Elite only. Research a question from real, citable sources (Wikipedia and scholarly papers), optionally in the light of one Library category's notes so the answer fits the user's project. Takes 10-30 seconds. Returns research_id, grounded, say (a spoken gist), findings (with [n] citations) and sources. Saves nothing: when the user asks for it written down, call write_research_note with the research_id.",
+      "response_timeout_secs": 90,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "The research question, complete and specific, in the user's intent (e.g. 'How should a memory app price monthly vs annual plans?')."
+          },
+          "category_name": {
+            "type": "string",
+            "description": "Optional: the Library category (project) this research is for, so its notes give context."
+          }
+        }
+      }
+    },
+    {
+      "name": "save_draft",
+      "description": "Save a card you proposed, AFTER the user clearly said yes to it (or 'looks good', 'go ahead'). Uses the card's current values, including any edits the user made on screen. Never call it in the same turn you proposed the card.",
+      "response_timeout_secs": 25,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "draft_id"
+        ],
+        "properties": {
+          "draft_id": {
+            "type": "string",
+            "description": "The draft_id returned when the card was proposed."
+          }
+        }
+      }
+    },
+    {
+      "name": "search_memory",
+      "description": "Search everything the user has told Kandoo (memories and reminders) by meaning. Use for any question about the past ('what did Kofi say about…', 'when am I seeing…') and to find the id of a memory before editing or deleting it. Returns matches with id, kind, content, person, place, dueAt, savedAt.",
+      "response_timeout_secs": 25,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What to look for, as a short phrase (the subject, not the whole question)."
+          }
+        }
+      }
+    },
+    {
+      "name": "send_team_task",
+      "description": "Elite, team admins only. PROPOSE sending a task to the whole team or one member (a card; sent only on the user's yes → save_draft). Each member accepts it into their own reminders. Needs what and when.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "task",
+          "due_at"
+        ],
+        "properties": {
+          "team_name": {
+            "type": "string",
+            "description": "The team, as list_teams names it."
+          },
+          "task": {
+            "type": "string",
+            "description": "What to do, short and imperative ('Submit the budget draft')."
+          },
+          "due_at": {
+            "type": "string",
+            "description": "When, full ISO 8601 with offset; never in the past. For a weekday ('by Friday'), copy that day's date from the coming-days list in the current local time; never work it out."
+          },
+          "weekday": {
+            "type": "string",
+            "description": "If the user named a weekday ('by Friday'), that weekday — the phone checks due_at falls on it. Omit otherwise.",
+            "enum": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday",
+              "saturday",
+              "sunday"
+            ]
+          },
+          "member_name": {
+            "type": "string",
+            "description": "Optional: one member's name. Omit to send it to everyone."
+          }
+        }
+      }
+    },
+    {
+      "name": "share_to_team",
+      "description": "Elite. PROPOSE sharing with a team (a card; shared only on the user's yes → save_draft). Share EITHER research (research_id from research_topic — it goes with its references), a Library note (library_note_id from read_library_category), or text you wrote with the user (title + body, e.g. a summary of a shared PDF or a reply). An optional message travels with it.",
+      "response_timeout_secs": 60,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "team_name": {
+            "type": "string",
+            "description": "The team, as list_teams names it."
+          },
+          "research_id": {
+            "type": "string",
+            "description": "Share this research (from research_topic)."
+          },
+          "library_note_id": {
+            "type": "string",
+            "description": "Share this Library note (from read_library_category)."
+          },
+          "title": {
+            "type": "string",
+            "description": "Title, for text you wrote."
+          },
+          "body": {
+            "type": "string",
+            "description": "The text, for something you wrote. Bullets as lines starting with '• '."
+          },
+          "message": {
+            "type": "string",
+            "description": "Optional short message to the team ('For Friday's meeting')."
+          }
+        }
+      }
+    },
+    {
+      "name": "snooze_reminder",
+      "description": "Push a reminder back by some minutes from now (a repeating reminder is snoozed just this once).",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "reminder_id"
+        ],
+        "properties": {
+          "reminder_id": {
+            "type": "string",
+            "description": "Id of the reminder."
+          },
+          "minutes": {
+            "type": "integer",
+            "description": "Minutes from now. Default 15."
+          }
+        }
+      }
+    },
+    {
+      "name": "star_place",
+      "description": "Star (or unstar) one of the user's important places. Starred places are watched first and listed on top.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "place_id",
+          "starred"
+        ],
+        "properties": {
+          "place_id": {
+            "type": "string",
+            "description": "Id from list_places."
+          },
+          "starred": {
+            "type": "boolean",
+            "description": "true to star, false to unstar."
+          }
+        }
+      }
+    },
+    {
+      "name": "stop_watching_place",
+      "description": "Stop Kandoo noticing arrivals at a place (removes its drawn area) while keeping the place and everything said about it.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "place_id"
+        ],
+        "properties": {
+          "place_id": {
+            "type": "string",
+            "description": "Id from list_places."
+          }
+        }
+      }
+    },
+    {
+      "name": "update_reminder",
+      "description": "Change a reminder's task, time, person or repeat days, and reschedule it on the phone. Find the id with list_reminders or search_memory first.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "reminder_id"
+        ],
+        "properties": {
+          "reminder_id": {
+            "type": "string",
+            "description": "Id of the reminder."
+          },
+          "task": {
+            "type": "string",
+            "description": "New wording, if changing it."
+          },
+          "due_at": {
+            "type": "string",
+            "description": "New time, full ISO 8601 with offset, if changing it. For a weekday, copy its date from the coming-days list in the current local time."
+          },
+          "weekday": {
+            "type": "string",
+            "description": "If the user named a weekday for the new time, that weekday — the phone checks due_at falls on it. Omit otherwise.",
+            "enum": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday",
+              "saturday",
+              "sunday"
+            ]
+          },
+          "person": {
+            "type": "string",
+            "description": "New person, if changing it."
+          },
+          "repeat_days": {
+            "type": "array",
+            "description": "New repeat weekdays (0=Sunday … 6=Saturday); an empty array stops repeating.",
+            "items": {
+              "type": "integer",
+              "description": "Weekday 0-6."
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "usage_stats",
+      "description": "Pro and Elite. How the user has used Kandoo this week or month: totals (captures, memories, reminders, Library notes, photos), reminders done / missed / upcoming / to review, how they capture (voice, typed, photo), busiest day, Library categories, top people and places. Set show=true to also open the Insights charts on screen.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "range": {
+            "type": "string",
+            "description": "'week' = the last 7 days (default), 'month' = the last 30 days.",
+            "enum": [
+              "week",
+              "month"
+            ]
+          },
+          "show": {
+            "type": "boolean",
+            "description": "true to open the Insights charts for them."
+          }
+        }
+      }
+    },
+    {
+      "name": "where_am_i",
+      "description": "Where the user is right now, worked out on the phone from GPS and their places: which of their places they're in and what's waiting there, or the area and the nearest place. Returns a ready sentence you can say.",
+      "response_timeout_secs": 25,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "name": "write_library_note",
+      "description": "Write a note into a Library category: something the user dictates, or a summary you composed in this conversation. Not for research (use write_research_note, which adds real references). Shows a card; saved only on the user's yes (save_draft). A category that doesn't exist yet is created when saved.",
+      "response_timeout_secs": 20,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [
+          "category_name",
+          "body"
+        ],
+        "properties": {
+          "category_name": {
+            "type": "string",
+            "description": "The category to file it in, e.g. 'Kandoo Project'."
+          },
+          "title": {
+            "type": "string",
+            "description": "A short title (optional)."
+          },
+          "body": {
+            "type": "string",
+            "description": "The note text. Bullets as lines starting with '• '. Numbers and codes in digits."
+          }
+        }
+      }
+    },
+    {
+      "name": "write_research_note",
+      "description": "Elite only. Write the research up as a Library note in the format the user wants, with numbered citations and a References list of real links. Shows it as a card: nothing is saved until the user says yes (then save_draft). Returns awaitingYes, draft_id, category, title, body.",
+      "response_timeout_secs": 60,
+      "expects_response": true,
+      "parameters": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "research_id": {
+            "type": "string",
+            "description": "From research_topic. Omit to use the latest research in this conversation."
+          },
+          "format": {
+            "type": "string",
+            "description": "points = key bullet points; structured = headings with bullets (default); summary = short paragraphs; report = a fuller write-up with sections.",
+            "enum": [
+              "points",
+              "structured",
+              "summary",
+              "report"
+            ]
+          },
+          "category_name": {
+            "type": "string",
+            "description": "Optional: where to file it. Defaults to the category the research was for, else 'Research'."
+          }
+        }
+      }
+    }
+  ]
+}

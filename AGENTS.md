@@ -289,14 +289,16 @@ duplicated — and native config never depends on a TypeScript import.
 | A. Schema | migration applied | ✅ |
 | B. Contract | one utterance → many actions | ✅ B1 passes |
 | C. Retrieval | recall answers a real question | ✅ semantic match verified |
-| D. Deploy | phone hits a public URL | ⬜ |
-| E. Local notifications | reminder fires with server off | ⬜ |
-| F. Review card | pending → confirmed on device | ⬜ browser-proven, not device-proven |
-| G. Voice | speak → actions appear | ⬜ |
-| H. Geofence (Places, Pro) | walk in → reminder / Moment fires | 🟡 built on `feature/places`; needs migration 007 + device walk test |
-| I. Design tokens + brand | theme, Symbol, BrandIntro | in progress |
-| J. RevenueCat | paywall + `useEntitlement()` | ⬜ |
-| K. Freeze → film → submit | submitted | ⬜ |
+| D. Deploy | phone hits a public URL | ✅ Render (kandoo-toow.onrender.com) |
+| E. Local notifications | reminder fires with server off | ✅ incl. lock-screen alarms, repeats |
+| F. Review card | pending → confirmed on device | ✅ |
+| G. Voice | speak → actions appear | ✅ on hardware (emulators have no recognizer) |
+| H. Geofence (Places) | walk in → reminder fires | ✅ merged; arrive and leave |
+| I. Design tokens + brand | theme, Symbol, BrandIntro | ✅ |
+| J. RevenueCat | paywall + `useEntitlement()` | ✅ Free · Personal · Pro · Elite, server-enforced |
+| L. Library, research, Insights, Teams | each works end to end | ✅ migrations 011–013 |
+| M. Mr. Kandoo | voice agent acts through cards | ✅ prompt + 50 tools in docs/mr-kandoo |
+| K. Freeze → film → submit | submitted | 🟡 filming and Devpost entry |
 
 ---
 
