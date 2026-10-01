@@ -140,6 +140,10 @@ export class FallbackAIProvider implements AIProvider {
     return this.run('document', (p) => p.readDocument(photo, context));
   }
 
+  extractFileText(file: { base64: string; mimeType: string }): Promise<string> {
+    return this.run('file text', (p) => p.extractFileText(file));
+  }
+
   generateJson(system: string, user: string, maxOutputTokens: number): Promise<unknown> {
     return this.run('json', (p) => p.generateJson(system, user, maxOutputTokens));
   }

@@ -22,6 +22,18 @@ import {
   fetchGroupedReminders,
   fetchLibrary,
   fetchLibraryCategory,
+  fetchTaskInbox,
+  fetchTeam,
+  fetchTeamFile,
+  fetchTeamFiles,
+  fetchTeamTasks,
+  fetchTeams,
+  fetchUsage,
+  openInWord,
+  openTeamFile,
+  respondTeamTask,
+  sendTeamTask,
+  shareTextToTeam,
   fetchMonthInsights,
   fetchPeople,
   fetchPerson,
@@ -44,6 +56,9 @@ import {
   type CreatedReminder,
   type LibraryNote,
   type ResearchResult,
+  type TeamFile,
+  type TeamSummary,
+  type TeamTask,
 } from '@/services/interpretationService';
 import { cancelReminder, scheduleReminder, snoozeRepeatingOnce } from '@/services/localNotifications';
 import { PhotoPermissionError, pickPhoto } from '@/services/photos';
@@ -183,6 +198,18 @@ function compactReminder(r: CreatedReminder) {
 // Cast: typed routes regenerate only when Metro runs.
 const go = (pathname: string, params?: Record<string, string>) =>
   router.navigate({ pathname: pathname as never, params });
+
+/** Team files and tasks Mr. Kandoo has seen this conversation, by id. */
+const teamFiles = new Map<string, TeamFile>();
+const teamTasks = new Map<string, TeamTask>();
+
+/** One of the user's teams by name (ignoring case; part of the name also works). */
+async function findTeam(name: string | null): Promise<TeamSummary | null> {
+  const teams = await fetchTeams();
+  if (!name) return teams.length === 1 ? teams[0] : null;
+  const n = name.trim().toLowerCase();
+  return teams.find((t) => t.name.toLowerCase() === n) ?? teams.find((t) => t.name.toLowerCase().includes(n)) ?? null;
+}
 
 /** Library notes Mr. Kandoo has read, by id, so an edit or delete card can show them. */
 const libraryNotes = new Map<string, LibraryNote>();
@@ -833,6 +860,213 @@ export const kandooTools: Record<string, Tool> = {
     );
   }),
 
+  // ---------------------------------------------------------------- insights
+  /** Pro and Elite: how the user has used Kandoo this week or month; can open the charts. */
+  usage_stats: guard(async (p) => {
+    const range = str(p.range) === 'month' ? 'month' : 'week';
+    const u = await fetchUsage(range);
+    if (p.show === true) go('/', { insights: range });
+    return ok({
+      range,
+      totals: u.totals,
+      reminders: u.reminders,
+      howCaptured: u.sources,
+      busiestDay: u.busiestDay,
+      library: u.library,
+      topPeople: u.people,
+      topPlaces: u.places,
+      chartsOpen: p.show === true,
+    });
+  }),
+
+  // ---------------------------------------------------------------- teams (Elite)
+  list_teams: guard(async () => {
+    const teams = await fetchTeams();
+    teams.forEach((t) => remember(t.id, t.name));
+    return ok({
+      teams: teams.map((t) => ({ id: t.id, name: t.name, role: t.role, members: t.memberCount, files: t.fileCount, lastActivity: t.lastActivity })),
+    });
+  }),
+
+  /** What a team has shared (newest first), optionally matching words. */
+  list_team_files: guard(async (p) => {
+    const team = await findTeam(str(p.team_name));
+    if (!team) return fail('I don’t see that team. list_teams shows the ones they’re in.');
+    const files = await fetchTeamFiles(team.id, str(p.query) ?? undefined);
+    files.forEach((f) => teamFiles.set(f.id, f));
+    return ok({
+      team: team.name,
+      files: files.slice(0, 20).map((f) => ({
+        id: f.id,
+        title: f.title,
+        kind: f.kind,
+        file: f.fileName,
+        sharedBy: f.fromMe ? 'the user' : f.senderName,
+        sharedAt: f.createdAt,
+        message: f.message,
+        readable: f.readable || Boolean(f.body),
+      })),
+    });
+  }),
+
+  /** The text of one shared file, so Mr. Kandoo can summarise it or answer questions about it. */
+  read_team_file: guard(async (p) => {
+    const id = str(p.file_id);
+    if (!id) return fail('Which file? Use list_team_files for its id.');
+    const { file, text, teamName } = await fetchTeamFile(id);
+    teamFiles.set(file.id, file);
+    if (!text) {
+      return fail(
+        file.kind === 'document'
+          ? 'That file’s text isn’t readable yet (still being read, or a slide or sheet). They can open it with open_team_file.'
+          : 'That file has no text to read.'
+      );
+    }
+    return ok({
+      title: file.title,
+      team: teamName,
+      sharedBy: file.fromMe ? 'the user' : file.senderName,
+      text: text.length > 9000 ? `${text.slice(0, 9000)}…` : text,
+      truncated: text.length > 9000,
+    });
+  }),
+
+  /** Open a shared file on the phone: notes and research in Word, documents in their app. */
+  open_team_file: guard(async (p) => {
+    const id = str(p.file_id);
+    const file = id ? teamFiles.get(id) ?? (await fetchTeamFile(id)).file : undefined;
+    if (!file) return fail('Which file? Use list_team_files for its id.');
+    const asWord = file.kind === 'note' || file.kind === 'research';
+    if (asWord) await openInWord({ kind: 'team', fileId: file.id }, file.title);
+    else await openTeamFile(file);
+    return ok({ opened: file.title, in: asWord ? 'Word' : 'its app' });
+  }),
+
+  /** Share research, a Library note, or text Mr. Kandoo wrote, with a team (a card; shared on yes). */
+  share_to_team: guard(async (p) => {
+    const team = await findTeam(str(p.team_name));
+    if (!team) return fail('I don’t see that team. list_teams shows the ones they’re in.');
+    let kind: 'note' | 'research' = 'note';
+    let title = str(p.title);
+    let body = str(p.body);
+    const researchId = str(p.research_id);
+    const noteId = str(p.library_note_id);
+    if (researchId) {
+      const result = research.get(researchId);
+      if (!result?.grounded) return fail('There is no research with sources to share. Use research_topic first.');
+      const note = await writeResearch(result, 'structured');
+      kind = 'research';
+      title = title ?? note.title;
+      body = note.body;
+    } else if (noteId) {
+      const note = libraryNotes.get(noteId);
+      if (!note) return fail('Read the category first (read_library_category) so I know that note.');
+      kind = note.source === 'research' ? 'research' : 'note';
+      title = title ?? note.title;
+      body = note.body;
+    }
+    if (!body) return fail('What should I share? A research_id, a library_note_id, or a body.');
+    return propose(
+      'share_to_team',
+      'Share with team',
+      [
+        shown('team', 'Team', team.name),
+        field('title', 'Title', title),
+        field('body', kind === 'research' ? 'Research' : 'Note', body, 'long'),
+        field('message', 'Message', str(p.message)),
+      ],
+      async (v) => {
+        const text = v.body?.trim();
+        if (!text) throw new Error('empty');
+        const file = await shareTextToTeam(team.id, { kind, title: v.title?.trim() || null, body: text, message: v.message?.trim() || null });
+        return { result: { shared: file.title, team: team.name }, open: { pathname: '/memory', params: { view: 'team' } } };
+      }
+    );
+  }),
+
+  /** Admins: send the team (or one member) a task with a time (a card; sent on yes). */
+  send_team_task: guard(async (p) => {
+    const team = await findTeam(str(p.team_name));
+    if (!team) return fail('I don’t see that team. list_teams shows the ones they’re in.');
+    if (team.role === 'member') return fail('Only the team’s admins can send tasks.');
+    const task = str(p.task);
+    const dueAt = iso(p.due_at);
+    if (!task || !dueAt) return fail('A task needs what and when.');
+    const memberName = str(p.member_name);
+    let assignee: { userId: string; name: string } | null = null;
+    if (memberName) {
+      const { members } = await fetchTeam(team.id);
+      const wanted = memberName.toLowerCase();
+      const hit =
+        members.find((m) => m.name.toLowerCase() === wanted) ?? members.find((m) => m.name.toLowerCase().startsWith(wanted));
+      if (!hit) return fail(`No one called ${memberName} is in ${team.name}.`);
+      assignee = { userId: hit.userId, name: hit.name };
+    }
+    return propose(
+      'send_team_task',
+      'Send team task',
+      [
+        shown('team', 'Team', team.name),
+        field('task', 'Task', task),
+        field('dueAt', 'When', dueAt, 'time'),
+        shown('to', 'To', assignee?.name ?? 'Everyone'),
+      ],
+      async (v) => {
+        const sent = await sendTeamTask(team.id, {
+          task: v.task?.trim() || task,
+          dueAt: v.dueAt ?? dueAt,
+          assigneeId: assignee?.userId ?? null,
+        });
+        return { result: { sent: sent.task, to: assignee?.name ?? 'everyone' }, open: { pathname: '/memory', params: { view: 'team' } } };
+      }
+    );
+  }),
+
+  /** Tasks the user's teams sent them that wait for an answer, and (with team_name) a team's tasks. */
+  list_team_tasks: guard(async (p) => {
+    const inbox = await fetchTaskInbox();
+    inbox.forEach((t) => teamTasks.set(t.id, t));
+    const team = str(p.team_name) ? await findTeam(str(p.team_name)) : null;
+    const all = team ? await fetchTeamTasks(team.id) : [];
+    all.forEach((t) => teamTasks.set(t.id, t));
+    return ok({
+      waitingForYou: inbox.map((t) => ({ id: t.id, task: t.task, dueAt: t.dueAt, from: t.senderName, team: t.teamName })),
+      ...(team
+        ? {
+            team: team.name,
+            tasks: all.map((t) => ({ id: t.id, task: t.task, dueAt: t.dueAt, from: t.fromMe ? 'the user' : t.senderName, myStatus: t.myStatus, ...t.counts })),
+          }
+        : {}),
+    });
+  }),
+
+  /** Accept (it becomes their reminder) or decline a task from their team (a card). */
+  answer_team_task: guard(async (p) => {
+    const id = str(p.task_id);
+    const task = id ? teamTasks.get(id) : undefined;
+    if (!id || !task) return fail('Find the task first with list_team_tasks.');
+    const accept = p.accept !== false;
+    return propose(
+      'answer_team_task',
+      accept ? 'Accept team task' : 'Decline team task',
+      [
+        shown('task', 'Task', task.task),
+        shown('from', 'From', task.senderName),
+        task.dueAt ? field('dueAt', 'When', task.dueAt, 'time', false) : null,
+      ],
+      async () => {
+        const { reminder } = await respondTeamTask(id, accept);
+        if (reminder) await scheduleReminder(reminder);
+        teamTasks.delete(id);
+        return {
+          result: { accepted: accept, reminder: reminder ? compactReminder(reminder) : null },
+          open: accept ? { pathname: '/reminders' } : { pathname: '/memory', params: { view: 'team' } },
+        };
+      },
+      { destructive: !accept }
+    );
+  }),
+
   // ---------------------------------------------------------------- places
   list_places: guard(async () => {
     const places = await fetchPlaces();
@@ -1016,12 +1250,14 @@ export const kandooTools: Record<string, Tool> = {
       case 'home': go('/'); break;
       case 'memory': go('/memory'); break;
       case 'library': go('/memory', { view: 'library' }); break;
+      case 'team': go('/memory', { view: 'team' }); break;
+      case 'insights': go('/', { insights: str(p.range) === 'month' ? 'month' : 'week' }); break;
       case 'people': go('/people'); break;
       case 'reminders': go('/reminders'); break;
       case 'places': go('/places', id ? { open: id } : undefined); break;
       case 'draw_place': go('/places', { draw: str(p.place_name) ?? '' }); break;
       case 'recap': go('/places', { recap: monthWindow(new Date()).key }); break;
-      default: return fail('Screens: home, memory, library, people, reminders, places, draw_place, recap.');
+      default: return fail('Screens: home, memory, library, team, insights, people, reminders, places, draw_place, recap.');
     }
     return ok({ opened: screen });
   }),

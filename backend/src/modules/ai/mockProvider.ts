@@ -49,6 +49,11 @@ export class MockAIProvider implements AIProvider {
   }
 
   /** No model here: an empty object, which every caller's schema rejects honestly. */
+  /** No vision: nothing to transcribe. */
+  async extractFileText(_file: { base64: string; mimeType: string }): Promise<string> {
+    return '';
+  }
+
   async generateJson(_system: string, _user: string, _maxOutputTokens: number): Promise<unknown> {
     return {};
   }

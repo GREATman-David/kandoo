@@ -25,6 +25,7 @@ function stub(overrides: Partial<AIProvider>): AIProvider {
     interpretPhoto: fail,
     readDocument: fail,
     generateJson: fail,
+    extractFileText: fail,
     writeNote: fail,
     generateRecallAnswer: fail,
     embed: fail,

@@ -14,6 +14,7 @@ import {
 import {
   EMPTY_RECALL_ANSWER,
   NOTE_SYSTEM_PROMPT,
+  FILE_TEXT_PROMPT,
   RECALL_SYSTEM_PROMPT,
   documentReadingPrompt,
   extractionPrompt,
@@ -384,6 +385,17 @@ export class GeminiProvider implements AIProvider {
       throw new Error(`Document reading failed validation: ${parsed.error.message}`);
     }
     return parsed.data;
+  }
+
+  async extractFileText(file: { base64: string; mimeType: string }): Promise<string> {
+    const { value } = await this.completeJson(
+      FILE_TEXT_PROMPT,
+      [{ role: 'user', parts: [{ inlineData: { mimeType: file.mimeType, data: file.base64 } }, { text: 'Transcribe this file.' }] }],
+      8000
+    );
+    const text = (value as { text?: unknown })?.text;
+    if (typeof text !== 'string') throw new Error('File transcription returned no text.');
+    return text;
   }
 
   async generateJson(system: string, user: string, maxOutputTokens: number): Promise<unknown> {

@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { LibraryNote } from '@/services/interpretationService';
+import { logFailure, openInWord, userMessage, type LibraryNote } from '@/services/interpretationService';
 import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 import { timeAgo } from '@/utils/timeAgo';
 
@@ -186,6 +186,21 @@ export function LibraryNoteEditor({
               ))}
             </View>
           ) : null}
+          {note && !changed ? (
+            // A saved note opens in Microsoft Word as a real .docx.
+            <Pressable
+              style={styles.word}
+              onPress={() => {
+                openInWord({ kind: 'library', noteId: note.id }, note.title ?? 'Kandoo note').catch((caught: unknown) => {
+                  logFailure('Opening a note in Word failed:', caught);
+                  setError(userMessage(caught, 'It didn’t open. Is Microsoft Word installed?'));
+                });
+              }}
+              accessibilityRole="button"
+            >
+              <Text style={styles.wordText}>Open in Word</Text>
+            </Pressable>
+          ) : null}
           {note ? (
             <Text style={styles.meta}>
               {note.source === 'document' ? 'Read from a page · ' : note.source === 'research' ? 'Researched by Mr. Kandoo · ' : ''}
@@ -245,6 +260,17 @@ const styles = StyleSheet.create({
   },
   meta: { ...text.caption, color: colors.inkMuted, marginTop: spacing.space3 },
   links: { marginTop: spacing.space4, gap: spacing.space2 },
+  word: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.space4,
+    minHeight: 44,
+    paddingHorizontal: spacing.space5,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.lineStrong,
+    justifyContent: 'center',
+  },
+  wordText: { ...text.bodyStrong, color: colors.ink },
   linksLabel: { ...text.label, letterSpacing: 1.5, color: colors.markRing },
   link: { ...text.body, color: colors.focus, textDecorationLine: 'underline' },
   dock: { paddingTop: spacing.space3, gap: spacing.space2 },

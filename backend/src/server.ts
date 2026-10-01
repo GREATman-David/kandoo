@@ -9,6 +9,7 @@ import insightsRouter from './routes/insights';
 import placesRouter from './routes/places';
 import photosRouter from './routes/photos';
 import libraryRouter from './routes/library';
+import teamsRouter from './routes/teams';
 
 const app = express();
 
@@ -32,10 +33,14 @@ app.use(cors({ origin: false }));
 // base64; everything else stays under the tight 1 MB limit.
 const jsonSmall = express.json({ limit: '1mb' });
 const jsonPhoto = express.json({ limit: '8mb' });
+// A shared team document is up to 15 MB, so about 20 MB as base64.
+const jsonFile = express.json({ limit: '22mb' });
 app.use((req, res, next) =>
-  req.path === '/interpret/photo' || req.path === '/photos' || req.path === '/library/read'
-    ? jsonPhoto(req, res, next)
-    : jsonSmall(req, res, next)
+  /^\/teams\/[^/]+\/files$/.test(req.path) && req.method === 'POST'
+    ? jsonFile(req, res, next)
+    : req.path === '/interpret/photo' || req.path === '/photos' || req.path === '/library/read'
+      ? jsonPhoto(req, res, next)
+      : jsonSmall(req, res, next)
 );
 
 app.get('/', (_req, res) => {
@@ -61,6 +66,9 @@ app.use('/', photosRouter);
 
 // /library/... — categories of the user's own notes.
 app.use('/', libraryRouter);
+
+// /teams/..., /join/:code, /library/notes/:id/docx — Teams (Elite) and Word export.
+app.use('/', teamsRouter);
 
 // /insights/month — the monthly recap's server half (counts only).
 app.use('/', insightsRouter);

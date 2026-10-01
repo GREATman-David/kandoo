@@ -17,8 +17,8 @@ export type RecallMemory = {
    * Also 'note' (the note Kandoo wrote up from a capture) and 'library' (a
    * Library note) since 012 — recall reaches everything the user kept.
    */
-  source: 'memory' | 'reminder' | 'note' | 'library';
-  /** The Library category a 'library' hit is filed in. */
+  source: 'memory' | 'reminder' | 'note' | 'library' | 'team';
+  /** The Library category of a 'library' hit, or the team of a 'team' hit (its sender is in person). */
   category?: string | null;
   content: string;
   person: string | null;
@@ -87,6 +87,12 @@ export interface AIProvider {
    * steps each have their own shape. Temperature 0, no thinking tokens.
    */
   generateJson(system: string, user: string, maxOutputTokens: number): Promise<unknown>;
+
+  /**
+   * The readable text of a shared file (a PDF, a scanned page, an image), for
+   * recall and for Mr. Kandoo to work with. Plain text; no interpretation.
+   */
+  extractFileText(file: { base64: string; mimeType: string }): Promise<string>;
 
   generateRecallAnswer(
     question: string,

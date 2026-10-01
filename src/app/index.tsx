@@ -1,4 +1,4 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
@@ -21,6 +21,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AccountSheet } from '@/components/AccountSheet';
+import { InsightsScreen } from '@/components/insights/InsightsScreen';
 import { ActionSheet } from '@/components/ActionSheet';
 import { PhotoViewer } from '@/components/PhotoViewer';
 import { EmptyState } from '@/components/EmptyState';
@@ -180,6 +181,15 @@ function KandooHome() {
   const [photoMenu, setPhotoMenu] = useState(false);
   const [viewerPhoto, setViewerPhoto] = useState<Photo | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+  // Insights (Pro and Elite): from the account sheet, or Mr. Kandoo (?insights=week|month).
+  const [insightsRange, setInsightsRange] = useState<'week' | 'month' | null>(null);
+  const homeParams = useLocalSearchParams<{ insights?: string }>();
+  useEffect(() => {
+    if (homeParams.insights === 'week' || homeParams.insights === 'month') {
+      setInsightsRange(homeParams.insights);
+      router.setParams({ insights: undefined });
+    }
+  }, [homeParams.insights]);
   const [agentOpen, setAgentOpen] = useState(false);
   // Which tier the paywall opens on, and why (e.g. Agent minutes used up).
   const [paywallFocus, setPaywallFocus] = useState<'pro' | 'elite'>('pro');
@@ -561,7 +571,15 @@ function KandooHome() {
         onClose={() => setAccountOpen(false)}
         onGetPro={() => openPaywallFor('pro')}
         onGetElite={() => openPaywallFor('elite')}
+        onOpenInsights={() => setInsightsRange('week')}
         onEntitlementChange={entitlement.refresh}
+      />
+
+      <InsightsScreen
+        visible={insightsRange !== null}
+        initialRange={insightsRange ?? 'week'}
+        onClose={() => setInsightsRange(null)}
+        onNeedPro={() => openPaywallFor('pro')}
       />
 
       <NoteDetail

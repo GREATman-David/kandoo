@@ -1541,3 +1541,191 @@ export async function writeResearch(
     { timeoutMs: AI_TIMEOUT_MS }
   );
 }
+
+// ── Insights (Pro and Elite) ─────────────────────────────────────────────────
+
+export type UsageSlice = { name: string; value: number };
+export type Usage = {
+  from: string;
+  to: string;
+  days: { date: string; label: string; captures: number; memories: number; reminders: number }[];
+  totals: { captures: number; memories: number; reminders: number; notes: number; photos: number };
+  sources: UsageSlice[];
+  reminders: { done: number; missed: number; upcoming: number; awaitingReview: number; cancelled: number };
+  library: UsageSlice[];
+  noteKinds: UsageSlice[];
+  people: UsageSlice[];
+  places: UsageSlice[];
+  busiestDay: string | null;
+};
+
+export type UsageRange = 'week' | 'month';
+
+/** The window, from the phone's own clock: the last 7 or 30 days, starting at local midnight. */
+export function usageWindow(range: UsageRange, now = new Date()): { from: Date; to: Date } {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (range === 'week' ? 6 : 29));
+  return { from: start, to: now };
+}
+
+/** Pro and Elite: activity over the last week or month, for charts (402 on Free). */
+export async function fetchUsage(range: UsageRange): Promise<Usage> {
+  const accessToken = await getAccessTokenOrThrow();
+  const { from, to } = usageWindow(range);
+  const params = new URLSearchParams({
+    from: from.toISOString(),
+    to: to.toISOString(),
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+  const data = await apiFetch<{ usage: Usage }>(
+    `/insights/usage?${params}`,
+    { method: 'GET', headers: { Authorization: `Bearer ${accessToken}` } },
+    'Your insights couldn’t load.'
+  );
+  return data.usage;
+}
+
+// ── Teams (Elite) ────────────────────────────────────────────────────────────
+
+export type TeamRole = 'owner' | 'admin' | 'member';
+
+export type TeamSummary = {
+  id: string;
+  name: string;
+  purpose: string | null;
+  role: TeamRole;
+  memberCount: number;
+  fileCount: number;
+  lastActivity: string;
+  /** Admins and the owner only. */
+  inviteCode: string | null;
+  inviteLink: string | null;
+};
+
+export type TeamMember = { userId: string; name: string; role: TeamRole; joinedAt: string; isMe: boolean };
+
+export type TeamFile = {
+  id: string;
+  teamId: string;
+  kind: 'note' | 'research' | 'document' | 'photo';
+  title: string;
+  message: string | null;
+  senderName: string;
+  fromMe: boolean;
+  fileName: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  url: string | null;
+  body: string | null;
+  readable: boolean;
+  createdAt: string;
+};
+
+export type TeamTaskStatus = 'sent' | 'accepted' | 'declined' | 'done';
+
+export type TeamTask = {
+  id: string;
+  teamId: string;
+  task: string;
+  dueAt: string | null;
+  senderName: string;
+  fromMe: boolean;
+  myStatus: TeamTaskStatus | null;
+  counts: Record<TeamTaskStatus, number>;
+  createdAt: string;
+  teamName?: string;
+};
+
+async function teamCall<T>(path: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', fallback: string, body?: unknown, timeoutMs?: number): Promise<T> {
+  const accessToken = await getAccessTokenOrThrow();
+  return apiFetch<T>(
+    path,
+    {
+      method,
+      headers: {
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        Authorization: `Bearer ${accessToken}`,
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    },
+    fallback,
+    timeoutMs ? { timeoutMs } : {}
+  );
+}
+
+const enc = encodeURIComponent;
+
+export const fetchTeams = async () => (await teamCall<{ teams: TeamSummary[] }>('/teams', 'GET', 'Your teams couldn’t load.')).teams;
+
+export const createTeam = async (input: { name: string; purpose: string | null; displayName?: string | null }) =>
+  (await teamCall<{ team: TeamSummary }>('/teams', 'POST', 'That team wasn’t made.', input)).team;
+
+export const joinTeam = async (code: string, displayName?: string | null) =>
+  (await teamCall<{ team: TeamSummary }>('/teams/join', 'POST', 'Joining didn’t work.', { code, displayName })).team;
+
+export const fetchTeam = (id: string) =>
+  teamCall<{ team: TeamSummary; members: TeamMember[] }>(`/teams/${enc(id)}`, 'GET', 'That team couldn’t load.');
+
+export const deleteTeam = (id: string) => teamCall(`/teams/${enc(id)}`, 'DELETE', 'That team wasn’t deleted.');
+export const leaveTeam = (id: string) => teamCall(`/teams/${enc(id)}/leave`, 'POST', 'Leaving didn’t work.', {});
+export const regenerateInvite = (id: string) =>
+  teamCall<{ inviteCode: string; inviteLink: string }>(`/teams/${enc(id)}/invite`, 'POST', 'A new link wasn’t made.', {});
+export const setMemberRole = (teamId: string, userId: string, role: 'admin' | 'member') =>
+  teamCall(`/teams/${enc(teamId)}/members/${enc(userId)}`, 'PATCH', 'That role didn’t change.', { role });
+export const removeMember = (teamId: string, userId: string) =>
+  teamCall(`/teams/${enc(teamId)}/members/${enc(userId)}`, 'DELETE', 'They weren’t removed.');
+
+export async function fetchTeamFiles(teamId: string, query?: string): Promise<TeamFile[]> {
+  const q = query?.trim() ? `?q=${enc(query.trim())}` : '';
+  return (await teamCall<{ files: TeamFile[] }>(`/teams/${enc(teamId)}/files${q}`, 'GET', 'The team’s files couldn’t load.')).files;
+}
+
+export const shareTextToTeam = async (
+  teamId: string,
+  input: { kind: 'note' | 'research'; title: string | null; body: string; message?: string | null }
+) => (await teamCall<{ file: TeamFile }>(`/teams/${enc(teamId)}/files`, 'POST', 'That wasn’t shared.', input)).file;
+
+/** Upload a document or photo (base64). Large files take a while on a slow network. */
+export const uploadTeamFile = async (
+  teamId: string,
+  file: { base64: string; mimeType: string; name: string },
+  extra: { title?: string | null; message?: string | null } = {}
+) => (await teamCall<{ file: TeamFile }>(`/teams/${enc(teamId)}/files`, 'POST', 'That file wasn’t shared.', { file, ...extra }, 120_000)).file;
+
+export const fetchTeamFile = (fileId: string) =>
+  teamCall<{ file: TeamFile; text: string | null; teamName: string }>(`/teams/files/${enc(fileId)}`, 'GET', 'That file couldn’t open.');
+
+export const deleteTeamFile = (fileId: string) => teamCall(`/teams/files/${enc(fileId)}`, 'DELETE', 'That file wasn’t removed.');
+
+export const fetchTeamTasks = async (teamId: string) =>
+  (await teamCall<{ tasks: TeamTask[] }>(`/teams/${enc(teamId)}/tasks`, 'GET', 'The team’s tasks couldn’t load.')).tasks;
+
+export const sendTeamTask = async (teamId: string, input: { task: string; dueAt: string; assigneeId: string | null }) =>
+  (await teamCall<{ task: TeamTask }>(`/teams/${enc(teamId)}/tasks`, 'POST', 'That task wasn’t sent.', input)).task;
+
+export const fetchTaskInbox = async () => (await teamCall<{ tasks: TeamTask[] }>('/teams/inbox', 'GET', 'Your team tasks couldn’t load.')).tasks;
+
+export const respondTeamTask = (taskId: string, accept: boolean) =>
+  teamCall<{ reminder: CreatedReminder | null }>(`/teams/tasks/${enc(taskId)}/respond`, 'POST', 'That didn’t go through.', { accept });
+
+export const markTeamTaskDone = (taskId: string) => teamCall(`/teams/tasks/${enc(taskId)}/done`, 'POST', 'That didn’t go through.', {});
+
+/** Open a team note, research write-up, or one of your Library notes in Word. */
+export async function openInWord(source: { kind: 'team'; fileId: string } | { kind: 'library'; noteId: string }, title: string): Promise<void> {
+  const { downloadAndOpen, DOCX_MIME } = await import('./documents');
+  const path = source.kind === 'team' ? `/teams/files/${enc(source.fileId)}/docx` : `/library/notes/${enc(source.noteId)}/docx`;
+  await downloadAndOpen({
+    url: `${BACKEND_URL}${path}`,
+    fileName: `${title.slice(0, 60) || 'Kandoo note'}.docx`,
+    mimeType: DOCX_MIME,
+    accessToken: await getAccessTokenOrThrow(),
+  });
+}
+
+/** Open a shared document or photo in the app for its type. */
+export async function openTeamFile(file: TeamFile): Promise<void> {
+  if (!file.url || !file.mimeType) throw new Error('This file has no download link.');
+  const { downloadAndOpen } = await import('./documents');
+  await downloadAndOpen({ url: file.url, fileName: file.fileName ?? file.title, mimeType: file.mimeType });
+}

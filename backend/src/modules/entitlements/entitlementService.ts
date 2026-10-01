@@ -121,6 +121,33 @@ export async function getUserTier(
         ((data?.items ?? []) as { entitlement_id?: string }[]).map((item) => item.entitlement_id)
       );
       tier = ids.elite && active.has(ids.elite) ? 'elite' : ids.pro && active.has(ids.pro) ? 'pro' : 'free';
+      // active_entitlements can lag a renewal (seen with Test Store renewals:
+      // the subscription says gives_access with both entitlements while the
+      // list is empty). Below Elite, ask the subscriptions themselves.
+      if (tier !== 'elite' && data) {
+        const subs = await revenueCatGet(
+          `/projects/${creds.projectId}/customers/${encodeURIComponent(userId)}/subscriptions`,
+          creds.secret
+        );
+        const granted = new Set<string>();
+        for (const sub of (subs?.items ?? []) as { gives_access?: boolean; entitlements?: unknown }[]) {
+          if (!sub.gives_access) continue;
+          const list = Array.isArray(sub.entitlements)
+            ? sub.entitlements
+            : ((sub.entitlements as { items?: unknown[] } | undefined)?.items ?? []);
+          for (const e of list) {
+            if (typeof e === 'string') granted.add(e);
+            else if (e && typeof e === 'object') {
+              const { id, lookup_key } = e as { id?: string; lookup_key?: string };
+              if (id) granted.add(id);
+              if (lookup_key) granted.add(lookup_key);
+            }
+          }
+        }
+        const has = (id: string | null, key: string) => (id !== null && granted.has(id)) || granted.has(key);
+        if (has(ids.elite, ELITE_LOOKUP_KEY)) tier = 'elite';
+        else if (tier === 'free' && has(ids.pro, PRO_LOOKUP_KEY)) tier = 'pro';
+      }
     }
   } catch (error) {
     console.error('RevenueCat entitlement check failed; treating as free:', error);

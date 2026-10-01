@@ -362,6 +362,17 @@ Return JSON only: {"title": "...", "body": "..."}
 `.trim();
 }
 
+/** Transcribe a shared file so a team can search it and Mr. Kandoo can read it. */
+export const FILE_TEXT_PROMPT = `
+Transcribe the readable text of this file, in reading order, as plain text.
+Keep headings on their own lines, lists as lines starting with "• ", tables as
+"cell | cell" rows, and every number, date, name and amount exactly as written.
+For a photo or image with little text, write one sentence describing it, then
+any text in it. Do not summarise, comment or add anything that is not there.
+
+Return JSON only: {"text": "..."}
+`.trim();
+
 /** Returned without calling a model: there is nothing to summarise. */
 export const EMPTY_RECALL_ANSWER = "I don't have anything saved about that yet.";
 
@@ -376,7 +387,9 @@ committed to do, with a scheduled time). Answer accordingly:
 - A NOTE is a write-up of something the user said; a LIBRARY NOTE is a note the
   user keeps in a named category of their Library. Answer from what they say,
   and for a Library note name where it lives: "Your Kandoo Project notes say
-  the launch is on Friday."
+  the launch is on Friday." A TEAM FILE was shared in one of the user's
+  teams: say who shared it and where ("Ama's budget sheet in Grace Foundation
+  says…").
 
 Use ONLY the items provided. Never invent or infer anything not there. If they do
 not answer the question, say plainly that you do not have it saved.
@@ -411,7 +424,9 @@ export function recallUserPrompt(
             ? 'NOTE'
             : item.source === 'library'
               ? `LIBRARY NOTE in "${item.category ?? 'Library'}"`
-              : 'MEMORY';
+              : item.source === 'team'
+                ? `TEAM FILE in "${item.category ?? 'a team'}", shared by ${item.person ?? 'a teammate'}`
+                : 'MEMORY';
       return [
         `[${index + 1}] (${kind}) ${item.content}`,
         item.source === 'reminder' && item.due_at

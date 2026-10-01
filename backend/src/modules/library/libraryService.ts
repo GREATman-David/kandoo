@@ -247,3 +247,23 @@ export async function deleteNote(userId: string, id: string): Promise<boolean> {
   if (error) throw error;
   return (data ?? []).length > 0;
 }
+
+/** One of the user's notes, with its category's name (for export). Null when not theirs. */
+export async function getNote(
+  userId: string,
+  id: string
+): Promise<(LibraryNote & { categoryName: string }) | null> {
+  const { data, error } = await supabase
+    .from('library_notes')
+    .select(`${NOTE_COLUMNS}, library_categories(name)`)
+    .eq('user_id', userId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const shelf = (data as Record<string, unknown>).library_categories as { name: string } | { name: string }[] | null;
+  return {
+    ...(data as unknown as LibraryNote),
+    categoryName: (Array.isArray(shelf) ? shelf[0]?.name : shelf?.name) ?? 'Library',
+  };
+}

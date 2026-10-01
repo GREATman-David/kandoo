@@ -153,6 +153,11 @@ export class OpenAIProvider implements AIProvider {
     return parsed.data;
   }
 
+  /** Chat completions can't read a PDF inline; the fallback chain moves on. */
+  async extractFileText(_file: { base64: string; mimeType: string }): Promise<string> {
+    throw new Error('OpenAI file transcription is not set up.');
+  }
+
   async generateJson(system: string, user: string, maxOutputTokens: number): Promise<unknown> {
     const { value } = await this.completeJson(
       [

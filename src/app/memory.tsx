@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ActionSheet, type SheetAction } from '@/components/ActionSheet';
 import { EmptyState } from '@/components/EmptyState';
 import { LibraryView } from '@/components/library/LibraryView';
+import { TeamsView } from '@/components/teams/TeamsView';
 import { LockedRow } from '@/components/LockedRow';
 import { ManualEntry, type ManualEntryProps } from '@/components/ManualEntry';
 import { ManualReminder } from '@/components/ManualReminder';
@@ -96,24 +97,29 @@ function toReminder(r: CaptureNoteReminder): CreatedReminder {
 export default function MemoryScreen() {
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuth();
-  const { isPro, refresh } = useEntitlement();
+  const { isPro, isElite, refresh } = useEntitlement();
 
   const [notes, setNotes] = useState<CaptureNote[]>([]);
   const [people, setPeople] = useState<PersonSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Memories (what you told Kandoo) or the Library (your own notes, by category).
-  const [view, setView] = useState<'memories' | 'library'>('memories');
+  // Memories (what you told Kandoo), the Library (your own notes, by
+  // category), or Team (what your teams share — Elite).
+  const [view, setView] = useState<'memories' | 'library' | 'team'>('memories');
   const [libraryRefresh, setLibraryRefresh] = useState(0);
-  // Arrived from Mr. Kandoo's "Open" on a filed page: show the Library.
-  const params = useLocalSearchParams<{ view?: string }>();
+  const [joinCode, setJoinCode] = useState<string | null>(null);
+  const [paywallFocus, setPaywallFocus] = useState<'pro' | 'elite'>('pro');
+  // Arrived from Mr. Kandoo ("Open" on a filed page, "open my team"), or an
+  // invite link (kandoo://join/CODE → view=team&join=CODE).
+  const params = useLocalSearchParams<{ view?: string; join?: string }>();
   useEffect(() => {
-    if (params.view === 'library') {
-      setView('library');
-      router.setParams({ view: undefined });
+    if (params.view === 'library' || params.view === 'team') {
+      setView(params.view);
+      if (params.join) setJoinCode(params.join);
+      router.setParams({ view: undefined, join: undefined });
     }
-  }, [params.view]);
+  }, [params.view, params.join]);
   const [query, setQuery] = useState('');
   // Typing filters the cards instantly on the device; pressing search also
   // asks Kandoo for a written answer. Both can show at once.
@@ -393,7 +399,7 @@ export default function MemoryScreen() {
       <OfflineNote />
 
       <View style={styles.switch} accessibilityRole="tablist">
-        {(['memories', 'library'] as const).map((option) => (
+        {(['memories', 'library', 'team'] as const).map((option) => (
           <Pressable
             key={option}
             style={[styles.switchOption, view === option && styles.switchOptionOn]}
@@ -402,13 +408,28 @@ export default function MemoryScreen() {
             accessibilityState={{ selected: view === option }}
           >
             <Text style={[styles.switchText, view === option && styles.switchTextOn]}>
-              {option === 'memories' ? 'Memories' : 'Library'}
+              {option === 'memories' ? 'Memories' : option === 'library' ? 'Library' : 'Team'}
             </Text>
           </Pressable>
         ))}
       </View>
 
-      {view === 'library' ? (
+      {view === 'team' ? (
+        isAuthenticated ? (
+          <TeamsView
+            isElite={isElite}
+            onNeedElite={() => {
+              setPaywallFocus('elite');
+              setPaywall(true);
+            }}
+            joinCode={joinCode}
+            onJoinCodeUsed={() => setJoinCode(null)}
+            refreshKey={libraryRefresh}
+          />
+        ) : (
+          <Text style={styles.empty}>Sign in to see your teams.</Text>
+        )
+      ) : view === 'library' ? (
         isAuthenticated ? (
           <LibraryView refreshKey={libraryRefresh} />
         ) : (
@@ -642,7 +663,11 @@ export default function MemoryScreen() {
 
       <Paywall
         visible={paywall}
-        onClose={() => setPaywall(false)}
+        focus={paywallFocus}
+        onClose={() => {
+          setPaywall(false);
+          setPaywallFocus('pro');
+        }}
         onPurchased={() => {
           refresh();
           setPaywall(false);
