@@ -110,6 +110,27 @@ const iso = (v: unknown): string | null => {
   const s = str(v);
   return s && !Number.isNaN(Date.parse(s)) ? s : null;
 };
+const WEEKDAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+/**
+ * The model names the right weekday ("Friday") and then writes a date that
+ * isn't one (seen: Friday → a Sunday). When the user said a weekday, the date
+ * must fall on it here on the phone; if not, refuse with the correct date.
+ */
+function weekdayMismatch(dueAt: string, weekday: unknown): string | null {
+  const wanted = WEEKDAY_NAMES.indexOf((str(weekday) ?? '').toLowerCase().trim());
+  if (wanted < 0) return null;
+  const due = new Date(dueAt);
+  if (due.getDay() === wanted) return null;
+  const today = new Date();
+  const ahead = (wanted - today.getDay() + 7) % 7 || 7;
+  const right = new Date(today.getFullYear(), today.getMonth(), today.getDate() + ahead);
+  const ymd = `${right.getFullYear()}-${String(right.getMonth() + 1).padStart(2, '0')}-${String(right.getDate()).padStart(2, '0')}`;
+  return fail(
+    `${dueAt.slice(0, 10)} is not a ${WEEKDAY_NAMES[wanted]}. The next ${WEEKDAY_NAMES[wanted]} is ${ymd} — call again with that date (same time).`
+  );
+}
+
 const days = (v: unknown): number[] | null =>
   Array.isArray(v) && v.every((d) => Number.isInteger(d) && d >= 0 && d <= 6) ? (v as number[]) : null;
 
@@ -436,6 +457,8 @@ export const kandooTools: Record<string, Tool> = {
     const task = str(p.task);
     if (!task) return fail('Say what the reminder is for.');
     const dueAt = iso(p.due_at);
+    const wrongDay = dueAt ? weekdayMismatch(dueAt, p.weekday) : null;
+    if (wrongDay) return wrongDay;
     const placeName = dueAt ? null : str(p.place_name);
     if (!dueAt && !placeName) return fail('A reminder needs a time or a place.');
     const trigger = p.trigger === 'leave' ? 'leave' : 'arrive';
@@ -477,6 +500,8 @@ export const kandooTools: Record<string, Tool> = {
     const current = [...g.active, ...g.needsReview, ...g.history].find((r) => r.id === id);
     if (!current) return fail('That reminder is no longer there.');
     const newDue = iso(p.due_at);
+    const wrongDay = newDue ? weekdayMismatch(newDue, p.weekday) : null;
+    if (wrongDay) return wrongDay;
     const repeat = p.repeat_days !== undefined ? days(p.repeat_days) : undefined;
     if (!str(p.task) && !newDue && p.person === undefined && repeat === undefined) return fail('Nothing to change.');
     return propose(
@@ -866,12 +891,18 @@ export const kandooTools: Record<string, Tool> = {
     const range = str(p.range) === 'month' ? 'month' : 'week';
     const u = await fetchUsage(range);
     if (p.show === true) go('/', { insights: range });
+    // Spelled out: given a bare date, the model guesses its weekday wrong.
+    const busiest = u.busiestDay
+      ? new Date(`${u.busiestDay}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+      : null;
+    const { missed, ...reminderCounts } = u.reminders;
     return ok({
       range,
       totals: u.totals,
-      reminders: u.reminders,
+      // "Overdue", as the app says: past due and not ticked off yet.
+      reminders: { ...reminderCounts, overdue: missed },
       howCaptured: u.sources,
-      busiestDay: u.busiestDay,
+      busiestDay: busiest,
       library: u.library,
       topPeople: u.people,
       topPlaces: u.places,
@@ -992,6 +1023,8 @@ export const kandooTools: Record<string, Tool> = {
     const task = str(p.task);
     const dueAt = iso(p.due_at);
     if (!task || !dueAt) return fail('A task needs what and when.');
+    const wrongDay = weekdayMismatch(dueAt, p.weekday);
+    if (wrongDay) return wrongDay;
     const memberName = str(p.member_name);
     let assignee: { userId: string; name: string } | null = null;
     if (memberName) {

@@ -6,7 +6,8 @@ import { supabase } from '@/services/supabase';
  * How Kandoo addresses the user — "David", "Dr. Mensah", "Ama". Pro users set
  * it after upgrading (or from their account); Kandoo Agent says it out loud.
  * Kept in the account's own profile metadata, so it follows them to a new
- * phone; it is never shown to anyone else.
+ * phone. The only other people who see it are teammates in a team the user
+ * joined (Elite Teams), as the name beside what they share.
  */
 
 export const MAX_NAME_LENGTH = 40;

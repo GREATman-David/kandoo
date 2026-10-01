@@ -75,9 +75,13 @@ function fail(res: Response, error: unknown, what: string) {
 }
 
 const me = (req: Request) => (req as AuthenticatedRequest).user;
+/** How teammates see this person: the name Kandoo calls them, else their sign-up first name. */
 const fallbackName = (req: Request) => {
-  const user = me(req) as { email?: string; user_metadata?: { name?: string } };
-  return user.user_metadata?.name ?? user.email?.split('@')[0] ?? 'A teammate';
+  const user = me(req) as { email?: string; user_metadata?: Record<string, unknown> };
+  const meta = user.user_metadata ?? {};
+  const pick = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const signUp = pick(meta.name) ?? pick(meta.full_name) ?? pick(meta.first_name);
+  return pick(meta.preferred_name) ?? signUp?.split(/\s+/)[0] ?? user.email?.split('@')[0] ?? 'A teammate';
 };
 
 /** The link an admin shares: an https page that opens Kandoo at the join screen. */

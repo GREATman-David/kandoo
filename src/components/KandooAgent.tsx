@@ -195,7 +195,7 @@ export function KandooAgent({ visible, onClose, onNeedPro }: KandooAgentProps) {
         dynamicVariables: {
           // The name the user chose; 'there' tells Kandoo it has none.
           user_name: preferredName(data.user) ?? 'there',
-          client_time: localIsoNow(),
+          client_time: agentClock(),
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         },
       });
@@ -548,6 +548,23 @@ function localIsoNow(): string {
   const pad = (n: number) => String(Math.floor(Math.abs(n))).padStart(2, '0');
   const local = new Date(now.getTime() + offset * 60_000).toISOString().slice(0, 19);
   return `${local}${sign}${pad(offset / 60)}:${pad(offset % 60)}`;
+}
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * Now, plus the weekday of today and the next seven days, so "Friday" is read
+ * off a list instead of worked out — the model got weekday arithmetic wrong
+ * ("Friday" on a Thursday became Saturday).
+ */
+function agentClock(): string {
+  const now = new Date();
+  const days = Array.from({ length: 8 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return `${WEEKDAYS[d.getDay()]} ${date}${i === 0 ? ' (today)' : i === 1 ? ' (tomorrow)' : ''}`;
+  });
+  return `${localIsoNow()}, ${WEEKDAYS[now.getDay()]}. The coming days: ${days.join('; ')}.`;
 }
 
 const styles = StyleSheet.create({

@@ -274,7 +274,11 @@ export function TeamSpace({ team, onClose }: { team: TeamSummary | null; onClose
             <Pressable
               key={option}
               style={[styles.tab, tab === option && styles.tabOn]}
-              onPress={() => setTab(option)}
+              onPress={() => {
+                setTab(option);
+                // Teammates change things while this is open: new members, files, answers.
+                void load();
+              }}
               accessibilityRole="tab"
               accessibilityState={{ selected: tab === option }}
             >
