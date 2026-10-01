@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import {
   Dimensions,
+  Image,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Pressable,
@@ -15,6 +16,8 @@ import { colors, fontFamily, radius, spacing, text } from '@/theme/theme';
 
 import { KandooSymbol } from './Symbol';
 
+const MR_KANDOO = require('@/assets/images/agent/kandoo-agent.png');
+
 type Card = { headline: string; body: string; plans?: true };
 
 /**
@@ -22,14 +25,16 @@ type Card = { headline: string; body: string; plans?: true };
  * Elite is a list, so each new Elite feature is one more line here.
  */
 const PLANS: { name: string; line: string; points?: string[] }[] = [
-  { name: 'Free', line: 'Capture, reminders and answers from your last ten days, spoken in your phone’s voice.' },
-  { name: 'Kandoo Pro', line: 'Your whole history, places that remind you the moment you arrive, and Kandoo’s own voice.' },
+  { name: 'Free', line: 'Speak, type or show a photo. Reminders, your Library of notes, and answers from your last ten days.' },
+  { name: 'Kandoo Pro', line: 'Your whole history, places that remind you the moment you arrive, Insights charts of how you use Kandoo, and Kandoo’s own voice.' },
   {
     name: 'Kandoo Elite',
     line: 'Everything in Pro, plus Mr. Kandoo:',
     points: [
       '45 minutes a month of conversation that acts across the app',
-      'Photograph your notes or a document — he pulls out what matters and files it in your Library',
+      'Research with real references, written up for your Library',
+      'Photograph pages and documents into organised notes',
+      'Teams — share files, send tasks, open them in Word, work on them together',
     ],
   },
 ];
@@ -69,7 +74,15 @@ function CardContent({ card }: { card: Card }) {
         <View style={styles.plans}>
           {PLANS.map((plan) => (
             <View key={plan.name} style={[styles.plan, plan.name === 'Kandoo Elite' && styles.planElite]}>
-              <Text style={styles.planName}>{plan.name}</Text>
+              {plan.name === 'Kandoo Elite' ? (
+                // Mr. Kandoo is Elite's headline: his face beside the name.
+                <View style={styles.eliteHead}>
+                  <Image source={MR_KANDOO} style={styles.mrKandoo} accessibilityLabel="Mr. Kandoo" />
+                  <Text style={styles.planName}>{plan.name}</Text>
+                </View>
+              ) : (
+                <Text style={styles.planName}>{plan.name}</Text>
+              )}
               <Text style={styles.planLine}>{plan.line}</Text>
               {plan.points?.map((point) => (
                 <View key={point} style={styles.planPoint}>
@@ -231,6 +244,15 @@ const styles = StyleSheet.create({
   },
   // Elite wears the same thicker gold border as its badge on Home.
   planElite: { borderWidth: 2, borderColor: colors.markCore },
+  eliteHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.space3, marginBottom: spacing.space1 },
+  mrKandoo: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.full,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
   planName: { ...text.memory, fontFamily: fontFamily.displayItalic, color: colors.ink },
   planLine: { ...text.body, color: colors.inkMuted },
   // A hanging indent: a wrapped line lines up with the text, not the bullet.

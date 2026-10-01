@@ -42,6 +42,7 @@ const TIERS: Record<PaidTier, { eyebrow: string; title: string; points: string[]
     points: [
       'Your whole history, not just the last ten days',
       'Places — reminders the moment you arrive',
+      'Insights — charts of how you use Kandoo, weekly or monthly',
       'Kandoo’s own voice for spoken answers',
       'A five-minute taste of Mr. Kandoo each month',
     ],
@@ -53,6 +54,9 @@ const TIERS: Record<PaidTier, { eyebrow: string; title: string; points: string[]
     points: [
       'Everything in Pro',
       'Mr. Kandoo — 45 minutes a month of conversation that acts across your app',
+      'Research with real references, written up for your Library',
+      'Photograph pages and documents into organised notes',
+      'Teams — share files, send tasks, open them in Word',
       'Every change shown to you, saved only on your yes',
     ],
     cta: 'Unlock Elite',
