@@ -484,7 +484,7 @@ function KandooHome() {
               disabled={home.busy}
               accessibilityRole="button"
               accessibilityLabel="Show Kandoo a photo"
-              hitSlop={8}
+              hitSlop={{ top: 8, bottom: 8 }}
             >
               <Image source={CAMERA_ICON} style={styles.micIcon} />
             </Pressable>
@@ -497,7 +497,7 @@ function KandooHome() {
                 onPress={home.startVoice}
                 accessibilityRole="button"
                 accessibilityLabel="Speak"
-                hitSlop={8}
+                hitSlop={{ top: 8, bottom: 8 }}
               >
                 <Image source={MIC_ICON} style={styles.micIcon} />
               </Pressable>
@@ -1550,9 +1550,11 @@ const styles = StyleSheet.create({
     maxHeight: 120,
     paddingVertical: spacing.space3,
   },
+  // 44px each, side by side: a tap between camera and mic lands on one of them,
+  // never both (no sideways hitSlop to overlap).
   micBtn: {
-    width: 36,
-    height: 36,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
