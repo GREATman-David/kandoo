@@ -5,7 +5,7 @@ import { onEntitlementChange, readTier, type Tier } from '@/services/purchases';
 import { setKandooVoiceAllowed } from '@/services/speech';
 
 /**
- * The one place the client reads the tier (`kandoo_pro` / `kandoo_elite`). It drives what
+ * The one place the client reads the tier (`kandoo_personal` / `kandoo_pro` / `kandoo_elite`). It drives what
  * the UI shows — the Free/Pro badge, which older rows look locked — never what
  * access is granted; the backend enforces memory depth server-side.
  *
@@ -62,6 +62,15 @@ export function useEntitlement() {
   const current = useSyncExternalStore(subscribe, () => tier);
   const refresh = useCallback(() => refreshNow(true), []);
 
-  // isPro = Pro features (Pro or Elite); isElite = Kandoo Agent's full allowance.
-  return { tier: current, isPro: current !== 'free', isElite: current === 'elite', refresh };
+  // isPro = any paid plan (Personal and up): whole history, Places, photos,
+  //   voice, Insights. The name predates Personal; it means "paid".
+  // isBusiness = Pro or Elite: work tools (pages into notes, Teams).
+  // isElite = Mr. Kandoo, research, leading a team.
+  return {
+    tier: current,
+    isPro: current !== 'free',
+    isBusiness: current === 'pro' || current === 'elite',
+    isElite: current === 'elite',
+    refresh,
+  };
 }

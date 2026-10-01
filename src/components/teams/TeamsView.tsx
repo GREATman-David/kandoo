@@ -35,9 +35,12 @@ import { TeamSpace } from './TeamSpace';
 const ICONS = { people: require('@/assets/images/icons/user-round.png') };
 
 export type TeamsViewProps = {
-  isElite: boolean;
-  /** Not Elite: open the paywall on Elite. */
-  onNeedElite: () => void;
+  /** Pro or Elite: can be in a team, share files and take tasks. */
+  isMember: boolean;
+  /** Elite: can start and lead a team (invite, roles, send tasks). */
+  canLead: boolean;
+  /** Open the paywall on the plan that unlocks what was tapped. */
+  onNeedPlan: (plan: 'pro' | 'elite') => void;
   /** An invite code from a link (kandoo://join/CODE), to join straight away. */
   joinCode?: string | null;
   onJoinCodeUsed?: () => void;
@@ -45,10 +48,10 @@ export type TeamsViewProps = {
 };
 
 /**
- * Teams (Elite), inside Memory beside the Library: the teams you're in, a
+ * Teams (Pro and Elite; leading one is Elite), inside Memory beside the Library: the teams you're in, a
  * banner for tasks your teams sent you, and ways to start or join a team.
  */
-export function TeamsView({ isElite, onNeedElite, joinCode, onJoinCodeUsed, refreshKey = 0 }: TeamsViewProps) {
+export function TeamsView({ isMember, canLead, onNeedPlan, joinCode, onJoinCodeUsed, refreshKey = 0 }: TeamsViewProps) {
   const [teams, setTeams] = useState<TeamSummary[]>([]);
   const [inbox, setInbox] = useState<TeamTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,7 +61,7 @@ export function TeamsView({ isElite, onNeedElite, joinCode, onJoinCodeUsed, refr
   const [inboxOpen, setInboxOpen] = useState(false);
 
   const load = useCallback(async () => {
-    if (!isElite) return;
+    if (!isMember) return;
     setError(null);
     try {
       const [mine, waiting] = await Promise.all([fetchTeams(), fetchTaskInbox()]);
@@ -71,7 +74,7 @@ export function TeamsView({ isElite, onNeedElite, joinCode, onJoinCodeUsed, refr
     } finally {
       setLoading(false);
     }
-  }, [isElite]);
+  }, [isMember]);
 
   useEffect(() => {
     void load();
@@ -81,8 +84,8 @@ export function TeamsView({ isElite, onNeedElite, joinCode, onJoinCodeUsed, refr
   useEffect(() => {
     if (!joinCode) return;
     onJoinCodeUsed?.();
-    if (!isElite) {
-      onNeedElite();
+    if (!isMember) {
+      onNeedPlan('pro');
       return;
     }
     joinTeam(joinCode)
@@ -97,7 +100,7 @@ export function TeamsView({ isElite, onNeedElite, joinCode, onJoinCodeUsed, refr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [joinCode]);
 
-  if (!isElite) {
+  if (!isMember) {
     return (
       <View style={styles.locked}>
         <Text style={styles.lockedTitle}>Work together in Teams</Text>
@@ -105,8 +108,8 @@ export function TeamsView({ isElite, onNeedElite, joinCode, onJoinCodeUsed, refr
           Share notes, research, photos and documents with the people you work with. See who sent what, send
           tasks that land in their reminders, open files in Word, and ask Mr. Kandoo about any of it.
         </Text>
-        <Pressable style={styles.primary} onPress={onNeedElite} accessibilityRole="button">
-          <Text style={styles.primaryText}>Teams are part of Kandoo Elite</Text>
+        <Pressable style={styles.primary} onPress={() => onNeedPlan('pro')} accessibilityRole="button">
+          <Text style={styles.primaryText}>Teams are part of Kandoo Pro and Elite</Text>
         </Pressable>
       </View>
     );
@@ -133,7 +136,7 @@ export function TeamsView({ isElite, onNeedElite, joinCode, onJoinCodeUsed, refr
         ) : (
           <BoxGrid>
             {[
-              <AddBox key="new" label="New team" onPress={() => setForm('create')} />,
+              <AddBox key="new" label="New team" onPress={() => (canLead ? setForm('create') : onNeedPlan('elite'))} />,
               <AddBox key="join" label="Join with a code" onPress={() => setForm('join')} />,
               ...teams.map((team) => <TeamBox key={team.id} team={team} onPress={() => setOpen(team)} />),
             ]}
@@ -160,6 +163,7 @@ export function TeamsView({ isElite, onNeedElite, joinCode, onJoinCodeUsed, refr
 
       <TeamSpace
         team={open}
+        canLead={canLead}
         onClose={() => {
           setOpen(null);
           void load();

@@ -1,14 +1,20 @@
 /**
- * The paywall line is memory depth: free recall reaches back 10 days, Pro reaches
- * back forever. That boundary is enforced HERE, on the server, not on the device
- * — a client boolean is trivially spoofable, and memory depth is the whole
- * product. The device only presents the paywall; the server decides who is Pro.
+ * The paywall line is memory depth: free recall reaches back 10 days, a paid
+ * plan reaches back forever. That boundary is enforced HERE, on the server, not
+ * on the device — a client boolean is trivially spoofable, and memory depth is
+ * the whole product. The device only presents the paywall; the server decides.
  *
- * Tiers: Free, Pro (`kandoo_pro`) and Elite (`kandoo_elite`, which includes
- * everything in Pro). Status comes from RevenueCat's V2 REST API, keyed by the Supabase user id
+ * Tiers, each including everything below it:
+ *   Free
+ *   Personal (`kandoo_personal`) — everyday life: whole history, Places,
+ *     kept photos, Kandoo's voice, Insights.
+ *   Pro (`kandoo_pro`) — work: reading pages and documents into notes, Teams
+ *     (as a member).
+ *   Elite (`kandoo_elite`) — Mr. Kandoo, research, leading a team.
+ * Status comes from RevenueCat's V2 REST API, keyed by the Supabase user id
  * (the app calls `Purchases.logIn(supabaseUserId)`, so RevenueCat's customer id
  * IS the Supabase id). Two calls, both cached:
- *   1. lookup_key `kandoo_pro` → RevenueCat's internal entitlement id
+ *   1. lookup keys → RevenueCat's internal entitlement ids
  *      (`/entitlements`, config, cached an hour).
  *   2. a customer's active entitlement ids (`/customers/{id}/active_entitlements`,
  *      cached a minute per user).
@@ -18,18 +24,31 @@
  */
 
 const API_BASE = 'https://api.revenuecat.com/v2';
-const PRO_LOOKUP_KEY = 'kandoo_pro';
-/** Kandoo Elite: everything in Pro, plus Kandoo Agent minutes. */
-const ELITE_LOOKUP_KEY = 'kandoo_elite';
+
+export type Tier = 'free' | 'personal' | 'pro' | 'elite';
+type PaidTier = Exclude<Tier, 'free'>;
+
+/** Most generous first: the first one a customer holds is their tier. */
+const PAID_TIERS: PaidTier[] = ['elite', 'pro', 'personal'];
+const LOOKUP_KEYS: Record<PaidTier, string> = {
+  personal: 'kandoo_personal',
+  pro: 'kandoo_pro',
+  elite: 'kandoo_elite',
+};
+const RANK: Record<Tier, number> = { free: 0, personal: 1, pro: 2, elite: 3 };
+
+/** Does `tier` include everything in `needed`? */
+export function tierAtLeast(tier: Tier, needed: Tier): boolean {
+  return RANK[tier] >= RANK[needed];
+}
 
 const ENTITLEMENT_ID_TTL_MS = 60 * 60 * 1000; // config barely changes
-const PRO_STATUS_TTL_MS = 60 * 1000; // brief, so a new purchase unlocks fast
+const TIER_TTL_MS = 60 * 1000; // brief, so a new purchase unlocks fast
 
 type Cached<T> = { value: T; at: number };
+type EntitlementIds = Record<PaidTier, string | null>;
 
-export type Tier = 'free' | 'pro' | 'elite';
-
-let entitlementIdCache: Cached<{ pro: string | null; elite: string | null }> | null = null;
+let entitlementIdCache: Cached<EntitlementIds> | null = null;
 const tierCache = new Map<string, Cached<Tier>>();
 
 function credentials(): { secret: string; projectId: string } | null {
@@ -62,14 +81,12 @@ async function revenueCatGet(
 }
 
 /**
- * Resolve the lookup keys `kandoo_pro` / `kandoo_elite` to RevenueCat's
- * internal entitlement ids. Cached for an hour: entitlement configuration is
- * not something that changes between requests.
+ * Resolve the lookup keys to RevenueCat's internal entitlement ids. Cached for
+ * an hour: entitlement configuration is not something that changes between
+ * requests. A tier whose entitlement isn't set up yet resolves to null and is
+ * simply never granted.
  */
-async function resolveEntitlementIds(
-  secret: string,
-  projectId: string
-): Promise<{ pro: string | null; elite: string | null }> {
+async function resolveEntitlementIds(secret: string, projectId: string): Promise<EntitlementIds> {
   if (entitlementIdCache && Date.now() - entitlementIdCache.at < ENTITLEMENT_ID_TTL_MS) {
     return entitlementIdCache.value;
   }
@@ -77,10 +94,19 @@ async function resolveEntitlementIds(
   const data = await revenueCatGet(`/projects/${projectId}/entitlements`, secret);
   const items = (data?.items ?? []) as { id?: string; lookup_key?: string }[];
   const idOf = (key: string) => items.find((item) => item.lookup_key === key)?.id ?? null;
-  const value = { pro: idOf(PRO_LOOKUP_KEY), elite: idOf(ELITE_LOOKUP_KEY) };
+  const value: EntitlementIds = {
+    personal: idOf(LOOKUP_KEYS.personal),
+    pro: idOf(LOOKUP_KEYS.pro),
+    elite: idOf(LOOKUP_KEYS.elite),
+  };
 
   entitlementIdCache = { value, at: Date.now() };
   return value;
+}
+
+/** The best tier among entitlements held, by internal id or lookup key. */
+function bestTier(ids: EntitlementIds, holds: (id: string | null, key: string) => boolean): Tier {
+  return PAID_TIERS.find((t) => holds(ids[t], LOOKUP_KEYS[t])) ?? 'free';
 }
 
 /**
@@ -95,7 +121,7 @@ export async function getUserTier(
   opts: { fresh?: boolean } = {}
 ): Promise<Tier> {
   const cached = tierCache.get(userId);
-  if (!opts.fresh && cached && Date.now() - cached.at < PRO_STATUS_TTL_MS) {
+  if (!opts.fresh && cached && Date.now() - cached.at < TIER_TTL_MS) {
     return cached.value;
   }
 
@@ -112,7 +138,7 @@ export async function getUserTier(
   let tier: Tier = 'free';
   try {
     const ids = await resolveEntitlementIds(creds.secret, creds.projectId);
-    if (ids.pro || ids.elite) {
+    if (PAID_TIERS.some((t) => ids[t])) {
       const data = await revenueCatGet(
         `/projects/${creds.projectId}/customers/${encodeURIComponent(userId)}/active_entitlements`,
         creds.secret
@@ -120,7 +146,7 @@ export async function getUserTier(
       const active = new Set(
         ((data?.items ?? []) as { entitlement_id?: string }[]).map((item) => item.entitlement_id)
       );
-      tier = ids.elite && active.has(ids.elite) ? 'elite' : ids.pro && active.has(ids.pro) ? 'pro' : 'free';
+      tier = bestTier(ids, (id) => id !== null && active.has(id));
       // active_entitlements can lag a renewal (seen with Test Store renewals:
       // the subscription says gives_access with both entitlements while the
       // list is empty). Below Elite, ask the subscriptions themselves.
@@ -144,9 +170,8 @@ export async function getUserTier(
             }
           }
         }
-        const has = (id: string | null, key: string) => (id !== null && granted.has(id)) || granted.has(key);
-        if (has(ids.elite, ELITE_LOOKUP_KEY)) tier = 'elite';
-        else if (tier === 'free' && has(ids.pro, PRO_LOOKUP_KEY)) tier = 'pro';
+        const fromSubs = bestTier(ids, (id, key) => (id !== null && granted.has(id)) || granted.has(key));
+        if (RANK[fromSubs] > RANK[tier]) tier = fromSubs;
       }
     }
   } catch (error) {
@@ -158,7 +183,7 @@ export async function getUserTier(
   return tier;
 }
 
-/** Pro features (whole history, Places, Kandoo's voice): Pro or Elite. */
-export async function isProUser(userId: string, opts: { fresh?: boolean } = {}): Promise<boolean> {
+/** Any paid plan (Personal and up): whole history, Places, Kandoo's voice. */
+export async function isPaidUser(userId: string, opts: { fresh?: boolean } = {}): Promise<boolean> {
   return (await getUserTier(userId, opts)) !== 'free';
 }

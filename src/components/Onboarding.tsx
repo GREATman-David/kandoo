@@ -21,20 +21,20 @@ const MR_KANDOO = require('@/assets/images/agent/kandoo-agent.png');
 type Card = { headline: string; body: string; plans?: true };
 
 /**
- * The three plans, as the last card says them. Prices live on the paywall.
+ * The four plans, as the last card says them. Prices live on the paywall.
  * Elite is a list, so each new Elite feature is one more line here.
  */
 const PLANS: { name: string; line: string; points?: string[] }[] = [
-  { name: 'Free', line: 'Speak, type or show a photo. Reminders, your Library of notes, and answers from your last ten days.' },
-  { name: 'Kandoo Pro', line: 'Your whole history, places that remind you the moment you arrive, Insights charts of how you use Kandoo, and Kandoo’s own voice.' },
+  { name: 'Free', line: 'Speak, type or show a photo. Reminders, your Library, answers from the last ten days.' },
+  { name: 'Kandoo Personal', line: 'Your whole history, Places, kept photos, Insights and Kandoo’s own voice.' },
+  { name: 'Kandoo Pro', line: 'Personal, plus work: photograph pages into notes, and join your team.' },
   {
     name: 'Kandoo Elite',
     line: 'Everything in Pro, plus Mr. Kandoo:',
     points: [
-      '45 minutes a month of conversation that acts across the app',
-      'Research with real references, written up for your Library',
-      'Photograph pages and documents into organised notes',
-      'Teams — share files, send tasks, open them in Word, work on them together',
+      '60 minutes a month of conversation that acts across the app',
+      'Research with real references',
+      'Lead a team — share files, send tasks, open them in Word',
     ],
   },
 ];

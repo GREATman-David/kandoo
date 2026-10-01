@@ -223,9 +223,9 @@ const TEN_DAYS_MS = 10 * 24 * 60 * 60 * 1000;
  * answers what it can, then names Pro as the way to reach further back.
  */
 const PRO_MORE_LINE =
-  'There’s more from further back, but memories older than ten days are part of Kandoo Pro.';
+  'There’s more from further back, but memories older than ten days come with any Kandoo plan.';
 const PRO_ONLY_LINE =
-  'That’s from more than ten days ago — older memories are part of Kandoo Pro.';
+  'That’s from more than ten days ago — older memories come with any Kandoo plan.';
 
 /**
  * Recall answer, gated by memory depth. Free users are answered from the last

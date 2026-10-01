@@ -42,7 +42,8 @@ const MAX_SPEAK_CHARS = 600;
 const TIMEOUT_MS = 15_000;
 
 /** Agent seconds included each calendar month (UTC), by tier. */
-const AGENT_ALLOWANCE_SECS: Record<Tier, number> = { free: 0, pro: 5 * 60, elite: 45 * 60 };
+// Mr. Kandoo is Elite's: Personal and Pro have no minutes.
+const AGENT_ALLOWANCE_SECS: Record<Tier, number> = { free: 0, personal: 0, pro: 0, elite: 60 * 60 };
 
 function monthStartUnix(now = new Date()): number {
   return Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000);
@@ -117,7 +118,7 @@ router.get('/agent/session', authenticateRequest, async (req, res) => {
   const tier = await getUserTier(userId, { fresh: req.query.fresh === '1' });
   const allowance = AGENT_ALLOWANCE_SECS[tier];
   if (allowance === 0) {
-    return res.status(402).json({ code: 'elite_required', error: 'Talking with Kandoo is part of Kandoo Elite.' });
+    return res.status(402).json({ code: 'elite_required', error: 'Talking with Mr. Kandoo is part of Kandoo Elite.' });
   }
 
   // If the count can't be read, a paid user still gets to talk — each call is
@@ -128,10 +129,7 @@ router.get('/agent/session', authenticateRequest, async (req, res) => {
     return res.status(402).json({
       code: 'agent_minutes_used',
       tier,
-      error:
-        tier === 'elite'
-          ? 'You’ve used this month’s minutes with Mr. Kandoo. They renew on the 1st.'
-          : 'You’ve used your minutes with Mr. Kandoo for this month. Kandoo Elite includes 45 a month.',
+      error: 'You’ve used this month’s minutes with Mr. Kandoo. They renew on the 1st.',
     });
   }
 
@@ -190,7 +188,7 @@ router.post('/speak', authenticateRequest, aiRateLimit, async (req, res) => {
   // Kandoo's own voice costs per character: it is a Pro benefit. Free answers
   // are spoken by the phone's voice, which is free.
   if ((await getUserTier(userId)) === 'free') {
-    return res.status(402).json({ code: 'pro_required', error: 'Kandoo’s voice is part of Kandoo Pro.' });
+    return res.status(402).json({ code: 'pro_required', error: 'Kandoo’s voice comes with Kandoo Personal and up.' });
   }
   const text = typeof req.body?.text === 'string' ? req.body.text.trim().slice(0, MAX_SPEAK_CHARS) : '';
   if (!text) return res.status(400).json({ error: 'Nothing to say.' });

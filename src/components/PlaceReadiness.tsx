@@ -66,7 +66,7 @@ export function PlaceReadiness({ reminder, onLeave }: { reminder: CreatedReminde
     readiness.kind === 'draw'
       ? [`Kandoo doesn’t know where ${readiness.name} is yet.`, `Draw ${readiness.name}`, () => openPlaces({ draw: readiness.name })]
       : readiness.kind === 'pro'
-        ? ['Reminders at places are part of Kandoo Pro.', 'See Places', () => openPlaces({})]
+        ? ['Reminders at places come with Kandoo Personal.', 'See Places', () => openPlaces({})]
         : ['Allow location all the time so Kandoo notices you arrive.', 'Open Places', () => openPlaces({})];
 
   return (

@@ -11,6 +11,7 @@ import type { PurchasesPackage } from 'react-native-purchases';
 
 import {
   ELITE_PACKAGES,
+  PERSONAL_PACKAGES,
   getDefaultOffering,
   isUserCancelled,
   purchasePackage,
@@ -25,26 +26,41 @@ export type PaywallProps = {
   /** Fired once the chosen tier is active — the caller re-asks so the now-Pro
    *  answer includes the older memories that were just unlocked. */
   onPurchased: () => void;
-  /** Which tier to open on: Elite when the user reached for Kandoo Agent. */
+  /** Which plan to open on: the cheapest one that unlocks what was tapped. */
   focus?: PaidTier;
   /** Why the paywall opened, when it isn't obvious ("You've used…"). */
   note?: string | null;
 };
 
 type Plan = 'annual' | 'monthly';
-type PaidTier = 'pro' | 'elite';
+export type PaidTier = 'personal' | 'pro' | 'elite';
+const ORDER: PaidTier[] = ['personal', 'pro', 'elite'];
+const LABEL: Record<PaidTier, string> = { personal: 'Personal', pro: 'Pro', elite: 'Elite' };
+type Packs = Record<PaidTier, { annual: PurchasesPackage | null; monthly: PurchasesPackage | null }>;
+const hasPacks = (packs: Packs, t: PaidTier) => !!(packs[t].annual || packs[t].monthly);
 
 /** What each tier gives — the words on the paywall. */
 const TIERS: Record<PaidTier, { eyebrow: string; title: string; points: string[]; cta: string }> = {
-  pro: {
-    eyebrow: 'Kandoo Pro',
+  personal: {
+    eyebrow: 'Kandoo Personal',
     title: 'Remember across all of time.',
     points: [
       'Your whole history, not just the last ten days',
       'Places — reminders the moment you arrive',
+      'Photos kept with the people and places in them',
       'Insights — charts of how you use Kandoo, weekly or monthly',
       'Kandoo’s own voice for spoken answers',
-      'A five-minute taste of Mr. Kandoo each month',
+    ],
+    cta: 'Unlock Personal',
+  },
+  pro: {
+    eyebrow: 'Kandoo Pro',
+    title: 'Kandoo for your work.',
+    points: [
+      'Everything in Personal',
+      'Photograph pages and documents into organised notes',
+      'Teams — join your team, share files, open them in Word, take tasks',
+      'Search inside the PDFs and documents your team shares',
     ],
     cta: 'Unlock Pro',
   },
@@ -53,10 +69,9 @@ const TIERS: Record<PaidTier, { eyebrow: string; title: string; points: string[]
     title: 'Talk it over with Mr. Kandoo.',
     points: [
       'Everything in Pro',
-      'Mr. Kandoo — 45 minutes a month of conversation that acts across your app',
+      'Mr. Kandoo — 60 minutes a month of conversation that acts across your app',
       'Research with real references, written up for your Library',
-      'Photograph pages and documents into organised notes',
-      'Teams — share files, send tasks, open them in Word',
+      'Lead a team — invite people, send tasks, manage who does what',
       'Every change shown to you, saved only on your yes',
     ],
     cta: 'Unlock Elite',
@@ -92,10 +107,12 @@ function isAnnualBetter(
   );
 }
 
-export function Paywall({ visible, onClose, onPurchased, focus = 'pro', note = null }: PaywallProps) {
-  const [packs, setPacks] = useState<
-    Record<PaidTier, { annual: PurchasesPackage | null; monthly: PurchasesPackage | null }>
-  >({ pro: { annual: null, monthly: null }, elite: { annual: null, monthly: null } });
+export function Paywall({ visible, onClose, onPurchased, focus = 'personal', note = null }: PaywallProps) {
+  const [packs, setPacks] = useState<Packs>({
+    personal: { annual: null, monthly: null },
+    pro: { annual: null, monthly: null },
+    elite: { annual: null, monthly: null },
+  });
   const [tierShown, setTierShown] = useState<PaidTier>(focus);
   const [selected, setSelected] = useState<Plan>('annual');
   const [busy, setBusy] = useState(false);
@@ -106,7 +123,7 @@ export function Paywall({ visible, onClose, onPurchased, focus = 'pro', note = n
   const [attempt, setAttempt] = useState(0);
 
   // Load the current offering each time the sheet opens. Pro uses RevenueCat's
-  // reserved `$rc_annual` / `$rc_monthly`; Elite uses the custom package ids.
+  // reserved `$rc_annual` / `$rc_monthly`; Personal and Elite custom ids.
   useEffect(() => {
     if (!visible) return;
     let active = true;
@@ -115,16 +132,20 @@ export function Paywall({ visible, onClose, onPurchased, focus = 'pro', note = n
     getDefaultOffering().then((offering) => {
       if (!active) return;
       const byId = (id: string) => offering?.availablePackages.find((p) => p.identifier === id) ?? null;
-      const next = {
+      const next: Packs = {
+        personal: { annual: byId(PERSONAL_PACKAGES.annual), monthly: byId(PERSONAL_PACKAGES.monthly) },
         pro: { annual: offering?.annual ?? null, monthly: offering?.monthly ?? null },
         elite: { annual: byId(ELITE_PACKAGES.annual), monthly: byId(ELITE_PACKAGES.monthly) },
       };
       setPacks(next);
-      const eliteReady = !!(next.elite.annual || next.elite.monthly);
-      const shown: PaidTier = focus === 'elite' && eliteReady ? 'elite' : 'pro';
+      // The plan asked for, else the next one up that is on sale (it includes
+      // everything below it), else whatever is.
+      const from = ORDER.indexOf(focus);
+      const shown =
+        ORDER.slice(from).find((t) => hasPacks(next, t)) ?? ORDER.find((t) => hasPacks(next, t)) ?? focus;
       setTierShown(shown);
       const { annual: a, monthly: m } = next[shown];
-      setLoadState(next.pro.annual || next.pro.monthly || eliteReady ? 'ready' : 'failed');
+      setLoadState(ORDER.some((t) => hasPacks(next, t)) ? 'ready' : 'failed');
       // Pre-select whichever plan is genuinely the better per-month deal. Never
       // assume annual wins — with the store's prices inverted it would default
       // the user to the more expensive plan and call it "Best value".
@@ -135,7 +156,7 @@ export function Paywall({ visible, onClose, onPurchased, focus = 'pro', note = n
     };
   }, [visible, attempt, focus]);
 
-  const eliteAvailable = !!(packs.elite.annual || packs.elite.monthly);
+  const onSale = ORDER.filter((t) => hasPacks(packs, t));
   const { annual, monthly } = packs[tierShown];
   const copy = TIERS[tierShown];
   const selectedPackage = selected === 'annual' ? annual : monthly;
@@ -162,7 +183,7 @@ export function Paywall({ visible, onClose, onPurchased, focus = 'pro', note = n
         setError(
           kind === 'restore'
             ? 'No earlier Kandoo purchase was found for this account.'
-            : `That didn’t unlock ${tierShown === 'elite' ? 'Elite' : 'Pro'}. Please try again.`
+            : `That didn’t unlock ${LABEL[tierShown]}. Please try again.`
         );
       }
     } catch (caught) {
@@ -190,9 +211,9 @@ export function Paywall({ visible, onClose, onPurchased, focus = 'pro', note = n
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           <ScrollView showsVerticalScrollIndicator={false}>
-            {eliteAvailable ? (
+            {onSale.length > 1 ? (
               <View style={styles.switch} accessibilityRole="tablist">
-                {(['pro', 'elite'] as const).map((t) => (
+                {onSale.map((t) => (
                   <Pressable
                     key={t}
                     style={[styles.switchItem, tierShown === t && styles.switchOn]}
@@ -201,7 +222,7 @@ export function Paywall({ visible, onClose, onPurchased, focus = 'pro', note = n
                     accessibilityState={{ selected: tierShown === t }}
                   >
                     <Text style={[styles.switchText, tierShown === t && styles.switchTextOn]}>
-                      {t === 'pro' ? 'Pro' : 'Elite'}
+                      {LABEL[t]}
                     </Text>
                   </Pressable>
                 ))}
@@ -272,8 +293,8 @@ export function Paywall({ visible, onClose, onPurchased, focus = 'pro', note = n
                 selectedPackage &&
                 complete(async () => {
                   const tier: Tier = await purchasePackage(selectedPackage);
-                  // Elite must actually grant Elite; Pro is any paid tier.
-                  return tierShown === 'elite' ? tier === 'elite' : tier !== 'free';
+                  // The plan bought must actually be granted (or a higher one).
+                  return ORDER.indexOf(tier as PaidTier) >= ORDER.indexOf(tierShown);
                 }, 'purchase')
               }
             >

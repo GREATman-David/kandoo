@@ -9,7 +9,7 @@ import { aiRateLimit } from '../middleware/rateLimit';
 import { resolveTimezone } from '../utils/timezone';
 
 import { AiUnavailableError, aiProvider } from '../modules/ai';
-import { getUserTier } from '../modules/entitlements/entitlementService';
+import { getUserTier, tierAtLeast } from '../modules/entitlements/entitlementService';
 import { PhotoInputError, decodeJpeg } from '../modules/photos/photoInput';
 
 import {
@@ -146,10 +146,11 @@ router.post('/library/read', authenticateRequest, aiRateLimit, async (req, res) 
   }
 
   try {
-    if ((await getUserTier(userId)) !== 'elite') {
+    // A work tool: Pro and Elite.
+    if (!tierAtLeast(await getUserTier(userId), 'pro')) {
       return res.status(402).json({
-        code: 'elite_required',
-        error: 'Reading pages into your Library is part of Kandoo Elite.',
+        code: 'pro_required',
+        error: 'Reading pages into your Library is part of Kandoo Pro and Elite.',
       });
     }
 

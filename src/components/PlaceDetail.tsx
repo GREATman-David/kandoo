@@ -326,7 +326,7 @@ export function PlaceDetail({
                   <Text style={styles.undrawnBody}>
                     Draw where {place.name} is, and Kandoo will remind you when you get there.
                   </Text>
-                  <Text style={styles.undrawnCta}>{isPro ? 'Draw it on the map' : 'Draw it with Pro'}</Text>
+                  <Text style={styles.undrawnCta}>{isPro ? 'Draw it on the map' : 'Draw it with Personal'}</Text>
                 </Pressable>
               )}
 

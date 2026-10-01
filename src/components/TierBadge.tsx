@@ -4,7 +4,7 @@ import type { Tier } from '@/services/purchases';
 import { colors, fontFamily, radius, text } from '@/theme/theme';
 
 /**
- * The account pill on Home, which says what the user has. Free and Pro share
+ * The account pill on Home, which says what the user has. Free, Personal and Pro share
  * the quiet pale-gold pill; Elite keeps the same size (so the top bar never
  * overflows a phone) but wears a thicker gold border and its name in the
  * display face — bolder, a little regal. Mark colours only (AGENTS §7).
@@ -14,7 +14,7 @@ type Props = { tier: Tier; onPress: () => void };
 
 export function TierBadge({ tier, onPress }: Props) {
   const elite = tier === 'elite';
-  const label = elite ? 'Elite' : tier === 'pro' ? 'Pro' : 'Free';
+  const label = elite ? 'Elite' : tier === 'pro' ? 'Pro' : tier === 'personal' ? 'Personal' : 'Free';
 
   return (
     <Pressable

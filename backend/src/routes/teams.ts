@@ -5,7 +5,7 @@ import {
   type AuthenticatedRequest,
 } from '../middleware/authenticateRequest';
 
-import { getUserTier } from '../modules/entitlements/entitlementService';
+import { getUserTier, tierAtLeast } from '../modules/entitlements/entitlementService';
 import { LibraryInputError, cleanNote } from '../modules/library/libraryInput';
 import { getNote } from '../modules/library/libraryService';
 import { searchTerm } from '../modules/library/libraryInput';
@@ -52,19 +52,33 @@ const router = Router();
 
 const PUBLIC_URL = process.env.PUBLIC_URL ?? 'https://kandoo-toow.onrender.com';
 
-async function requireElite(req: Request, res: Response, next: NextFunction) {
-  try {
-    if ((await getUserTier((req as AuthenticatedRequest).user.id)) !== 'elite') {
-      return res.status(402).json({ code: 'elite_required', error: 'Teams are part of Kandoo Elite.' });
+/**
+ * Teams are for business plans. Pro and Elite can be in a team, share and take
+ * tasks; leading one (creating it, inviting, roles, sending tasks) is Elite,
+ * because running a team leans on Mr. Kandoo, which only Elite has.
+ */
+function requireTier(needed: 'pro' | 'elite') {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!tierAtLeast(await getUserTier((req as AuthenticatedRequest).user.id), needed)) {
+        return res.status(402).json(
+          needed === 'elite'
+            ? { code: 'elite_required', error: 'Leading a team is part of Kandoo Elite.' }
+            : { code: 'pro_required', error: 'Teams are part of Kandoo Pro and Elite.' }
+        );
+      }
+      return next();
+    } catch (error) {
+      console.error('Teams tier check failed:', error);
+      return res.status(500).json({ error: 'Teams couldn’t load just now.' });
     }
-    return next();
-  } catch (error) {
-    console.error('Teams tier check failed:', error);
-    return res.status(500).json({ error: 'Teams couldn’t load just now.' });
-  }
+  };
 }
 
-const guard = [authenticateRequest, requireElite];
+/** Members: Pro and up. */
+const guard = [authenticateRequest, requireTier('pro')];
+/** Leading a team: Elite. */
+const lead = [authenticateRequest, requireTier('elite')];
 
 /** A user-facing refusal → 400/403; anything else is logged and becomes a plain 500. */
 function fail(res: Response, error: unknown, what: string) {
@@ -98,7 +112,7 @@ router.get('/teams', ...guard, async (req, res) => {
   }
 });
 
-router.post('/teams', ...guard, async (req, res) => {
+router.post('/teams', ...lead, async (req, res) => {
   try {
     const team = await createTeam(me(req).id, {
       name: cleanTeamName(req.body?.name),
@@ -140,7 +154,7 @@ router.get('/teams/:id', ...guard, async (req, res) => {
   }
 });
 
-router.delete('/teams/:id', ...guard, async (req, res) => {
+router.delete('/teams/:id', ...lead, async (req, res) => {
   try {
     await deleteTeam(me(req).id, String(req.params.id));
     return res.json({ success: true });
@@ -158,7 +172,7 @@ router.post('/teams/:id/leave', ...guard, async (req, res) => {
   }
 });
 
-router.post('/teams/:id/invite', ...guard, async (req, res) => {
+router.post('/teams/:id/invite', ...lead, async (req, res) => {
   try {
     const code = await regenerateInvite(me(req).id, String(req.params.id));
     return res.json({ inviteCode: code, inviteLink: inviteLink(code) });
@@ -167,10 +181,14 @@ router.post('/teams/:id/invite', ...guard, async (req, res) => {
   }
 });
 
-router.patch('/teams/:id/members/:userId', ...guard, async (req, res) => {
+router.patch('/teams/:id/members/:userId', ...lead, async (req, res) => {
   const role = req.body?.role === 'admin' ? 'admin' : req.body?.role === 'member' ? 'member' : null;
   if (!role) return res.status(400).json({ error: 'A role is admin or member.' });
   try {
+    // An admin leads (tasks, invites), which is Elite: a Pro member stays a member.
+    if (role === 'admin' && (await getUserTier(String(req.params.userId))) !== 'elite') {
+      return res.status(400).json({ error: 'Only a Kandoo Elite member can be an admin.' });
+    }
     await setMemberRole(me(req).id, String(req.params.id), String(req.params.userId), role);
     return res.json({ success: true });
   } catch (error) {
@@ -178,7 +196,7 @@ router.patch('/teams/:id/members/:userId', ...guard, async (req, res) => {
   }
 });
 
-router.delete('/teams/:id/members/:userId', ...guard, async (req, res) => {
+router.delete('/teams/:id/members/:userId', ...lead, async (req, res) => {
   try {
     await removeMember(me(req).id, String(req.params.id), String(req.params.userId));
     return res.json({ success: true });
@@ -282,7 +300,7 @@ router.get('/teams/:id/tasks', ...guard, async (req, res) => {
   }
 });
 
-router.post('/teams/:id/tasks', ...guard, async (req, res) => {
+router.post('/teams/:id/tasks', ...lead, async (req, res) => {
   const task = cleanOptional(req.body?.task, 300, 'task');
   const dueAt = typeof req.body?.dueAt === 'string' && !Number.isNaN(Date.parse(req.body.dueAt)) ? req.body.dueAt : null;
   if (!task) return res.status(400).json({ error: 'Say what the task is.' });

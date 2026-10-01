@@ -22,7 +22,7 @@ import { ManualReminder } from '@/components/ManualReminder';
 import { MemoryDetail, type MemoryDetailTarget } from '@/components/MemoryDetail';
 import { NoteDetail } from '@/components/NoteDetail';
 import { NoteMemoryFork } from '@/components/NoteMemoryFork';
-import { Paywall } from '@/components/Paywall';
+import { Paywall, type PaidTier } from '@/components/Paywall';
 import { PersonDetail } from '@/components/PersonDetail';
 import { ReminderDetail } from '@/components/ReminderDetail';
 import { OfflineNote } from '@/components/OfflineNote';
@@ -97,7 +97,7 @@ function toReminder(r: CaptureNoteReminder): CreatedReminder {
 export default function MemoryScreen() {
   const insets = useSafeAreaInsets();
   const { isAuthenticated } = useAuth();
-  const { isPro, isElite, refresh } = useEntitlement();
+  const { isPro, isBusiness, isElite, refresh } = useEntitlement();
 
   const [notes, setNotes] = useState<CaptureNote[]>([]);
   const [people, setPeople] = useState<PersonSummary[]>([]);
@@ -109,7 +109,7 @@ export default function MemoryScreen() {
   const [view, setView] = useState<'memories' | 'library' | 'team'>('memories');
   const [libraryRefresh, setLibraryRefresh] = useState(0);
   const [joinCode, setJoinCode] = useState<string | null>(null);
-  const [paywallFocus, setPaywallFocus] = useState<'pro' | 'elite'>('pro');
+  const [paywallFocus, setPaywallFocus] = useState<PaidTier>('personal');
   // Arrived from Mr. Kandoo ("Open" on a filed page, "open my team"), or an
   // invite link (kandoo://join/CODE → view=team&join=CODE).
   const params = useLocalSearchParams<{ view?: string; join?: string }>();
@@ -417,9 +417,10 @@ export default function MemoryScreen() {
       {view === 'team' ? (
         isAuthenticated ? (
           <TeamsView
-            isElite={isElite}
-            onNeedElite={() => {
-              setPaywallFocus('elite');
+            isMember={isBusiness}
+            canLead={isElite}
+            onNeedPlan={(plan) => {
+              setPaywallFocus(plan);
               setPaywall(true);
             }}
             joinCode={joinCode}
@@ -666,7 +667,7 @@ export default function MemoryScreen() {
         focus={paywallFocus}
         onClose={() => {
           setPaywall(false);
-          setPaywallFocus('pro');
+          setPaywallFocus('personal');
         }}
         onPurchased={() => {
           refresh();

@@ -11,20 +11,26 @@ import {
   isUserCancelled,
   resetPurchasesUser,
   restorePurchases,
+  type Tier,
 } from '@/services/purchases';
 import { colors, radius, spacing, text, withOpacity } from '@/theme/theme';
 
+const PLAN_NAME: Record<Tier, string> = { free: 'Free', personal: 'Personal', pro: 'Pro', elite: 'Elite' };
+
 export type AccountSheetProps = {
   visible: boolean;
+  /** Any paid plan (Personal and up). */
   isPro: boolean;
   /** Kandoo Elite (includes everything in Pro). */
   isElite?: boolean;
+  /** Which plan, for its name. */
+  tier?: Tier;
   onClose: () => void;
-  /** Free users tap "Get Kandoo Pro" — the caller opens the paywall. */
+  /** Free users tap "Get Kandoo Personal" — the caller opens the paywall. */
   onGetPro: () => void;
-  /** Pro users tap "Get Kandoo Elite" — the caller opens the paywall on Elite. */
+  /** Paid users below Elite tap to see the business plans. */
   onGetElite?: () => void;
-  /** Insights: charts of how they use Kandoo (Pro and Elite). */
+  /** Insights: charts of how they use Kandoo (Personal and up). */
   onOpenInsights?: () => void;
   /** Called after a successful restore so the badge flips. */
   onEntitlementChange: () => void;
@@ -34,6 +40,7 @@ export function AccountSheet({
   visible,
   isPro,
   isElite = false,
+  tier = isElite ? 'elite' : isPro ? 'pro' : 'free',
   onClose,
   onGetPro,
   onGetElite,
@@ -100,7 +107,7 @@ export function AccountSheet({
       const entitled = await restorePurchases();
       onEntitlementChange();
       Alert.alert(
-        entitled ? 'Kandoo Pro restored' : 'Nothing to restore',
+        entitled ? 'Your plan is restored' : 'Nothing to restore',
         entitled
           ? 'Your whole history is unlocked again.'
           : 'No previous purchase was found for this account.'
@@ -143,14 +150,16 @@ export function AccountSheet({
     >
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
-          <Text style={styles.eyebrow}>{isElite ? 'Kandoo Elite' : isPro ? 'Kandoo Pro' : 'Account'}</Text>
+          <Text style={styles.eyebrow}>{isPro ? `Kandoo ${PLAN_NAME[tier]}` : 'Account'}</Text>
 
           {isPro ? (
             <View style={styles.proRow}>
               <Text style={styles.proText}>
-                {isElite
+                {tier === 'elite'
                   ? 'You’re on Kandoo Elite — everything in Pro, plus Mr. Kandoo.'
-                  : 'You’re on Kandoo Pro — your whole history is unlocked.'}
+                  : tier === 'pro'
+                    ? 'You’re on Kandoo Pro — your whole history, plus work tools and Teams.'
+                    : 'You’re on Kandoo Personal — your whole history is unlocked.'}
               </Text>
             </View>
           ) : (
@@ -161,7 +170,7 @@ export function AccountSheet({
                 onGetPro();
               }}
             >
-              <Text style={styles.rowStrong}>Get Kandoo Pro</Text>
+              <Text style={styles.rowStrong}>Get Kandoo Personal</Text>
               <Text style={styles.rowHint}>Remember across all of time</Text>
             </Pressable>
           )}
@@ -175,8 +184,10 @@ export function AccountSheet({
               }}
               accessibilityRole="button"
             >
-              <Text style={styles.rowStrong}>Get Kandoo Elite</Text>
-              <Text style={styles.rowHint}>Talk with Mr. Kandoo — 45 minutes a month</Text>
+              <Text style={styles.rowStrong}>{tier === 'pro' ? 'Get Kandoo Elite' : 'Get Kandoo Pro or Elite'}</Text>
+              <Text style={styles.rowHint}>
+                {tier === 'pro' ? 'Mr. Kandoo — 60 minutes a month, and lead your team' : 'Work tools, Teams and Mr. Kandoo'}
+              </Text>
             </Pressable>
           ) : null}
 
@@ -192,7 +203,7 @@ export function AccountSheet({
             >
               <Text style={styles.rowText}>Insights</Text>
               <Text style={styles.rowHint}>
-                {isPro ? 'Charts of how you use Kandoo' : 'Charts of how you use Kandoo · Pro'}
+                {isPro ? 'Charts of how you use Kandoo' : 'Charts of how you use Kandoo · Personal'}
               </Text>
             </Pressable>
           ) : null}

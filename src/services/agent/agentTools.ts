@@ -195,7 +195,7 @@ function guard(tool: Tool): Tool {
     try {
       return await tool(params ?? {});
     } catch (error) {
-      if (isProRequired(error)) return fail('That needs Kandoo Pro.');
+      if (isProRequired(error)) return fail('That needs a Kandoo plan — Personal or above.');
       console.warn('Agent tool failed:', error);
       return fail(userMessage(error, 'That did not work just now. Please try again.'));
     }
@@ -671,11 +671,11 @@ export const kandooTools: Record<string, Tool> = {
    */
   read_document: guard(async (p) => {
     // A quick check on the phone so nobody photographs a page for nothing;
-    // the server enforces Elite either way (402), and an unknown tier (offline)
+    // the server enforces Pro either way (402), and an unknown tier (offline)
     // is left to it.
     const tier = await readTier().catch(() => null);
-    if (tier === 'free' || tier === 'pro') {
-      return fail('Reading pages into the Library is part of Kandoo Elite.');
+    if (tier === 'free' || tier === 'personal') {
+      return fail('Reading pages into the Library is part of Kandoo Pro and Elite.');
     }
 
     const source = str(p.source) === 'gallery' ? 'library' : 'camera';
@@ -695,7 +695,7 @@ export const kandooTools: Record<string, Tool> = {
     try {
       reading = await readDocument(photo, asked);
     } catch (error) {
-      if (isProRequired(error)) return fail('Reading pages into the Library is part of Kandoo Elite.');
+      if (isProRequired(error)) return fail('Reading pages into the Library is part of Kandoo Pro and Elite.');
       throw error;
     }
 
@@ -815,7 +815,7 @@ export const kandooTools: Record<string, Tool> = {
     const question = str(p.question);
     if (!question) return fail('What should I research?');
     const tier = await readTier().catch(() => null);
-    if (tier === 'free' || tier === 'pro') return fail('Research with Mr. Kandoo is part of Kandoo Elite.');
+    if (tier !== null && tier !== 'elite') return fail('Research with Mr. Kandoo is part of Kandoo Elite.');
     let result: ResearchResult;
     try {
       result = await researchTopic(question, str(p.category_name));

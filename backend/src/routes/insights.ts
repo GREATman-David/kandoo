@@ -47,7 +47,7 @@ router.get('/insights/usage', authenticateRequest, async (req, res) => {
   }
   try {
     if ((await getUserTier(userId)) === 'free') {
-      return res.status(402).json({ code: 'pro_required', error: 'Insights are part of Kandoo Pro.' });
+      return res.status(402).json({ code: 'pro_required', error: 'Insights come with Kandoo Personal and up.' });
     }
     const usage = await usageInsights(userId, {
       from: new Date(from).toISOString(),

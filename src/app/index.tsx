@@ -31,7 +31,7 @@ import { NoteDetail } from '@/components/NoteDetail';
 import { Onboarding } from '@/components/Onboarding';
 import { KandooAgent } from '@/components/KandooAgent';
 import { NameSheet } from '@/components/NameSheet';
-import { Paywall } from '@/components/Paywall';
+import { Paywall, type PaidTier } from '@/components/Paywall';
 import { ReviewSheet } from '@/components/ReviewSheet';
 import { KandooSymbol } from '@/components/Symbol';
 import { TierBadge } from '@/components/TierBadge';
@@ -192,9 +192,9 @@ function KandooHome() {
   }, [homeParams.insights]);
   const [agentOpen, setAgentOpen] = useState(false);
   // Which tier the paywall opens on, and why (e.g. Agent minutes used up).
-  const [paywallFocus, setPaywallFocus] = useState<'pro' | 'elite'>('pro');
+  const [paywallFocus, setPaywallFocus] = useState<PaidTier>('personal');
   const [paywallNote, setPaywallNote] = useState<string | null>(null);
-  const openPaywallFor = (focus: 'pro' | 'elite', note: string | null = null) => {
+  const openPaywallFor = (focus: PaidTier, note: string | null = null) => {
     setPaywallFocus(focus);
     setPaywallNote(note);
     home.openPaywall();
@@ -338,7 +338,7 @@ function KandooHome() {
               onOpenNote={setNoteId}
               onOpenPhoto={setViewerPhoto}
               onKeepPhotos={() =>
-                openPaywallFor('pro', 'Kandoo Pro keeps your photos with the people and places in them.')
+                openPaywallFor('personal', 'Kandoo Personal keeps your photos with the people and places in them.')
               }
             />
           ) : null}
@@ -374,8 +374,8 @@ function KandooHome() {
               active={agentOpen}
               onPress={() => {
                 stopSpeaking();
-                // Pro gets a five-minute taste each month; Elite the full allowance.
-                if (entitlement.isPro) setAgentOpen(true);
+                // Mr. Kandoo is Elite's.
+                if (entitlement.isElite) setAgentOpen(true);
                 else openPaywallFor('elite');
               }}
             />
@@ -530,7 +530,7 @@ function KandooHome() {
         onClose={() => {
           home.closePaywall();
           // Next time (a locked memory, the account sheet) it opens on Pro again.
-          setPaywallFocus('pro');
+          setPaywallFocus('personal');
           setPaywallNote(null);
         }}
         onPurchased={() => {
@@ -555,7 +555,7 @@ function KandooHome() {
 
       <NameSheet
         visible={askName}
-        welcome={entitlement.isElite ? 'Kandoo Elite' : 'Kandoo Pro'}
+        welcome={entitlement.isElite ? 'Kandoo Elite' : entitlement.isBusiness ? 'Kandoo Pro' : 'Kandoo Personal'}
         onClose={() => setAskName(false)} />
 
       <KandooAgent
@@ -568,8 +568,9 @@ function KandooHome() {
         visible={accountOpen}
         isPro={entitlement.isPro}
         isElite={entitlement.isElite}
+        tier={entitlement.tier}
         onClose={() => setAccountOpen(false)}
-        onGetPro={() => openPaywallFor('pro')}
+        onGetPro={() => openPaywallFor('personal')}
         onGetElite={() => openPaywallFor('elite')}
         onOpenInsights={() => setInsightsRange('week')}
         onEntitlementChange={entitlement.refresh}
@@ -579,7 +580,7 @@ function KandooHome() {
         visible={insightsRange !== null}
         initialRange={insightsRange ?? 'week'}
         onClose={() => setInsightsRange(null)}
-        onNeedPro={() => openPaywallFor('pro')}
+        onNeedPro={() => openPaywallFor('personal')}
       />
 
       <NoteDetail
@@ -1200,7 +1201,7 @@ function Remembered({ response, onDone, onOpenNote, onOpenPhoto, onKeepPhotos }:
               <View style={styles.tickIconWrap} />
               <Text style={styles.tickText}>
                 Keep this photo with the people and places in it ·{' '}
-                <Text style={styles.tickLink}>Kandoo Pro</Text>
+                <Text style={styles.tickLink}>Kandoo Personal</Text>
               </Text>
             </Pressable>
           ) : null}

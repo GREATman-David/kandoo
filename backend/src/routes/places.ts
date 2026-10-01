@@ -4,7 +4,7 @@ import {
   authenticateRequest,
   type AuthenticatedRequest,
 } from '../middleware/authenticateRequest';
-import { isProUser } from '../modules/entitlements/entitlementService';
+import { isPaidUser } from '../modules/entitlements/entitlementService';
 import { placeGeometry } from '../modules/places/geo';
 import {
   PlaceInputError,
@@ -30,11 +30,11 @@ const router = Router();
 
 const PRO_REQUIRED = {
   code: 'pro_required',
-  error: 'Places are part of Kandoo Pro.',
+  error: 'Places come with Kandoo Personal and up.',
 } as const;
 
 async function requirePro(userId: string, res: Response): Promise<boolean> {
-  if (await isProUser(userId)) return true;
+  if (await isPaidUser(userId)) return true;
   res.status(402).json(PRO_REQUIRED);
   return false;
 }

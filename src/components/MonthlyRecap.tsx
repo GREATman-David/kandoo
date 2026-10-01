@@ -113,7 +113,7 @@ export function MonthlyRecap({ month, onClose, onOpenPlace }: MonthlyRecapProps)
             <Text style={styles.quiet}>
               {isPro
                 ? 'Draw the places that matter to you, and next month Kandoo will show where your time went.'
-                : 'With Places (Kandoo Pro), your month shows where your time went — kept only on this phone.'}
+                : 'With Places (Kandoo Personal), your month shows where your time went — kept only on this phone.'}
             </Text>
           )}
 

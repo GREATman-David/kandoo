@@ -140,7 +140,7 @@ export default function PlacesScreen() {
               <View style={styles.rowMain}>
                 <Text style={styles.drawTitle}>Draw a place</Text>
                 <Text style={styles.counts}>
-                  {isPro ? 'Home, school, the clinic — any shape you like.' : 'Part of Kandoo Pro'}
+                  {isPro ? 'Home, school, the clinic — any shape you like.' : 'Part of Kandoo Personal'}
                 </Text>
               </View>
             </Pressable>

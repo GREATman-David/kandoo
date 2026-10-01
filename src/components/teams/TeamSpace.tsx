@@ -73,7 +73,16 @@ function fileTypeLabel(file: TeamFile): string {
  * One team's space: what members shared (and who), the tasks going round, and
  * who's in it. Admins invite, send tasks and manage members.
  */
-export function TeamSpace({ team, onClose }: { team: TeamSummary | null; onClose: () => void }) {
+export function TeamSpace({
+  team,
+  canLead,
+  onClose,
+}: {
+  team: TeamSummary | null;
+  /** Elite: an owner or admin on a lower plan sees the team as a member does. */
+  canLead: boolean;
+  onClose: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>('files');
   const [summary, setSummary] = useState<TeamSummary | null>(team);
@@ -90,7 +99,7 @@ export function TeamSpace({ team, onClose }: { team: TeamSummary | null; onClose
   const [memberMenu, setMemberMenu] = useState<TeamMember | null>(null);
 
   const id = team?.id ?? null;
-  const isAdmin = summary?.role === 'owner' || summary?.role === 'admin';
+  const isAdmin = canLead && (summary?.role === 'owner' || summary?.role === 'admin');
 
   const load = useCallback(async () => {
     if (!id) return;

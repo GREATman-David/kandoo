@@ -200,7 +200,7 @@ router.post('/photos', authenticateRequest, async (req, res) => {
   }
   try {
     if ((await getUserTier(userId)) === 'free') {
-      return res.status(402).json({ code: 'pro_required', error: 'Keeping photos is part of Kandoo Pro.' });
+      return res.status(402).json({ code: 'pro_required', error: 'Keeping photos comes with Kandoo Personal and up.' });
     }
     const entityIds = await ownedEntityIds(userId, req.body?.entityIds);
     if (entityIds.length === 0) {

@@ -13,7 +13,7 @@ export type LockedRowProps = {
 
 /**
  * A memory beyond the free ten-day window. No blur, no teaser — the title reads
- * in ink-faint with a small lock and "Part of Kandoo Pro" where the date would
+ * in ink-faint with a small lock and "Part of Kandoo Personal" where the date would
  * sit. Tapping opens the paywall. Reused by People detail and the Memory list.
  */
 export function LockedRow({
@@ -35,7 +35,7 @@ export function LockedRow({
       </Text>
       <View style={styles.right}>
         <LockGlyph />
-        <Text style={styles.pro}>Part of Kandoo Pro</Text>
+        <Text style={styles.pro}>Part of Kandoo Personal</Text>
       </View>
     </Pressable>
   );

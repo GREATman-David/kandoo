@@ -14,13 +14,17 @@ import Purchases, {
  * Supabase account, so the backend can look the same id up over the V2 REST
  * API and the entitlement follows the user across devices.
  */
+/** Kandoo Personal: everyday life — whole history, Places, photos, voice, Insights. */
+export const PERSONAL_ENTITLEMENT_ID = 'kandoo_personal';
+/** Kandoo Pro: Personal plus work tools (pages into notes, Teams as a member). */
 export const ENTITLEMENT_ID = 'kandoo_pro';
-/** Kandoo Elite: everything in Pro, plus Kandoo Agent minutes. */
+/** Kandoo Elite: everything in Pro, plus Mr. Kandoo, research and leading a team. */
 export const ELITE_ENTITLEMENT_ID = 'kandoo_elite';
 
-export type Tier = 'free' | 'pro' | 'elite';
+export type Tier = 'free' | 'personal' | 'pro' | 'elite';
 
-/** Paywall packages for Elite live in the same offering under these ids. */
+/** Pro uses the reserved `$rc_monthly` / `$rc_annual`; the others these ids. */
+export const PERSONAL_PACKAGES = { monthly: 'personal_monthly', annual: 'personal_annual' } as const;
 export const ELITE_PACKAGES = { monthly: 'elite_monthly', annual: 'elite_annual' } as const;
 
 let configured = false;
@@ -114,7 +118,7 @@ export async function getDefaultOffering(): Promise<PurchasesOffering | null> {
   }
 }
 
-/** Pro features (Pro or Elite), or null when unknown — see readTier. */
+/** Any paid plan (Personal and up), or null when unknown — see readTier. */
 export async function readEntitlement(fresh = false): Promise<boolean | null> {
   const tier = await readTier(fresh);
   return tier === null ? null : tier !== 'free';
@@ -123,6 +127,7 @@ export async function readEntitlement(fresh = false): Promise<boolean | null> {
 function tierOf(entitlements: { active: Record<string, unknown> }): Tier {
   if (typeof entitlements.active[ELITE_ENTITLEMENT_ID] !== 'undefined') return 'elite';
   if (typeof entitlements.active[ENTITLEMENT_ID] !== 'undefined') return 'pro';
+  if (typeof entitlements.active[PERSONAL_ENTITLEMENT_ID] !== 'undefined') return 'personal';
   return 'free';
 }
 

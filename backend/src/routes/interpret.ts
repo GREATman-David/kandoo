@@ -18,7 +18,7 @@ import {
   listCaptureNotes,
   updateCaptureNote,
 } from '../modules/captures/captureService';
-import { isProUser } from '../modules/entitlements/entitlementService';
+import { isPaidUser } from '../modules/entitlements/entitlementService';
 import {
   addPerson,
   deletePerson,
@@ -179,7 +179,7 @@ router.post('/interpret', authenticateRequest, aiRateLimit, async (req, res) => 
     const freshEntitlement = req.body?.freshEntitlement === true;
     const ensureProStatus = async () => {
       if (proStatus === null) {
-        proStatus = await isProUser(userId, { fresh: freshEntitlement });
+        proStatus = await isPaidUser(userId, { fresh: freshEntitlement });
       }
       return proStatus;
     };
