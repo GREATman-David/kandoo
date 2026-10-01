@@ -10,7 +10,10 @@ moment you arrive somewhere, or when you ask.
 
 Built for the **RevenueCat Shipaton 2026 — Next Gen Award**.
 
+**Watch the demo:** [youtu.be/2wiwBygtu-8](https://youtu.be/2wiwBygtu-8)  
 **See everything Kandoo can do:** [greatman-david.github.io/kandoo](https://greatman-david.github.io/kandoo/)
+
+[![Kandoo demo video](https://i.ytimg.com/vi/2wiwBygtu-8/hqdefault.jpg)](https://youtu.be/2wiwBygtu-8)
 
 | | | | | |
 |---|---|---|---|---|
